@@ -11,7 +11,7 @@ $routes->post('/login', 'Auth::authenticate');
 $routes->get('/logout', 'Auth::logout');
 
 $routes->group('', ['filter' => 'auth'], function ($routes) {
-    $routes->get('/dashboard', 'Dashboard::index');
+    $routes->get('/dashboard', 'DashboardController::index');
 });
 
 $routes->group('master', ['filter' => 'auth'], function ($routes) {
@@ -84,6 +84,63 @@ $routes->group('die-casting', ['filter'=>'auth'], function ($routes) {
     $routes->get('dandori', 'DieCasting\DandoriController::index');
     $routes->post('dandori/store', 'DieCasting\DandoriController::store');
 });
+
+$routes->group('shotblast', ['filter' => 'auth'], function ($routes) {
+    $routes->get('schedule', 'ShotBlast\ScheduleController::index');
+    $routes->post('schedule/store', 'ShotBlast\ScheduleController::store');
+
+    $routes->get('send', 'ShotBlast\SendController::index');
+    $routes->post('send/store', 'ShotBlast\SendController::store');
+
+    $routes->get('receive', 'ShotBlast\ReceiveController::index');
+    $routes->post('receive/store', 'ShotBlast\ReceiveController::store');
+});
+
+$routes->group('baritori', ['filter' => 'auth'], function ($routes) {
+
+    // Schedule
+    $routes->get('schedule', 'Baritori\ScheduleController::index');
+    $routes->post('schedule/store', 'Baritori\ScheduleController::store');
+
+    // External
+    $routes->get('send-external', 'Baritori\SendExternalController::index');
+    $routes->post('send-external/store', 'Baritori\SendExternalController::store');
+
+    $routes->get('receive-external', 'Baritori\ReceiveExternalController::index');
+    $routes->post('receive-external/store', 'Baritori\ReceiveExternalController::store');
+
+    // Internal
+    $routes->get('send-internal', 'Baritori\SendInternalController::index');
+    $routes->post('send-internal/store', 'Baritori\SendInternalController::store');
+});
+
+$routes->group('machining', ['filter' => 'auth'], function ($routes) {
+
+    $routes->get('production', 'Machining\ProductionController::index');
+    $routes->post('production/store', 'Machining\ProductionController::store');
+
+    $routes->get('dandori', 'Machining\DandoriController::index');
+    $routes->post('dandori/store', 'Machining\DandoriController::store');
+
+    $routes->get('sub-assy', 'Machining\SubAssyController::index');
+    $routes->post('sub-assy/store', 'Machining\SubAssyController::store');
+});
+
+$routes->group('painting', ['filter' => 'auth'], function ($routes) {
+
+    $routes->get('schedule', 'Painting\ScheduleController::index');
+    $routes->post('schedule/store', 'Painting\ScheduleController::store');
+
+    $routes->get('send', 'Painting\SendController::index');
+    $routes->post('send/store', 'Painting\SendController::store');
+
+    $routes->get('receive-external', 'Painting\ReceiveExternalController::index');
+    $routes->post('receive-external/store', 'Painting\ReceiveExternalController::store');
+});
+
+
+
+
 
 
 

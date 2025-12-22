@@ -146,6 +146,78 @@ function isActive($path, $currentUrl)
                                     </div>
                                 </li>
 
+                                <li class="nav-item">
+                                    <a class="nav-link text-white d-flex justify-content-between"
+                                    data-bs-toggle="collapse"
+                                    href="#menuShotBlast">
+                                        <span><i class="bi bi-truck me-2"></i> Shot Blast</span>
+                                        <i class="bi bi-chevron-down"></i>
+                                    </a>
+
+                                    <div class="collapse" id="menuShotBlast">
+                                        <ul class="nav flex-column ms-3">
+                                            <li><a class="nav-link" href="/shotblast/schedule">Daily Schedule</a></li>
+                                            <li><a class="nav-link" href="/shotblast/send">Send to External</a></li>
+                                            <li><a class="nav-link" href="/shotblast/receive">Receive from External</a></li>
+                                        </ul>
+                                    </div>
+                                </li>
+
+                                <li class="nav-item">
+                                    <a class="nav-link text-white d-flex justify-content-between"
+                                    data-bs-toggle="collapse"
+                                    href="#menuBaritori">
+                                        <span><i class="bi bi-arrow-repeat me-2"></i> Baritori</span>
+                                        <i class="bi bi-chevron-down"></i>
+                                    </a>
+
+                                    <div class="collapse" id="menuBaritori">
+                                        <ul class="nav flex-column ms-3">
+                                            <li><a class="nav-link" href="/baritori/schedule">Daily Schedule</a></li>
+                                            <li><a class="nav-link" href="/baritori/send-external">Send to External</a></li>
+                                            <li><a class="nav-link" href="/baritori/receive-external">Receive from External</a></li>
+                                            <li><a class="nav-link" href="/baritori/send-internal">Send to Internal</a></li>
+                                        </ul>
+                                    </div>
+                                </li>
+
+                                <li class="nav-item">
+                                    <a class="nav-link text-white d-flex justify-content-between"
+                                    data-bs-toggle="collapse"
+                                    href="#menuMachining">
+                                        <span><i class="bi bi-tools me-2"></i> Machining</span>
+                                        <i class="bi bi-chevron-down"></i>
+                                    </a>
+
+                                    <div class="collapse" id="menuMachining">
+                                        <ul class="nav flex-column ms-3">
+                                            <li><a class="nav-link" href="/machining/production">Daily Production</a></li>
+                                            <li><a class="nav-link" href="/machining/dandori">Daily Dandori</a></li>
+                                            <li><a class="nav-link" href="/machining/sub-assy">Daily Sub Assy</a></li>
+                                        </ul>
+                                    </div>
+                                </li>
+
+                                <li class="nav-item">
+                                    <a class="nav-link text-white d-flex justify-content-between"
+                                    data-bs-toggle="collapse"
+                                    href="#menuPainting">
+                                        <span><i class="bi bi-palette me-2"></i> Painting</span>
+                                        <i class="bi bi-chevron-down"></i>
+                                    </a>
+
+                                    <div class="collapse" id="menuPainting">
+                                        <ul class="nav flex-column ms-3">
+                                            <li><a class="nav-link" href="/painting/schedule">Daily Schedule</a></li>
+                                            <li><a class="nav-link" href="/painting/send">Send Painting</a></li>
+                                            <li><a class="nav-link" href="/painting/receive-external">Receive from External</a></li>
+                                        </ul>
+                                    </div>
+                                </li>
+
+
+
+
                             </ul>
                         </div>
                     </li>

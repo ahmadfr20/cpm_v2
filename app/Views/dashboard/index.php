@@ -1,36 +1,21 @@
 <?= $this->extend('layout/layout') ?>
-
 <?= $this->section('content') ?>
 
-<h3>Dashboard CPM</h3>
+<h4>Dashboard</h4>
 
-<div class="row mt-4">
-    <div class="col-md-4">
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <h6>Target Hari Ini</h6>
-                <h3>1,200</h3>
-            </div>
-        </div>
+<form class="row g-2 mb-3">
+    <div class="col-auto">
+        <input type="date" name="date" value="<?= $date ?>" class="form-control">
     </div>
+    <div class="col-auto">
+        <button class="btn btn-primary">Filter</button>
+    </div>
+</form>
 
-    <div class="col-md-4">
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <h6>Actual Produksi</h6>
-                <h3>980</h3>
-            </div>
-        </div>
-    </div>
-
-    <div class="col-md-4">
-        <div class="card shadow-sm">
-            <div class="card-body">
-                <h6>Balance</h6>
-                <h3>220</h3>
-            </div>
-        </div>
-    </div>
-</div>
+<?= view('dashboard/asakai', ['asakai'=>$asakai]) ?>
+<hr>
+<?= view('dashboard/wip', ['wip'=>$wip]) ?>
+<hr>
+<?= view('dashboard/inventory', ['inventory'=>$inventory]) ?>
 
 <?= $this->endSection() ?>
