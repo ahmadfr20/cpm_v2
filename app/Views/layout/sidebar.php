@@ -118,33 +118,34 @@ function isActive($path, $currentUrl)
                                 </li>
 
                                 <!-- DIE CASTING -->
-                                <li class="nav-item">
+                                <li>
                                     <a class="nav-link text-white d-flex justify-content-between align-items-center"
-                                       data-bs-toggle="collapse"
-                                       href="#menuDieCasting"
-                                       aria-expanded="<?= isActive('die-casting',$currentUrl) ? 'true' : 'false' ?>">
+                                    data-bs-toggle="collapse" href="#menuDieCasting"
+                                    aria-expanded="<?= isActive('die-casting',$currentUrl)?'true':'false' ?>">
                                         <span><i class="bi bi-cpu me-2"></i> Die Casting</span>
                                         <i class="bi bi-chevron-down"></i>
                                     </a>
 
-                                    <div class="collapse <?= isActive('die-casting',$currentUrl) ? 'show' : '' ?>"
-                                         id="menuDieCasting">
-                                        <ul class="nav flex-column ms-3 mt-1">
-                                            <li class="nav-item">
-                                                <a class="nav-link <?= isActive('die-casting/production',$currentUrl)?'active':'' ?>"
-                                                   href="/die-casting/production">
-                                                    <i class="bi bi-clipboard-data me-2"></i> Daily Production
-                                                </a>
-                                            </li>
-                                            <li class="nav-item">
-                                                <a class="nav-link <?= isActive('die-casting/dandori',$currentUrl)?'active':'' ?>"
-                                                   href="/die-casting/dandori">
-                                                    <i class="bi bi-tools me-2"></i> Daily Dandori
-                                                </a>
-                                            </li>
-                                        </ul>
+                                    <div class="collapse <?= isActive('die-casting',$currentUrl)?'show':'' ?>" id="menuDieCasting">
+                                    <ul class="nav flex-column ms-3 mt-1">
+
+                                    <li>
+                                        <a class="nav-link <?= isActive('die-casting/schedule',$currentUrl)?'active':'' ?>"
+                                        href="/die-casting/schedule">
+                                            <i class="bi bi-calendar-plus me-2"></i> Die Casting Schedule
+                                        </a>
+                                    </li>
+
+                                    <li>
+                                        <a class="nav-link <?= isActive('die-casting/dandori',$currentUrl)?'active':'' ?>"
+                                        href="/die-casting/dandori">
+                                            <i class="bi bi-tools me-2"></i> Daily Dandori
+                                        </a>
+                                    </li>
+
+                                    </ul>
                                     </div>
-                                </li>
+                                    </li>
 
                                 <li class="nav-item">
                                     <a class="nav-link text-white d-flex justify-content-between"
@@ -226,6 +227,31 @@ function isActive($path, $currentUrl)
                 </ul>
             </div>
         </li>
+
+        <?php if (in_array($role, ['ADMIN','PRODUCTION','OPERATOR'])): ?>
+<li class="nav-item mt-3">
+<a class="nav-link text-white d-flex justify-content-between align-items-center"
+   data-bs-toggle="collapse" href="#menuProductionSection"
+   aria-expanded="<?= isActive('die-casting/production',$currentUrl)?'true':'false' ?>">
+    <span><i class="bi bi-gear-wide-connected me-2"></i> Production</span>
+    <i class="bi bi-chevron-down"></i>
+</a>
+
+<div class="collapse <?= isActive('die-casting/production',$currentUrl)?'show':'' ?>"
+     id="menuProductionSection">
+<ul class="nav flex-column ms-3 mt-1">
+
+<li>
+    <a class="nav-link <?= isActive('die-casting/production',$currentUrl)?'active':'' ?>"
+       href="/die-casting/production">
+        <i class="bi bi-cpu me-2"></i> Die Casting Production
+    </a>
+</li>
+
+</ul>
+</div>
+</li>
+<?php endif; ?>
 
         <!-- REPORT -->
         <li class="nav-item mt-3">

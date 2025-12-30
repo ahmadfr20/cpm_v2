@@ -4,58 +4,11 @@
 <h4 class="mb-3">Daily Production Schedule</h4>
 
 <?php if (session()->getFlashdata('success')): ?>
-<div class="alert alert-success">
-    <?= session()->getFlashdata('success') ?>
-</div>
+<div class="alert alert-success"><?= session()->getFlashdata('success') ?></div>
 <?php endif; ?>
 
+<form method="post" action="/production/daily-schedule/store">
 
-<h5 class="mb-3">📋 Today Production Schedule</h5>
-
-<?php if (!empty($todaySchedules)): ?>
-    <?php foreach ($todaySchedules as $sch): ?>
-        <div class="card mb-3">
-            <div class="card-header bg-light">
-                <strong><?= $sch['section'] ?></strong> |
-                Shift: <?= $sch['shift_name'] ?> |
-                Date: <?= $sch['schedule_date'] ?>
-            </div>
-
-            <div class="card-body p-2">
-                <table class="table table-bordered table-sm mb-0">
-                    <thead class="table-secondary">
-                    <tr>
-                        <th>Machine</th>
-                        <th>Part</th>
-                        <th>Target / Shift</th>
-                        <th>Target / Hour</th>
-                        <th>Cycle Time</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-                    <?php foreach ($sch['items'] as $it): ?>
-                        <tr>
-                            <td><?= esc($it['machine_code']) ?></td>
-                            <td><?= esc($it['part_no']) ?> - <?= esc($it['part_name']) ?></td>
-                            <td class="text-center"><?= $it['target_per_shift'] ?></td>
-                            <td class="text-center"><?= $it['target_per_hour'] ?></td>
-                            <td class="text-center"><?= $it['cycle_time'] ?> s</td>
-                        </tr>
-                    <?php endforeach ?>
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    <?php endforeach ?>
-<?php else: ?>
-    <div class="alert alert-warning">
-        Belum ada Daily Schedule hari ini
-    </div>
-<?php endif; ?>
-
-<form method="post" action="/production/daily-schedule/store" id="scheduleForm">
-
-<!-- HEADER -->
 <div class="row mb-3">
     <div class="col-md-3">
         <label>Date</label>
@@ -64,19 +17,11 @@
     </div>
 
     <div class="col-md-3">
-        <label>Time</label>
-        <input type="text" class="form-control"
-               value="<?= date('H:i:s') ?>" readonly>
-    </div>
-
-    
-
-    <div class="col-md-3">
         <label>Shift</label>
         <select name="shift_id" class="form-control" required>
             <?php foreach ($shifts as $s): ?>
             <option value="<?= $s['id'] ?>"><?= $s['shift_name'] ?></option>
-            <?php endforeach; ?>
+            <?php endforeach ?>
         </select>
     </div>
 
@@ -90,17 +35,15 @@
     </div>
 </div>
 
-<!-- TABLE -->
 <table class="table table-bordered table-sm align-middle">
 <thead class="table-light">
 <tr>
     <th>Select</th>
-    <th>Part Number</th>
-    <th>Part Name</th>
+    <th>Part</th>
     <th>Machine</th>
-    <th>Target / Shift</th>
-    <th>Target / Hour</th>
-    <th>Cycle Time (s)</th>
+    <th width="120">Target / Shift</th>
+    <th width="120">Target / Hour</th>
+    <th width="150">Cycle Time (sec)</th>
 </tr>
 </thead>
 <tbody>
@@ -113,18 +56,16 @@
         <input type="hidden" name="items[<?= $i ?>][selected]" disabled>
     </td>
 
-    <td><?= $p['part_no'] ?></td>
-    <td><?= $p['part_name'] ?></td>
+    <td><?= esc($p['part_no'].' - '.$p['part_name']) ?></td>
 
     <td>
         <select name="items[<?= $i ?>][machine_id]" class="form-control form-control-sm">
             <?php foreach ($machines as $m): ?>
             <option value="<?= $m['id'] ?>"><?= $m['machine_code'] ?></option>
-            <?php endforeach; ?>
+            <?php endforeach ?>
         </select>
     </td>
 
-    <!-- SYSTEM FIELDS -->
     <td class="text-center">
         <span id="shiftTarget<?= $i ?>">-</span>
         <input type="hidden" name="items[<?= $i ?>][target_per_shift]">
@@ -136,61 +77,78 @@
     </td>
 
     <td>
-        <input type="number" class="form-control form-control-sm cycle-input"
-               data-index="<?= $i ?>" placeholder="sec">
+        <input type="number"
+               class="form-control form-control-sm cycle-input"
+               placeholder="Isi cycle time"
+               data-index="<?= $i ?>"
+               disabled>
         <input type="hidden" name="items[<?= $i ?>][cycle_time]">
     </td>
 
     <input type="hidden" name="items[<?= $i ?>][product_id]" value="<?= $p['id'] ?>">
 </tr>
-<?php endforeach; ?>
+<?php endforeach ?>
 
 </tbody>
 </table>
 
 <button class="btn btn-primary">Save Schedule</button>
-
 </form>
 
 <?= $this->endSection() ?>
 
 <script>
-const SHIFT_HOUR = 8;
-const CAVITY = 2;
+const SHIFT_HOUR = 8;   // Jam kerja per shift
+const CAVITY = 2;      // Cavity default (bisa dikembangkan per part)
 
 document.querySelectorAll('.select-item').forEach(cb => {
     cb.addEventListener('change', function () {
+
         const i = this.dataset.index;
         const row = this.closest('tr');
 
-        const cycleInput = row.querySelector('.cycle-input');
+        const cycleInput  = row.querySelector('.cycle-input');
         const cycleHidden = row.querySelector(`input[name="items[${i}][cycle_time]"]`);
         const hourHidden  = row.querySelector(`input[name="items[${i}][target_per_hour]"]`);
         const shiftHidden = row.querySelector(`input[name="items[${i}][target_per_shift]"]`);
         const selectHidden= row.querySelector(`input[name="items[${i}][selected]"]`);
 
+        // Enable / Disable input
+        cycleInput.disabled = !this.checked;
+        selectHidden.disabled = !this.checked;
+
         if (!this.checked) {
+            cycleInput.value = '';
+            cycleHidden.value = '';
+            hourHidden.value = '';
+            shiftHidden.value = '';
             document.getElementById(`hourTarget${i}`).innerText = '-';
             document.getElementById(`shiftTarget${i}`).innerText = '-';
-            cycleHidden.value = '';
-            hourHidden.value  = '';
-            shiftHidden.value = '';
-            selectHidden.disabled = true;
             return;
         }
 
-        selectHidden.disabled = false;
-
         cycleInput.addEventListener('input', function () {
             const cycle = parseInt(this.value);
-            if (!cycle || cycle <= 0) return;
 
+            // VALIDASI
+            if (isNaN(cycle) || cycle <= 0) {
+                document.getElementById(`hourTarget${i}`).innerText = '-';
+                document.getElementById(`shiftTarget${i}`).innerText = '-';
+                cycleHidden.value = '';
+                hourHidden.value = '';
+                shiftHidden.value = '';
+                return;
+            }
+
+            // HITUNG TARGET
             const targetHour  = Math.floor(3600 / (cycle * CAVITY));
             const targetShift = targetHour * SHIFT_HOUR;
 
+            // TAMPILKAN
             document.getElementById(`hourTarget${i}`).innerText = targetHour;
             document.getElementById(`shiftTarget${i}`).innerText = targetShift;
 
+            // SIMPAN KE HIDDEN INPUT
             cycleHidden.value = cycle;
             hourHidden.value  = targetHour;
             shiftHidden.value = targetShift;
@@ -198,4 +156,3 @@ document.querySelectorAll('.select-item').forEach(cb => {
     });
 });
 </script>
-

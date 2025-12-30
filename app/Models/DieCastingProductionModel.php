@@ -8,7 +8,6 @@ class DieCastingProductionModel extends Model
 {
     protected $table = 'die_casting_production';
     protected $primaryKey = 'id';
-
     protected $allowedFields = [
         'production_date',
         'shift_id',
@@ -17,7 +16,6 @@ class DieCastingProductionModel extends Model
         'qty_p',
         'qty_a',
         'qty_ng',
-        'weight_kg',
-        'created_at'
+        'weight_kg'
     ];
 }

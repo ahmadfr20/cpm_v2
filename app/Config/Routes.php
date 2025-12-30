@@ -78,10 +78,14 @@ $routes->group('material', ['filter'=>'auth'], function ($routes) {
 });
 
 $routes->group('die-casting', ['filter'=>'auth'], function ($routes) {
+
+    // 🔹 Schedule Die Casting (PPIC)
+    $routes->get('schedule', 'DieCasting\ScheduleController::index');
+    $routes->post('schedule/store', 'DieCasting\ScheduleController::store');
+
+    // 🔹 Production Die Casting (Operator / Production)
     $routes->get('production', 'DieCasting\ProductionController::index');
     $routes->post('production/store', 'DieCasting\ProductionController::store');
-        $routes->get('/', 'DieCasting\ProductionController::index');
-    $routes->post('store', 'DieCasting\ProductionController::store');
 
     $routes->get('dandori', 'DieCasting\DandoriController::index');
     $routes->post('dandori/store', 'DieCasting\DandoriController::store');
