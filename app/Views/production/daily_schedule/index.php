@@ -9,6 +9,50 @@
 </div>
 <?php endif; ?>
 
+
+<h5 class="mb-3">📋 Today Production Schedule</h5>
+
+<?php if (!empty($todaySchedules)): ?>
+    <?php foreach ($todaySchedules as $sch): ?>
+        <div class="card mb-3">
+            <div class="card-header bg-light">
+                <strong><?= $sch['section'] ?></strong> |
+                Shift: <?= $sch['shift_name'] ?> |
+                Date: <?= $sch['schedule_date'] ?>
+            </div>
+
+            <div class="card-body p-2">
+                <table class="table table-bordered table-sm mb-0">
+                    <thead class="table-secondary">
+                    <tr>
+                        <th>Machine</th>
+                        <th>Part</th>
+                        <th>Target / Shift</th>
+                        <th>Target / Hour</th>
+                        <th>Cycle Time</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    <?php foreach ($sch['items'] as $it): ?>
+                        <tr>
+                            <td><?= esc($it['machine_code']) ?></td>
+                            <td><?= esc($it['part_no']) ?> - <?= esc($it['part_name']) ?></td>
+                            <td class="text-center"><?= $it['target_per_shift'] ?></td>
+                            <td class="text-center"><?= $it['target_per_hour'] ?></td>
+                            <td class="text-center"><?= $it['cycle_time'] ?> s</td>
+                        </tr>
+                    <?php endforeach ?>
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    <?php endforeach ?>
+<?php else: ?>
+    <div class="alert alert-warning">
+        Belum ada Daily Schedule hari ini
+    </div>
+<?php endif; ?>
+
 <form method="post" action="/production/daily-schedule/store" id="scheduleForm">
 
 <!-- HEADER -->
@@ -24,6 +68,8 @@
         <input type="text" class="form-control"
                value="<?= date('H:i:s') ?>" readonly>
     </div>
+
+    
 
     <div class="col-md-3">
         <label>Shift</label>

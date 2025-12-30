@@ -12,9 +12,12 @@ class DieCastingProductionModel extends Model
     protected $allowedFields = [
         'production_date',
         'shift_id',
+        'machine_id',
         'product_id',
-        'qty_ok',
+        'qty_p',
+        'qty_a',
         'qty_ng',
+        'weight_kg',
         'created_at'
     ];
 }

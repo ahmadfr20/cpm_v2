@@ -1,97 +1,90 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-4">
-    <i class="bi bi-cpu me-2"></i>
-    Jadwal Harian Produksi Die Casting
+<h4 class="mb-3">
+    <i class="bi bi-cpu"></i> Daily Schedule Produciton Casting
 </h4>
 
 <?php if (session()->getFlashdata('success')): ?>
 <div class="alert alert-success">
     <?= session()->getFlashdata('success') ?>
 </div>
-<?php endif; ?>
+<?php endif ?>
 
-<div class="card shadow-sm">
-    <div class="card-body">
+<form method="post" action="/die-casting/production/store">
 
-        <form method="post" action="/die-casting/production/store">
+<div class="row mb-3">
+    <div class="col-md-3">
+        <label>Tanggal</label>
+        <input class="form-control" value="<?= $date ?>" readonly>
+    </div>
 
-            <!-- HEADER -->
-            <div class="row mb-3">
-                <div class="col-md-3">
-                    <label class="form-label">Tanggal</label>
-                    <input class="form-control" value="<?= $date ?>" readonly>
-                </div>
-
-                <div class="col-md-3">
-                    <label class="form-label">Shift</label>
-                    <select name="shift_id" class="form-select" required>
-                        <?php foreach ($shifts as $s): ?>
-                            <option value="<?= $s['id'] ?>">
-                                <?= $s['shift_name'] ?>
-                            </option>
-                        <?php endforeach ?>
-                    </select>
-                </div>
-            </div>
-
-            <!-- TABLE -->
-            <div class="table-responsive">
-                <table class="table table-bordered table-sm align-middle">
-                    <thead class="table-dark">
-                    <tr>
-                        <th>No</th>
-                        <th>Part No</th>
-                        <th>Part Name</th>
-                        <th width="120">OK</th>
-                        <th width="120">NG</th>
-                    </tr>
-                    </thead>
-                    <tbody>
-
-                    <?php if (!empty($schedules)): ?>
-                        <?php foreach ($schedules as $i => $sc): ?>
-                        <tr>
-                            <td><?= $i + 1 ?></td>
-                            <td><?= esc($sc['part_no']) ?></td>
-                            <td><?= esc($sc['part_name']) ?></td>
-                            <td>
-                                <input type="number"
-                                       name="items[<?= $i ?>][qty_ok]"
-                                       class="form-control form-control-sm"
-                                       min="0">
-                            </td>
-                            <td>
-                                <input type="number"
-                                       name="items[<?= $i ?>][qty_ng]"
-                                       class="form-control form-control-sm"
-                                       min="0">
-                            </td>
-                            <input type="hidden"
-                                   name="items[<?= $i ?>][product_id]"
-                                   value="<?= $sc['product_id'] ?>">
-                        </tr>
-                        <?php endforeach ?>
-                    <?php else: ?>
-                        <tr>
-                            <td colspan="5" class="text-center text-muted">
-                                Tidak ada jadwal die casting hari ini
-                            </td>
-                        </tr>
-                    <?php endif; ?>
-
-                    </tbody>
-                </table>
-            </div>
-
-            <button class="btn btn-success mt-3">
-                <i class="bi bi-save me-1"></i> Save Production
-            </button>
-
-        </form>
-
+    <div class="col-md-3">
+        <label>Shift</label>
+        <select name="shift_id" class="form-select" required>
+            <?php foreach ($shifts as $s): ?>
+                <option value="<?= $s['id'] ?>"><?= $s['shift_name'] ?></option>
+            <?php endforeach ?>
+        </select>
     </div>
 </div>
+
+<div class="table-responsive">
+<table class="table table-bordered table-sm align-middle text-center">
+    <thead class="table-dark">
+        <tr>
+            <th>No</th>
+            <th style="min-width:180px">Machine</th>
+            <th style="min-width:260px">Part Name</th>
+            <th>P</th>
+            <th>A</th>
+            <th>NG</th>
+            <th>Weight (Kg)</th>
+        </tr>
+    </thead>
+    <tbody>
+        <?php for ($i = 0; $i < 10; $i++): ?>
+        <tr>
+            <td><?= $i + 1 ?></td>
+
+            <!-- MACHINE -->
+            <td class="text-start">
+                <select name="items[<?= $i ?>][machine_id]" class="form-select form-select-sm">
+                    <option value="">-- machine --</option>
+                    <?php foreach ($machines as $m): ?>
+                        <option value="<?= $m['id'] ?>">
+                            <?= $m['machine_name'] ?>
+                        </option>
+                    <?php endforeach ?>
+                </select>
+            </td>
+
+            <!-- PART -->
+            <td class="text-start">
+                <select name="items[<?= $i ?>][product_id]" class="form-select form-select-sm">
+                    <option value="">-- part --</option>
+                    <?php foreach ($products as $p): ?>
+                        <option value="<?= $p['id'] ?>">
+                            <?= $p['part_no'] ?> - <?= $p['part_name'] ?>
+                        </option>
+                    <?php endforeach ?>
+                </select>
+            </td>
+
+            <td><input type="number" min="0" name="items[<?= $i ?>][qty_p]" class="form-control form-control-sm"></td>
+            <td><input type="number" min="0" name="items[<?= $i ?>][qty_a]" class="form-control form-control-sm"></td>
+            <td><input type="number" min="0" name="items[<?= $i ?>][qty_ng]" class="form-control form-control-sm"></td>
+            <td><input type="number" step="0.01" name="items[<?= $i ?>][weight_kg]" class="form-control form-control-sm"></td>
+        </tr>
+        <?php endfor ?>
+    </tbody>
+</table>
+</div>
+
+<button class="btn btn-success mt-3">
+    <i class="bi bi-save"></i> Save Production
+</button>
+
+</form>
 
 <?= $this->endSection() ?>

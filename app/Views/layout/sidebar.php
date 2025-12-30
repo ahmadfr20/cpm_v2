@@ -84,7 +84,7 @@ function isActive($path, $currentUrl)
                                 <li class="nav-item">
                                     <a class="nav-link <?= isActive('production/daily-schedule',$currentUrl)?'active':'' ?>"
                                        href="/production/daily-schedule">
-                                        <i class="bi bi-calendar-check me-2"></i> Daily Schedule
+                                        <i class="bi bi-calendar-check me-2"></i> Production Daily Schedule
                                     </a>
                                 </li>
 
