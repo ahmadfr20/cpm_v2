@@ -8,12 +8,15 @@ class DailyScheduleItemModel extends Model
 {
     protected $table = 'daily_schedule_items';
     protected $primaryKey = 'id';
+
     protected $allowedFields = [
         'daily_schedule_id',
         'machine_id',
         'product_id',
         'cycle_time',
+        'cavity',
         'target_per_hour',
-        'target_per_shift'
+        'target_per_shift',
+        'is_selected'
     ];
 }

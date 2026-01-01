@@ -8,24 +8,32 @@ class MachineSeeder extends Seeder
 {
     public function run()
     {
-        $data = [
-            [
-                'machine_code'    => 'DC-01',
-                'machine_name'    => 'Die Casting 01',
-                'production_line' => 'Die Casting'
-            ],
-            [
-                'machine_code'    => 'DC-02',
-                'machine_name'    => 'Die Casting 02',
-                'production_line' => 'Die Casting'
-            ],
-            [
-                'machine_code'    => 'MC-01',
-                'machine_name'    => 'Machining Center 01',
-                'production_line' => 'Machining'
-            ]
-        ];
+        $machines = [];
 
-        $this->db->table('machines')->insertBatch($data);
+        // =========================
+        // DIE CASTING DC-01 s/d DC-08
+        // =========================
+        for ($i = 1; $i <= 8; $i++) {
+            $code = 'DC-' . str_pad($i, 2, '0', STR_PAD_LEFT);
+
+            $machines[] = [
+                'machine_code'    => $code,
+                'machine_name'    => 'Die Casting ' . str_pad($i, 2, '0', STR_PAD_LEFT),
+                'production_line' => 'Die Casting'
+            ];
+        }
+
+        // =========================
+        // INSERT AMAN (CEK DUPLIKAT)
+        // =========================
+        foreach ($machines as $m) {
+            $exists = $this->db->table('machines')
+                ->where('machine_code', $m['machine_code'])
+                ->countAllResults();
+
+            if ($exists === 0) {
+                $this->db->table('machines')->insert($m);
+            }
+        }
     }
 }

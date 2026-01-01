@@ -10,9 +10,16 @@ $routes->get('/login', 'Auth::login');
 $routes->post('/login', 'Auth::authenticate');
 $routes->get('/logout', 'Auth::logout');
 
-$routes->group('', ['filter' => 'auth'], function ($routes) {
-    $routes->get('/dashboard', 'DashboardController::index');
+$routes->group('dashboard', ['filter' => 'auth'], function ($routes) {
+
+    $routes->get('/', 'Dashboard\HomeController::index');
+
+    $routes->get('asakai', 'Dashboard\AsakaiController::index');
+    $routes->get('wip', 'Dashboard\WipController::index');
+    $routes->get('inventory', 'Dashboard\InventoryController::index');
+
 });
+
 
 $routes->group('master', ['filter' => 'auth'], function ($routes) {
 
@@ -65,7 +72,11 @@ $routes->group('master', ['filter' => 'auth'], function ($routes) {
 $routes->group('production', ['filter'=>'auth'], function($routes){
     $routes->get('daily-schedule', 'Production\DailyScheduleController::index');
     $routes->post('daily-schedule/store', 'Production\DailyScheduleController::store');
+    $routes->get('daily-schedule/view/(:num)', 'Production\DailyScheduleController::view/$1');
+    $routes->get('get-machines', 'Production\DailyScheduleController::getMachines');
 });
+
+
 
 $routes->group('material', ['filter' => 'auth'], function ($routes) {
     $routes->get('incoming', 'Material\IncomingController::index');
@@ -143,6 +154,32 @@ $routes->group('painting', ['filter' => 'auth'], function ($routes) {
     $routes->get('receive-external', 'Painting\ReceiveExternalController::index');
     $routes->post('receive-external/store', 'Painting\ReceiveExternalController::store');
 });
+
+$routes->group('machining', ['filter' => 'auth'], function ($routes) {
+
+    // 🔹 Schedule Machining (PPIC)
+    $routes->get('schedule', 'Machining\DailyScheduleController::index');
+    $routes->post('schedule/store', 'Machining\DailyScheduleController::store');
+
+    // 🔹 Production Machining (Operator)
+    $routes->get('production', 'Machining\ProductionController::index');
+    $routes->post('production/store', 'Machining\ProductionController::store');
+
+    // 🔹 Dandori
+    $routes->get('dandori', 'Machining\DandoriController::index');
+    $routes->post('dandori/store', 'Machining\DandoriController::store');
+
+    // 🔹 Sub Assy
+    $routes->get('sub-assy', 'Machining\SubAssyController::index');
+    $routes->post('sub-assy/store', 'Machining\SubAssyController::store');
+});
+
+$routes->get(
+    'production/daily-schedule/list',
+    'Production\DailyScheduleController::list'
+);
+
+
 
 
 

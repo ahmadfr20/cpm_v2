@@ -4,14 +4,13 @@ namespace App\Models;
 
 use CodeIgniter\Model;
 
-class TimeSlotModel extends Model
+class ShiftTimeSlotModel extends Model
 {
-    protected $table = 'time_slots';
+    protected $table = 'shift_time_slots';
     protected $primaryKey = 'id';
 
     protected $allowedFields = [
-        'time_code',
-        'time_start',
-        'time_end'
+        'shift_id',
+        'time_slot_id'
     ];
 }

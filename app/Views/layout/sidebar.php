@@ -88,6 +88,13 @@ function isActive($path, $currentUrl)
                                     </a>
                                 </li>
 
+                                <li class="nav-item">
+                                    <a class="nav-link" href="/production/daily-schedule/list">
+                                        <i class="bi bi-list-ul me-2"></i> Daily Schedule List
+                                    </a>
+                                </li>
+
+
                                 <!-- RAW MATERIAL -->
                                 <li class="nav-item">
                                     <a class="nav-link text-white d-flex justify-content-between align-items-center"
@@ -182,22 +189,67 @@ function isActive($path, $currentUrl)
                                     </div>
                                 </li>
 
+                                <!-- machining -->
                                 <li class="nav-item">
                                     <a class="nav-link text-white d-flex justify-content-between"
                                     data-bs-toggle="collapse"
-                                    href="#menuMachining">
+                                    href="#menuMachining"
+                                    aria-expanded="<?= 
+                                        isActive('machining/schedule',$currentUrl) ||
+                                        isActive('machining/production',$currentUrl) ||
+                                        isActive('machining/dandori',$currentUrl) ||
+                                        isActive('machining/sub-assy',$currentUrl)
+                                        ? 'true' : 'false' ?>">
                                         <span><i class="bi bi-tools me-2"></i> Machining</span>
                                         <i class="bi bi-chevron-down"></i>
                                     </a>
 
-                                    <div class="collapse" id="menuMachining">
+                                    <div class="collapse <?= 
+                                        isActive('machining/schedule',$currentUrl) ||
+                                        isActive('machining/production',$currentUrl) ||
+                                        isActive('machining/dandori',$currentUrl) ||
+                                        isActive('machining/sub-assy',$currentUrl)
+                                        ? 'show' : '' ?>"
+                                        id="menuMachining">
+
                                         <ul class="nav flex-column ms-3">
-                                            <li><a class="nav-link" href="/machining/production">Daily Production</a></li>
-                                            <li><a class="nav-link" href="/machining/dandori">Daily Dandori</a></li>
-                                            <li><a class="nav-link" href="/machining/sub-assy">Daily Sub Assy</a></li>
+
+                                            <!-- ✅ DAILY SCHEDULE (BARU) -->
+                                            <li class="nav-item">
+                                                <a class="nav-link <?= isActive('machining/schedule',$currentUrl)?'active':'' ?>"
+                                                href="/machining/schedule">
+                                                    <i class="bi bi-calendar-plus me-2"></i> Daily Schedule
+                                                </a>
+                                            </li>
+
+                                            <!-- DAILY PRODUCTION -->
+                                            <li class="nav-item">
+                                                <a class="nav-link <?= isActive('machining/production',$currentUrl)?'active':'' ?>"
+                                                href="/machining/production">
+                                                    <i class="bi bi-gear-wide-connected me-2"></i> Daily Production
+                                                </a>
+                                            </li>
+
+                                            <!-- DAILY DANDORI -->
+                                            <li class="nav-item">
+                                                <a class="nav-link <?= isActive('machining/dandori',$currentUrl)?'active':'' ?>"
+                                                href="/machining/dandori">
+                                                    <i class="bi bi-tools me-2"></i> Daily Dandori
+                                                </a>
+                                            </li>
+
+                                            <!-- DAILY SUB ASSY -->
+                                            <li class="nav-item">
+                                                <a class="nav-link <?= isActive('machining/sub-assy',$currentUrl)?'active':'' ?>"
+                                                href="/machining/sub-assy">
+                                                    <i class="bi bi-diagram-3 me-2"></i> Daily Sub Assy
+                                                </a>
+                                            </li>
+
                                         </ul>
                                     </div>
                                 </li>
+
 
                                 <li class="nav-item">
                                     <a class="nav-link text-white d-flex justify-content-between"

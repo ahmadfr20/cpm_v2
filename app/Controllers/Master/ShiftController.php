@@ -4,72 +4,87 @@ namespace App\Controllers\Master;
 
 use App\Controllers\BaseController;
 use App\Models\ShiftModel;
+use App\Models\TimeSlotModel;
+use App\Models\ShiftTimeSlotModel;
 
 class ShiftController extends BaseController
 {
-    protected $shiftModel;
+    protected $shift;
+    protected $timeSlot;
+    protected $pivot;
 
     public function __construct()
     {
-        $this->shiftModel = new ShiftModel();
+        $this->shift = new ShiftModel();
+        $this->timeSlot = new TimeSlotModel();
+        $this->pivot = new ShiftTimeSlotModel();
     }
 
-    // LIST DATA
     public function index()
     {
         return view('master/shift/index', [
-            'shifts' => $this->shiftModel->findAll()
+            'shifts' => $this->shift->getWithTimeSlots()
         ]);
     }
 
-    // FORM CREATE
     public function create()
     {
-        return view('master/shift/create');
+        return view('master/shift/create', [
+            'timeSlots' => $this->timeSlot->orderBy('time_start')->findAll()
+        ]);
     }
 
-    // SIMPAN DATA
     public function store()
     {
-        $this->shiftModel->insert([
+        $shiftId = $this->shift->insert([
             'shift_code' => $this->request->getPost('shift_code'),
             'shift_name' => $this->request->getPost('shift_name'),
-            'start_time' => $this->request->getPost('start_time'),
-            'end_time'   => $this->request->getPost('end_time'),
+            'is_active'  => 1
         ]);
 
+        foreach ($this->request->getPost('time_slots') as $ts) {
+            $this->pivot->insert([
+                'shift_id'     => $shiftId,
+                'time_slot_id'=> $ts
+            ]);
+        }
+
         return redirect()->to('/master/shift')
-            ->with('success', 'Shift berhasil ditambahkan');
+            ->with('success', 'Shift berhasil disimpan');
     }
 
-    // FORM EDIT
     public function edit($id)
     {
+        $selected = array_column(
+            $this->pivot->where('shift_id', $id)->findAll(),
+            'time_slot_id'
+        );
+
         return view('master/shift/edit', [
-            'shift' => $this->shiftModel->find($id)
+            'shift'      => $this->shift->find($id),
+            'timeSlots'  => $this->timeSlot->orderBy('time_start')->findAll(),
+            'selected'   => $selected
         ]);
     }
 
-    // UPDATE DATA
     public function update($id)
     {
-        $this->shiftModel->update($id, [
+        $this->shift->update($id, [
             'shift_code' => $this->request->getPost('shift_code'),
             'shift_name' => $this->request->getPost('shift_name'),
-            'start_time' => $this->request->getPost('start_time'),
-            'end_time'   => $this->request->getPost('end_time'),
+            'is_active'  => $this->request->getPost('is_active')
         ]);
 
-        return redirect()->to('/master/shift')
-            ->with('success', 'Shift berhasil diupdate');
-    }
+        $this->pivot->where('shift_id', $id)->delete();
 
-    // DELETE DATA
-    public function delete($id)
-    {
-        $this->shiftModel->delete($id);
+        foreach ($this->request->getPost('time_slots') as $ts) {
+            $this->pivot->insert([
+                'shift_id' => $id,
+                'time_slot_id' => $ts
+            ]);
+        }
 
         return redirect()->to('/master/shift')
-            ->with('success', 'Shift berhasil dihapus');
+            ->with('success', 'Shift berhasil diperbarui');
     }
 }
