@@ -96,7 +96,7 @@ function isActive($path, $currentUrl)
 
 
                                 <!-- RAW MATERIAL -->
-                                <li class="nav-item">
+                                <!-- <li class="nav-item">
                                     <a class="nav-link text-white d-flex justify-content-between align-items-center"
                                        data-bs-toggle="collapse"
                                        href="#menuRawMaterial"
@@ -122,7 +122,7 @@ function isActive($path, $currentUrl)
                                             </li>
                                         </ul>
                                     </div>
-                                </li>
+                                </li> -->
 
                                 <!-- DIE CASTING -->
                                 <li>
@@ -153,7 +153,7 @@ function isActive($path, $currentUrl)
                                     </ul>
                                     </div>
                                     </li>
-
+<!-- 
                                 <li class="nav-item">
                                     <a class="nav-link text-white d-flex justify-content-between"
                                     data-bs-toggle="collapse"
@@ -169,9 +169,9 @@ function isActive($path, $currentUrl)
                                             <li><a class="nav-link" href="/shotblast/receive">Receive from External</a></li>
                                         </ul>
                                     </div>
-                                </li>
+                                </li> -->
 
-                                <li class="nav-item">
+                                <!-- <li class="nav-item">
                                     <a class="nav-link text-white d-flex justify-content-between"
                                     data-bs-toggle="collapse"
                                     href="#menuBaritori">
@@ -187,7 +187,7 @@ function isActive($path, $currentUrl)
                                             <li><a class="nav-link" href="/baritori/send-internal">Send to Internal</a></li>
                                         </ul>
                                     </div>
-                                </li>
+                                </li> -->
 
                                 <!-- machining -->
                                 <li class="nav-item">
@@ -223,12 +223,7 @@ function isActive($path, $currentUrl)
                                             </li>
 
                                             <!-- DAILY PRODUCTION -->
-                                            <li class="nav-item">
-                                                <a class="nav-link <?= isActive('machining/production',$currentUrl)?'active':'' ?>"
-                                                href="/machining/production">
-                                                    <i class="bi bi-gear-wide-connected me-2"></i> Daily Production
-                                                </a>
-                                            </li>
+
 
                                             <!-- DAILY DANDORI -->
                                             <li class="nav-item">
@@ -251,7 +246,7 @@ function isActive($path, $currentUrl)
                                 </li>
 
 
-                                <li class="nav-item">
+                                <!-- <li class="nav-item">
                                     <a class="nav-link text-white d-flex justify-content-between"
                                     data-bs-toggle="collapse"
                                     href="#menuPainting">
@@ -266,7 +261,7 @@ function isActive($path, $currentUrl)
                                             <li><a class="nav-link" href="/painting/receive-external">Receive from External</a></li>
                                         </ul>
                                     </div>
-                                </li>
+                                </li> -->
 
 
 
@@ -296,16 +291,38 @@ function isActive($path, $currentUrl)
 <li>
     <a class="nav-link <?= isActive('die-casting/production',$currentUrl)?'active':'' ?>"
        href="/die-casting/production">
-        <i class="bi bi-cpu me-2"></i> Die Casting Production
+        <i class="bi bi-cpu me-2"></i> Die Casting Production Per Shift
     </a>
 </li>
+<li>
+    <a class="nav-link <?= isActive('die-casting/hourly',$currentUrl)?'active':'' ?>"
+       href="/die-casting/hourly">
+        <i class="bi bi-clock-history me-2"></i> Hourly Production Die Casting
+    </a>
+</li>
+
+    <li class="nav-item">
+    <a class="nav-link <?= isActive('machining/production',$currentUrl)?'active':'' ?>"
+    href="/machining/production">
+        <i class="bi bi-gear-wide-connected me-2"></i> Machining Production Per Shift
+    </a>
+    </li>
+
+<li class="nav-item">
+    <a class="nav-link <?= isActive('machining/hourly',$currentUrl)?'active':'' ?>"
+       href="/machining/hourly">
+        <i class="bi bi-clock-history me-2"></i> Hourly Production Machining
+    </a>
+</li>
+
+
 
 </ul>
 </div>
 </li>
 <?php endif; ?>
 
-        <!-- REPORT -->
+        <!-- REPORT
         <li class="nav-item mt-3">
             <a class="nav-link text-white d-flex justify-content-between align-items-center"
                data-bs-toggle="collapse"
@@ -322,7 +339,7 @@ function isActive($path, $currentUrl)
                     <li class="nav-item"><a class="nav-link <?= isActive('report/production',$currentUrl)?'active':'' ?>" href="/report/production">Production Report</a></li>
                 </ul>
             </div>
-        </li>
+        </li> -->
 
     </ul>
 </div>

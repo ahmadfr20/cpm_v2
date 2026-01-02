@@ -100,6 +100,9 @@ $routes->group('die-casting', ['filter'=>'auth'], function ($routes) {
 
     $routes->get('dandori', 'DieCasting\DandoriController::index');
     $routes->post('dandori/store', 'DieCasting\DandoriController::store');
+
+    $routes->get('hourly', 'DieCasting\HourlyController::index');
+    $routes->post('hourly/store', 'DieCasting\HourlyController::store');
 });
 
 $routes->group('shotblast', ['filter' => 'auth'], function ($routes) {
@@ -141,6 +144,9 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
 
     $routes->get('sub-assy', 'Machining\SubAssyController::index');
     $routes->post('sub-assy/store', 'Machining\SubAssyController::store');
+
+        $routes->get('hourly', 'Machining\HourlyController::index');
+    $routes->post('hourly/store', 'Machining\HourlyController::store');
 });
 
 $routes->group('painting', ['filter' => 'auth'], function ($routes) {
