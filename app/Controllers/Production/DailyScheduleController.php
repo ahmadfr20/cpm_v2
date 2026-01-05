@@ -8,6 +8,7 @@ use App\Models\DailyScheduleItemModel;
 use App\Models\ProductModel;
 use App\Models\MachineModel;
 use App\Models\ShiftModel;
+use App\Models\ProductionStandardModel;
 
 class DailyScheduleController extends BaseController
 {
@@ -16,49 +17,158 @@ class DailyScheduleController extends BaseController
     protected $productModel;
     protected $machineModel;
     protected $shiftModel;
+    protected $standardModel;
 
     public function __construct()
     {
-        $this->scheduleModel = new DailyScheduleModel();
-        $this->itemModel    = new DailyScheduleItemModel();
-        $this->productModel = new ProductModel();
-        $this->machineModel = new MachineModel();
-        $this->shiftModel   = new ShiftModel();
+        $this->scheduleModel  = new DailyScheduleModel();
+        $this->itemModel     = new DailyScheduleItemModel();
+        $this->productModel  = new ProductModel();
+        $this->machineModel  = new MachineModel();
+        $this->shiftModel    = new ShiftModel();
+        $this->standardModel = new ProductionStandardModel();
     }
 
-    // =============================
-    // FORM INPUT
-    // =============================
+    /* =====================================================
+     * FORM INPUT DAILY SCHEDULE
+     * ===================================================== */
     public function index()
     {
         return view('production/daily_schedule/index', [
-            'products' => $this->productModel->findAll(),
-            'shifts'   => $this->shiftModel->findAll()
+            'shifts' => $this->shiftModel->where('is_active', 1)->findAll()
         ]);
     }
 
-    // =============================
-    // AJAX: MACHINE BY SECTION
-    // =============================
+    /* =====================================================
+     * AJAX: GET MACHINE BY SECTION
+     * ===================================================== */
     public function getMachines()
     {
+        $section = $this->request->getGet('section');
+
         return $this->response->setJSON(
             $this->machineModel
-                ->where('production_line', $this->request->getGet('section'))
+                ->where('production_line', $section)
+                ->orderBy('id')
                 ->findAll()
         );
     }
 
-    // =============================
-    // STORE SCHEDULE
-    // =============================
+    /* =====================================================
+     * AJAX: GET PRODUCT BY MACHINE
+     * (BASED ON PRODUCTION STANDARD)
+     * ===================================================== */
+    public function getProducts()
+    {
+        $machineId = $this->request->getGet('machine_id');
+        $db = db_connect();
+
+        $products = $db->table('production_standards ps')
+            ->select('p.id, p.part_no, p.part_name')
+            ->join('products p', 'p.id = ps.product_id')
+            ->where('ps.machine_id', $machineId)
+            ->orderBy('p.part_no')
+            ->get()
+            ->getResultArray();
+
+        return $this->response->setJSON($products);
+    }
+
+    /* =====================================================
+     * HITUNG TOTAL MENIT SHIFT DARI TIME SLOT
+     * ===================================================== */
+    private function getShiftTotalMinute($shiftId)
+    {
+        $db = db_connect();
+
+        $slots = $db->table('shift_time_slots sts')
+            ->select('ts.time_start, ts.time_end')
+            ->join('time_slots ts', 'ts.id = sts.time_slot_id')
+            ->where('sts.shift_id', $shiftId)
+            ->get()
+            ->getResultArray();
+
+        $totalMinute = 0;
+
+        foreach ($slots as $s) {
+            $start = strtotime($s['time_start']);
+            $end   = strtotime($s['time_end']);
+
+            // support shift malam
+            if ($end < $start) {
+                $end += 86400;
+            }
+
+            $totalMinute += ($end - $start) / 60;
+        }
+
+        return $totalMinute;
+    }
+
+    /* =====================================================
+     * AJAX: HITUNG TARGET PRODUKSI
+     * ===================================================== */
+    public function calculateTarget()
+    {
+        $machineId = $this->request->getGet('machine_id');
+        $productId = $this->request->getGet('product_id');
+        $shiftId   = $this->request->getGet('shift_id');
+
+        // ambil durasi shift dari time slot
+        $totalMinute = $this->getShiftTotalMinute($shiftId);
+
+        if ($totalMinute <= 0) {
+            return $this->response->setJSON([
+                'error' => 'Shift belum memiliki time slot'
+            ]);
+        }
+
+        // ambil production standard
+        $std = $this->standardModel->getStandard($machineId, $productId);
+        if (!$std) {
+            return $this->response->setJSON([
+                'error' => 'Production standard tidak ditemukan'
+            ]);
+        }
+
+        $cycle  = (int) $std['cycle_time_sec'];
+        $cavity = (int) $std['cavity'];
+
+        // RUMUS FINAL
+        $targetShift = floor(
+            ($totalMinute * 60 / $cycle) * $cavity
+        );
+
+        $targetHour = floor(
+            $targetShift / ($totalMinute / 60)
+        );
+
+        return $this->response->setJSON([
+            'target_per_shift' => $targetShift,
+            'target_per_hour'  => $targetHour,
+            'cycle_time'       => $cycle,
+            'cavity'           => $cavity,
+            'shift_minute'     => $totalMinute
+        ]);
+    }
+
+    /* =====================================================
+     * SIMPAN DAILY SCHEDULE
+     * ===================================================== */
     public function store()
     {
         $db = db_connect();
         $db->transStart();
 
+        $scheduleDate = $this->request->getPost('schedule_date');
+
+        if (!$scheduleDate) {
+            return redirect()->back()
+                ->with('error', 'Tanggal schedule wajib diisi');
+        }
+
         $scheduleId = $this->scheduleModel->insert([
-            'schedule_date' => date('Y-m-d'),
+            'schedule_date' => $scheduleDate,
             'shift_id'      => $this->request->getPost('shift_id'),
             'section'       => $this->request->getPost('section'),
             'is_completed'  => 0,
@@ -66,15 +176,14 @@ class DailyScheduleController extends BaseController
         ]);
 
         foreach ($this->request->getPost('items') as $item) {
-
-            if (!isset($item['is_selected'])) continue;
+            if (empty($item['is_selected']) || empty($item['product_id'])) {
+                continue;
+            }
 
             $this->itemModel->insert([
                 'daily_schedule_id' => $scheduleId,
-                'product_id'        => $item['product_id'],
                 'machine_id'        => $item['machine_id'],
-                'cycle_time'        => 40,
-                'cavity'            => 2,
+                'product_id'        => $item['product_id'],
                 'target_per_hour'   => $item['target_per_hour'],
                 'target_per_shift'  => $item['target_per_shift'],
                 'is_selected'       => 1
@@ -83,12 +192,43 @@ class DailyScheduleController extends BaseController
 
         $db->transComplete();
 
-        return redirect()->to('/production/daily-schedule/view/' . $scheduleId);
+        return redirect()->to('/production/daily-schedule/list?date=' . $scheduleDate)
+            ->with('success', 'Daily schedule berhasil disimpan');
     }
 
-    // =============================
-    // VIEW RESULT
-    // =============================
+
+        /* =====================================================
+        * LIST DAILY SCHEDULE
+        * ===================================================== */
+        public function list()
+        {
+            $date = $this->request->getGet('date') ?? date('Y-m-d');
+            $db = db_connect();
+
+            $data = $db->table('daily_schedules ds')
+                ->select('
+                    ds.id,
+                    ds.schedule_date,
+                    ds.section,
+                    ds.is_completed,
+                    s.shift_name
+                ')
+                ->join('shifts s', 's.id = ds.shift_id')
+                ->where('ds.schedule_date', $date)
+                ->orderBy('ds.section')
+                ->get()
+                ->getResultArray();
+
+            return view('production/daily_schedule/list', [
+                'date'      => $date,
+                'schedules' => $data
+            ]);
+        }
+
+
+    /* =====================================================
+     * DETAIL DAILY SCHEDULE
+     * ===================================================== */
     public function view($id)
     {
         $db = db_connect();
@@ -105,20 +245,21 @@ class DailyScheduleController extends BaseController
         }
 
         $items = $db->table('daily_schedule_items dsi')
-            ->select('
-                p.part_no,
-                p.part_name,
-                m.machine_code,
-                dsi.cycle_time,
-                dsi.cavity,
-                dsi.target_per_hour,
-                dsi.target_per_shift
-            ')
-            ->join('products p', 'p.id = dsi.product_id')
-            ->join('machines m', 'm.id = dsi.machine_id')
-            ->where('dsi.daily_schedule_id', $id)
-            ->get()
-            ->getResultArray();
+        ->select('
+            m.line_position,
+            m.machine_code,
+            p.part_no,
+            p.part_name,
+            dsi.target_per_hour,
+            dsi.target_per_shift
+        ')
+        ->join('machines m', 'm.id = dsi.machine_id')
+        ->join('products p', 'p.id = dsi.product_id')
+        ->where('dsi.daily_schedule_id', $id)
+        ->orderBy('m.line_position')
+        ->get()
+        ->getResultArray();
+
 
         return view('production/daily_schedule/view', [
             'header' => $header,
@@ -126,30 +267,5 @@ class DailyScheduleController extends BaseController
         ]);
     }
 
-    public function list()
-    {
-        $db = db_connect();
-
-        $date = $this->request->getGet('date') ?? date('Y-m-d');
-
-        $schedules = $db->table('daily_schedules ds')
-            ->select('
-                ds.id,
-                ds.schedule_date,
-                ds.section,
-                ds.is_completed,
-                s.shift_name
-            ')
-            ->join('shifts s', 's.id = ds.shift_id')
-            ->where('ds.schedule_date', $date)
-            ->orderBy('ds.section')
-            ->get()
-            ->getResultArray();
-
-        return view('production/daily_schedule/list', [
-            'date'      => $date,
-            'schedules' => $schedules
-        ]);
-    }
-
+    
 }

@@ -1,118 +1,97 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-3">
-    <i class="bi bi-clock-history me-2"></i>
-    HOURLY PRODUCTION ACHIEVEMENT – DIE CASTING
-</h4>
+<h4>HOURLY PRODUCTION – DIE CASTING</h4>
 
-<!-- ================= SYSTEM INFO ================= -->
-<div class="card mb-3">
-    <div class="card-body row g-2">
-        <div class="col-md-3">
-            <b>Section</b><br>
-            Die Casting
-        </div>
-        <div class="col-md-3">
-            <b>Shift</b><br>
-            <?= esc($shift['shift_name'] ?? $shiftId) ?>
-        </div>
-        <div class="col-md-3">
-            <b>Date</b><br>
-            <?= date('d-m-Y', strtotime($date)) ?>
-        </div>
-        <div class="col-md-3">
-            <b>Time</b><br>
-            <?= date('H:i') ?>
-        </div>
-        <div class="col-md-6 mt-2">
-            <b>Operator Name</b><br>
-            <?= esc(session()->get('fullname')) ?>
-        </div>
+<!-- ================= FILTER ================= -->
+<form method="get" class="row g-2 mb-3 align-items-end">
+
+    <div class="col-md-3">
+        <label class="form-label">Tanggal</label>
+        <input type="date"
+               name="date"
+               class="form-control"
+               value="<?= esc($date) ?>">
     </div>
+
+    <div class="col-md-3">
+        <button class="btn btn-primary">
+            <i class="bi bi-search"></i> Load Data
+        </button>
+    </div>
+
+</form>
+
+<!-- ================= INFO ================= -->
+<div class="mb-3 p-3 bg-light border">
+    <b>Date:</b> <?= date('d-m-Y', strtotime($date)) ?><br>
+    <b>Shift:</b> <?= esc($shift['shift_name']) ?>
+    (<?= $shift['time_start'] ?> - <?= $shift['time_end'] ?>)
 </div>
 
-<?php if (session()->getFlashdata('success')): ?>
-<div class="alert alert-success">
-    <?= session()->getFlashdata('success') ?>
-</div>
-<?php endif; ?>
-
-<?php if (empty($rows)): ?>
-<div class="alert alert-warning">
-    Tidak ada Daily Production Schedule untuk shift ini.
-</div>
-<?php else: ?>
-
-<!-- ================= FORM HOURLY INPUT ================= -->
 <form method="post" action="/die-casting/hourly/store">
 
 <input type="hidden" name="date" value="<?= esc($date) ?>">
-<input type="hidden" name="shift_id" value="<?= esc($shiftId) ?>">
-<input type="hidden" name="time_slot_id" value="<?= esc($slotId) ?>">
+<input type="hidden" name="shift_id" value="<?= esc($shift['shift_id']) ?>">
+<input type="hidden" name="time_slot_id" value="<?= esc($shift['time_slot_id']) ?>">
 
-<div class="table-responsive">
-<table class="table table-bordered table-sm align-middle">
-
-<thead class="table-light text-center">
+<table class="table table-bordered table-sm text-center align-middle">
+<thead class="table-secondary">
 <tr>
-    <th width="60">Select</th>
-    <th>Part No</th>
-    <th>Part Name</th>
-    <th width="90">Cycle Time</th>
-    <th width="110">Target / Hour</th>
-    <th width="90">FG</th>
-    <th width="90">NG</th>
-    <th width="150">NG Category</th>
-    <th width="120">Downtime (min)</th>
-    <th width="180">Keterangan</th>
+    <th>Line</th>
+    <th>Machine</th>
+    <th>Part</th>
+    <th>Cycle</th>
+    <th>Target/Hr</th>
+    <th>FG</th>
+    <th>NG</th>
+    <th>NG Category</th>
+    <th>Downtime</th>
 </tr>
 </thead>
 
 <tbody>
 <?php foreach ($rows as $i => $r): ?>
-
 <tr>
-    <td class="text-center">
-        <input type="checkbox" class="form-check-input"
-               checked <?= !$canEdit ? 'disabled' : '' ?>>
+    <td>Line <?= esc($r['line_position']) ?></td>
+    <td><?= esc($r['machine_code']) ?></td>
+
+    <td>
+        <select name="items[<?= $i ?>][product_id]"
+                class="form-select form-select-sm productSelect">
+            <?php foreach ($products[$r['machine_id']] as $p): ?>
+                <option value="<?= $p['id'] ?>"
+                    <?= $p['id']==$r['product_id']?'selected':'' ?>>
+                    <?= esc($p['part_no']) ?>
+                </option>
+            <?php endforeach ?>
+        </select>
     </td>
 
-    <td><?= esc($r['part_no']) ?></td>
-    <td><?= esc($r['part_name']) ?></td>
+    <td><?= esc($r['cycle_time_sec']) ?></td>
+    <td><?= esc($r['target_per_hour']) ?></td>
 
-    <!-- SYSTEM -->
-    <td class="text-center"><?= $r['cycle_time'] ?></td>
-    <td class="text-center"><?= $r['target_per_hour'] ?></td>
-
-    <!-- IDENTITAS -->
     <input type="hidden" name="items[<?= $i ?>][machine_id]" value="<?= $r['machine_id'] ?>">
-    <input type="hidden" name="items[<?= $i ?>][product_id]" value="<?= $r['product_id'] ?>">
 
-    <!-- INPUT -->
     <td>
         <input type="number"
                name="items[<?= $i ?>][qty_fg]"
-               value="<?= $r['qty_fg'] ?>"
-               class="form-control form-control-sm"
-               <?= !$canEdit ? 'readonly' : '' ?>>
+               class="form-control form-control-sm fg"
+               value="<?= $r['qty_fg'] ?>">
     </td>
 
     <td>
         <input type="number"
                name="items[<?= $i ?>][qty_ng]"
-               value="<?= $r['qty_ng'] ?>"
-               class="form-control form-control-sm"
-               <?= !$canEdit ? 'readonly' : '' ?>>
+               class="form-control form-control-sm ng"
+               value="<?= $r['qty_ng'] ?>">
     </td>
 
     <td>
         <select name="items[<?= $i ?>][ng_category]"
-                class="form-select form-select-sm"
-                <?= !$canEdit ? 'disabled' : '' ?>>
+                class="form-select form-select-sm">
             <option value="">-</option>
             <option <?= $r['ng_category']=='Flow Line'?'selected':'' ?>>Flow Line</option>
-            <option <?= $r['ng_category']=='Gompal'?'selected':'' ?>>Gompal</option>
             <option <?= $r['ng_category']=='Crack'?'selected':'' ?>>Crack</option>
             <option <?= $r['ng_category']=='Porosity'?'selected':'' ?>>Porosity</option>
         </select>
@@ -121,36 +100,29 @@
     <td>
         <input type="number"
                name="items[<?= $i ?>][downtime]"
-               value="<?= $r['downtime_minute'] ?>"
-               class="form-control form-control-sm"
-               <?= !$canEdit ? 'readonly' : '' ?>>
-    </td>
-
-    <td>
-        <input type="text"
-               name="items[<?= $i ?>][remark]"
-               class="form-control form-control-sm"
-               <?= !$canEdit ? 'readonly' : '' ?>>
+               class="form-control form-control-sm downtime"
+               value="<?= $r['downtime'] ?>">
     </td>
 </tr>
-
 <?php endforeach ?>
 </tbody>
-
 </table>
-</div>
 
-<?php if ($canEdit): ?>
 <button class="btn btn-success mt-3">
-    <i class="bi bi-save"></i> Save Hourly Production
+    <i class="bi bi-save"></i> Save Hourly
 </button>
-<?php else: ?>
-<div class="alert alert-info mt-3">
-    Data terkunci (di luar waktu input shift).
-</div>
-<?php endif; ?>
 
 </form>
-<?php endif; ?>
+
+<script>
+document.querySelectorAll('.productSelect').forEach(sel => {
+    sel.addEventListener('change', function () {
+        const row = this.closest('tr');
+        row.querySelector('.fg').value = 0;
+        row.querySelector('.ng').value = 0;
+        row.querySelector('.downtime').value = 0;
+    });
+});
+</script>
 
 <?= $this->endSection() ?>

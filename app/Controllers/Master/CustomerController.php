@@ -31,7 +31,13 @@ class CustomerController extends BaseController
 
     public function store()
     {
-        $this->customerModel->insert($this->request->getPost());
+        $this->customerModel->insert([
+            'customer_code' => $this->request->getPost('customer_code'),
+            'customer_name' => $this->request->getPost('customer_name'),
+            'address'       => $this->request->getPost('address'),
+            'phone'         => $this->request->getPost('phone'),
+            'email'         => $this->request->getPost('email'),
+        ]);
 
         return redirect()->to('/master/customer')
             ->with('success', 'Customer berhasil ditambahkan');
@@ -46,7 +52,13 @@ class CustomerController extends BaseController
 
     public function update($id)
     {
-        $this->customerModel->update($id, $this->request->getPost());
+        $this->customerModel->update($id, [
+            'customer_code' => $this->request->getPost('customer_code'),
+            'customer_name' => $this->request->getPost('customer_name'),
+            'address'       => $this->request->getPost('address'),
+            'phone'         => $this->request->getPost('phone'),
+            'email'         => $this->request->getPost('email'),
+        ]);
 
         return redirect()->to('/master/customer')
             ->with('success', 'Customer berhasil diupdate');

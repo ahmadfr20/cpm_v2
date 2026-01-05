@@ -9,10 +9,7 @@
 <!-- FILTER DATE -->
 <form method="get" class="row g-2 mb-3">
     <div class="col-auto">
-        <input type="date"
-               name="date"
-               value="<?= esc($date) ?>"
-               class="form-control">
+        <input type="date" name="date" value="<?= esc($date) ?>" class="form-control">
     </div>
     <div class="col-auto">
         <button class="btn btn-primary">
@@ -30,9 +27,9 @@
 
     <div class="card-body p-0">
 
-    <?php if (empty($data[$shift['id']])): ?>
+    <?php if (empty($data[$shift['id']] ?? [])): ?>
         <div class="p-3 text-center text-muted">
-            Tidak ada produksi machining pada shift ini
+            Tidak ada schedule machining pada shift ini
         </div>
     <?php else: ?>
 
@@ -44,8 +41,10 @@
             <th>Machine</th>
             <th>Part No</th>
             <th>Part Name</th>
+            <th>Target / Shift</th>
             <th>FG</th>
             <th>NG</th>
+            <th>Efficiency</th>
             <th>Downtime (min)</th>
             <th>Status</th>
         </tr>
@@ -54,25 +53,52 @@
         <tbody>
         <?php foreach ($data[$shift['id']] as $row): ?>
         <?php
-            $status = 'Normal';
-            if ($row['total_fg'] == 0) {
-                $status = 'No Output';
-            } elseif ($row['total_ng'] > 0) {
+            $target = (int) $row['target_per_shift'];
+            $fg     = (int) $row['total_fg'];
+
+            $efficiency = $target > 0
+                ? round(($fg / $target) * 100, 1)
+                : 0;
+
+            if ($fg == 0) {
+                $status = 'Planned';
+                $badge  = 'secondary';
+            } elseif ($efficiency >= 95) {
+                $status = 'Excellent';
+                $badge  = 'success';
+            } elseif ($efficiency >= 80) {
+                $status = 'Normal';
+                $badge  = 'primary';
+            } elseif ($efficiency > 0) {
+                $status = 'Below Target';
+                $badge  = 'warning';
+            } else {
                 $status = 'NG';
+                $badge  = 'danger';
             }
         ?>
         <tr>
             <td><?= esc($row['machine_code']) ?></td>
             <td><?= esc($row['part_no']) ?></td>
             <td><?= esc($row['part_name']) ?></td>
-            <td><?= esc($row['total_fg']) ?></td>
+            <td><?= esc($target) ?></td>
+            <td><?= esc($fg) ?></td>
             <td><?= esc($row['total_ng']) ?></td>
-            <td><?= esc($row['total_downtime']) ?></td>
+
+            <!-- EFFICIENCY -->
             <td>
-                <span class="badge bg-<?= 
-                    $status === 'Normal' ? 'success' :
-                    ($status === 'NG' ? 'warning' : 'secondary')
+                <span class="fw-bold text-<?= 
+                    $efficiency >= 95 ? 'success' :
+                    ($efficiency >= 80 ? 'primary' : 'danger')
                 ?>">
+                    <?= $efficiency ?> %
+                </span>
+            </td>
+
+            <td><?= esc($row['total_downtime']) ?></td>
+
+            <td>
+                <span class="badge bg-<?= $badge ?>">
                     <?= $status ?>
                 </span>
             </td>

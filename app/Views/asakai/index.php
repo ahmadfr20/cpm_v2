@@ -1,34 +1,33 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4>ASAKAI</h4>
+<h3 class="mb-3">
+    <i class="bi bi-sunrise me-2"></i> ASAKAI – Daily Production Summary
+</h3>
 
-<form class="row g-2 mb-3">
-    <div class="col-auto">
-        <input type="date" name="date" value="<?= esc($date) ?>" class="form-control">
-    </div>
-    <div class="col-auto">
-        <button class="btn btn-primary">Filter</button>
-    </div>
+<form method="get" class="mb-3">
+    <input type="date"
+           name="date"
+           value="<?= esc($date) ?>"
+           class="form-control w-auto">
 </form>
 
-<table class="table table-bordered">
+<table class="table table-bordered text-center align-middle">
 <thead class="table-light">
 <tr>
     <th>Section</th>
     <th>Target</th>
     <th>Actual (FG)</th>
-    <th>Achievement</th>
+    <th>Efficiency</th>
     <th>Note</th>
 </tr>
 </thead>
+
 <tbody>
 
 <?php
 function renderRow($label, $data) {
-    $target = $data['target'] ?? 0;
-    $fg     = $data['fg'] ?? 0;
-    $eff    = $data['eff'] ?? 0;
+    $eff = $data['eff'] ?? 0;
 
     if ($eff >= 95) {
         $class = 'table-success';
@@ -43,8 +42,8 @@ function renderRow($label, $data) {
 ?>
 <tr>
     <td><b><?= $label ?></b></td>
-    <td><?= $target ?></td>
-    <td><?= $fg ?></td>
+    <td><?= $data['target'] ?? 0 ?></td>
+    <td><?= $data['fg'] ?? 0 ?></td>
     <td class="<?= $class ?>">
         <?= $eff ?> %
     </td>

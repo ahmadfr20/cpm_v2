@@ -11,34 +11,44 @@ class AsakaiController extends BaseController
         $db   = db_connect();
         $date = $this->request->getGet('date') ?? date('Y-m-d');
 
-        $casting   = $this->getEfficiency($db, 'Die Casting', $date);
-        $machining = $this->getEfficiency($db, 'Machining', $date);
-
         return view('dashboard/asakai/index', [
-            'date'      => $date,
-            'casting'   => $casting,
-            'machining' => $machining,
+            'date'        => $date,
+            'dieCasting'  => $this->summary($db, 'Die Casting', $date),
+            'machining'   => $this->summary($db, 'Machining', $date),
         ]);
     }
 
-    private function getEfficiency($db, $process, $date)
+    private function summary($db, $section, $date)
     {
-        $plan = $db->table('daily_schedules ds')
-            ->selectSum('dsi.target_per_shift')
+        /* ================= PLAN ================= */
+        $planRow = $db->table('daily_schedules ds')
+            ->select('SUM(dsi.target_per_shift) AS target')
             ->join('daily_schedule_items dsi', 'dsi.daily_schedule_id = ds.id')
-            ->where('ds.section', $process)
+            ->where('ds.section', $section)
             ->where('ds.schedule_date', $date)
-            ->get()->getRow()->target_per_shift ?? 0;
+            ->get()
+            ->getRowArray();
 
-        $actual = $db->table('production_outputs po')
-            ->selectSum('po.qty_ok')
+        $target = (int) ($planRow['target'] ?? 0);
+
+        /* ================= ACTUAL ================= */
+        $actualRow = $db->table('production_outputs po')
+            ->select('
+                SUM(po.qty_ok) AS fg,
+                SUM(po.qty_ng) AS ng
+            ')
             ->join('production_processes pp', 'pp.id = po.process_id')
-            ->where('pp.process_name', $process)
+            ->where('pp.process_name', $section)
             ->where('po.production_date', $date)
-            ->get()->getRow()->qty_ok ?? 0;
+            ->get()
+            ->getRowArray();
 
-        $eff = $plan > 0 ? round(($actual / $plan) * 100, 2) : 0;
+        $fg = (int) ($actualRow['fg'] ?? 0);
+        $ng = (int) ($actualRow['ng'] ?? 0);
 
-        return compact('plan','actual','eff');
+        /* ================= EFF ================= */
+        $eff = $target > 0 ? round(($fg / $target) * 100, 1) : 0;
+
+        return compact('target','fg','ng','eff');
     }
 }

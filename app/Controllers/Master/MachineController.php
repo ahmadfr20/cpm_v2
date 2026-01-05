@@ -4,26 +4,32 @@ namespace App\Controllers\Master;
 
 use App\Controllers\BaseController;
 use App\Models\MachineModel;
+use App\Models\ProductModel;
+use App\Models\MachineProductModel;
 
 class MachineController extends BaseController
 {
     protected $machineModel;
+    protected $productModel;
+    protected $machineProductModel;
 
     public function __construct()
     {
         $this->machineModel = new MachineModel();
+        $this->productModel = new ProductModel();
+        $this->machineProductModel = new MachineProductModel();
     }
 
     public function index()
     {
-        $keyword = $this->request->getGet('keyword');
-        $line    = $this->request->getGet('production_line');
-
         return view('master/machine/index', [
-            'machines' => $this->machineModel->getMachines($keyword, $line),
-            'lines'    => $this->machineModel->getLines(),
-            'keyword'  => $keyword,
-            'line'     => $line
+            'machines' => $this->machineModel->getMachinesWithProducts(
+                $this->request->getGet('keyword'),
+                $this->request->getGet('production_line')
+            ),
+            'lines' => $this->machineModel->getLines(),
+            'keyword' => $this->request->getGet('keyword'),
+            'line' => $this->request->getGet('production_line')
         ]);
     }
 
@@ -38,6 +44,7 @@ class MachineController extends BaseController
             'machine_code'    => $this->request->getPost('machine_code'),
             'machine_name'    => $this->request->getPost('machine_name'),
             'production_line' => $this->request->getPost('production_line'),
+            'line_position'   => $this->request->getPost('line_position'),
         ]);
 
         return redirect()->to('/master/machine')
@@ -57,6 +64,7 @@ class MachineController extends BaseController
             'machine_code'    => $this->request->getPost('machine_code'),
             'machine_name'    => $this->request->getPost('machine_name'),
             'production_line' => $this->request->getPost('production_line'),
+            'line_position'   => $this->request->getPost('line_position'),
         ]);
 
         return redirect()->to('/master/machine')
@@ -66,7 +74,6 @@ class MachineController extends BaseController
     public function delete($id)
     {
         $this->machineModel->delete($id);
-
         return redirect()->to('/master/machine')
             ->with('success', 'Machine berhasil dihapus');
     }

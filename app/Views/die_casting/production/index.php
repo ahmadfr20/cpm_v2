@@ -1,87 +1,122 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-2">DIE CASTING – DAILY PRODUCTION ACHIEVEMENT PER SHIFT</h4>
+<h4 class="mb-3">DIE CASTING – DAILY PRODUCTION ACHIEVEMENT</h4>
 
-<div class="mb-3 p-3 bg-light border rounded">
-    <b>Tanggal:</b> <?= date('d-m-Y', strtotime($date)) ?><br>
-    <b>Shift:</b> <?= esc($shift['shift_name']) ?>
-    (<?= $shift['start_time'] ?> - <?= $shift['end_time'] ?>)
+<!-- ================= FILTER TANGGAL ================= -->
+<form method="get" class="row g-2 mb-4 align-items-end">
+
+    <div class="col-md-3">
+        <label class="form-label">Tanggal Produksi</label>
+        <input type="date"
+               name="date"
+               value="<?= esc($date) ?>"
+               class="form-control">
+    </div>
+
+    <div class="col-md-2">
+        <button class="btn btn-primary">
+            <i class="bi bi-search"></i> Load Data
+        </button>
+    </div>
+
+</form>
+
+<?php if (empty($data)): ?>
+    <div class="alert alert-warning">
+        Tidak ada Daily Production Schedule untuk tanggal ini.
+    </div>
+<?php endif; ?>
+
+<!-- ================= LOOP PER SHIFT ================= -->
+<?php foreach ($data as $shiftData): ?>
+
+<div class="card mb-4">
+
+    <!-- ===== SHIFT HEADER ===== -->
+    <div class="card-header bg-light fw-bold">
+        <?= esc($shiftData['shift']['shift_name']) ?>
+        (<?= esc($shiftData['start_time']) ?> - <?= esc($shiftData['end_time']) ?>)
+    </div>
+
+    <!-- ===== TABLE ===== -->
+    <div class="card-body p-0">
+        <table class="table table-bordered table-sm text-center mb-0 align-middle">
+
+            <thead class="table-secondary">
+            <tr>
+                <th>Line</th>
+                <th>Machine</th>
+                <th>Part</th>
+                <th>Target</th>
+                <th>FG</th>
+                <th>NG</th>
+                <th>Downtime (min)</th>
+            </tr>
+            </thead>
+
+            <tbody>
+            <?php foreach ($shiftData['rows'] as $r): ?>
+                <tr>
+                    <td>Line <?= esc($r['line_position']) ?></td>
+                    <td><?= esc($r['machine_code']) ?></td>
+                    <td><?= esc($r['part_no']) ?> - <?= esc($r['part_name']) ?></td>
+                    <td><?= esc($r['target_per_shift']) ?></td>
+
+                    <td>
+                        <input type="number"
+                               class="form-control form-control-sm text-end"
+                               value="<?= esc($r['fg']) ?>"
+                               <?= !$shiftData['canEdit'] ? 'readonly' : '' ?>>
+                    </td>
+
+                    <td>
+                        <input type="number"
+                               class="form-control form-control-sm text-end"
+                               value="<?= esc($r['ng']) ?>"
+                               <?= !$shiftData['canEdit'] ? 'readonly' : '' ?>>
+                    </td>
+
+                    <td>
+                        <input type="number"
+                               class="form-control form-control-sm text-end"
+                               value="<?= esc($r['downtime']) ?>"
+                               <?= !$shiftData['canEdit'] ? 'readonly' : '' ?>>
+                    </td>
+                </tr>
+            <?php endforeach ?>
+            </tbody>
+
+            <!-- ===== TOTAL PER SHIFT ===== -->
+            <tfoot class="table-light fw-bold">
+            <tr>
+                <td colspan="3" class="text-end">TOTAL</td>
+                <td><?= esc($shiftData['totalTarget']) ?></td>
+                <td><?= esc($shiftData['totalFG']) ?></td>
+                <td colspan="2">
+                    Efficiency :
+                    <span class="badge
+                        <?= $shiftData['efficiency'] >= 95 ? 'bg-success'
+                           : ($shiftData['efficiency'] >= 80 ? 'bg-primary'
+                           : 'bg-warning') ?>">
+                        <?= esc($shiftData['efficiency']) ?> %
+                    </span>
+                </td>
+            </tr>
+            </tfoot>
+
+        </table>
+    </div>
+
+    <!-- ===== INFO LOCK ===== -->
+    <?php if (!$shiftData['canEdit']): ?>
+        <div class="alert alert-warning m-2">
+            ⛔ Koreksi hanya diperbolehkan pada waktu akhir shift
+        </div>
+    <?php endif ?>
+
 </div>
 
-
-<table class="table table-bordered table-sm text-center">
-<thead class="table-light">
-<tr>
-    <th rowspan="2">Machine</th>
-    <th rowspan="2">Part</th>
-    <th rowspan="2">Target</th>
-    <th colspan="2">Production</th>
-    <th rowspan="2">NG Category</th>
-    <th rowspan="2">Downtime (min)</th>
-</tr>
-<tr>
-    <th>FG</th>
-    <th>NG</th>
-</tr>
-</thead>
-
-<tbody>
-
-<?php foreach ($data as $machine => $rows): ?>
-    <?php foreach ($rows as $i => $r): ?>
-    <tr>
-        <?php if ($i === 0): ?>
-            <td rowspan="<?= count($rows) ?>"><b><?= $machine ?></b></td>
-        <?php endif ?>
-
-        <td><?= $r['part_no'] ?> - <?= $r['part_name'] ?></td>
-        <td><?= $r['target_per_shift'] ?></td>
-
-        <!-- FG -->
-        <td>
-            <input type="number"
-                   class="form-control form-control-sm"
-                   value="<?= $r['fg'] ?>"
-                   <?= !$canEdit ? 'readonly' : '' ?>>
-        </td>
-
-        <!-- NG -->
-        <td>
-            <input type="number"
-                   class="form-control form-control-sm"
-                   value="<?= $r['ng'] ?>"
-                   <?= !$canEdit ? 'readonly' : '' ?>>
-        </td>
-
-        <!-- NG CATEGORY -->
-        <td>
-            <select class="form-select form-select-sm" <?= !$canEdit ? 'disabled' : '' ?>>
-                <option>Flow Line</option>
-                <option>Crack</option>
-                <option>Short</option>
-                <option>Porosity</option>
-            </select>
-        </td>
-
-        <!-- DOWNTIME -->
-        <td>
-            <input type="number"
-                   class="form-control form-control-sm"
-                   value="<?= $r['downtime'] ?>"
-                   <?= !$canEdit ? 'readonly' : '' ?>>
-        </td>
-    </tr>
-    <?php endforeach ?>
 <?php endforeach ?>
-
-</tbody>
-</table>
-
-<?php if (!$canEdit): ?>
-<div class="alert alert-warning mt-3">
-    ⛔ Data hanya bisa dikoreksi pada akhir shift
-</div>
-<?php endif ?>
 
 <?= $this->endSection() ?>

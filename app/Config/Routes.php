@@ -31,6 +31,14 @@ $routes->group('master', ['filter' => 'auth'], function ($routes) {
     $routes->post('shift/update/(:num)', 'Master\ShiftController::update/$1');
     $routes->get('shift/delete/(:num)', 'Master\ShiftController::delete/$1');
 
+    $routes->get('production-standard', 'Master\ProductionStandardController::index');
+    $routes->get('production-standard/create', 'Master\ProductionStandardController::create');
+    $routes->post('production-standard/store', 'Master\ProductionStandardController::store');
+    $routes->get('production-standard/edit/(:num)', 'Master\ProductionStandardController::edit/$1');
+    $routes->post('production-standard/update/(:num)', 'Master\ProductionStandardController::update/$1');
+    $routes->get('production-standard/delete/(:num)', 'Master\ProductionStandardController::delete/$1');
+
+
     // Time Slot
     $routes->get('time-slot', 'Master\TimeSlotController::index');
     $routes->get('time-slot/create', 'Master\TimeSlotController::create');
@@ -55,6 +63,9 @@ $routes->group('master', ['filter' => 'auth'], function ($routes) {
     $routes->post('machine/update/(:num)', 'Master\MachineController::update/$1');
     $routes->get('machine/delete/(:num)', 'Master\MachineController::delete/$1');
 
+    $routes->get('machine/products/(:num)', 'Master\MachineController::products/$1');
+    $routes->post('machine/save-products/(:num)', 'Master\MachineController::saveProducts/$1');
+
     $routes->get('customer', 'Master\CustomerController::index');
     $routes->get('customer/create', 'Master\CustomerController::create');
     $routes->post('customer/store', 'Master\CustomerController::store');
@@ -74,6 +85,10 @@ $routes->group('production', ['filter'=>'auth'], function($routes){
     $routes->post('daily-schedule/store', 'Production\DailyScheduleController::store');
     $routes->get('daily-schedule/view/(:num)', 'Production\DailyScheduleController::view/$1');
     $routes->get('get-machines', 'Production\DailyScheduleController::getMachines');
+
+    $routes->get('get-products', 'Production\DailyScheduleController::getProducts');
+    $routes->get('calculate-target', 'Production\DailyScheduleController::calculateTarget');
+
 });
 
 
@@ -184,6 +199,9 @@ $routes->get(
     'production/daily-schedule/list',
     'Production\DailyScheduleController::list'
 );
+
+$routes->get('/asakai', 'AsakaiController::index', ['filter' => 'auth']);
+
 
 
 

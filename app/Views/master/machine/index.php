@@ -14,11 +14,11 @@
         <select name="production_line" class="form-control">
             <option value="">-- Production Line --</option>
             <?php foreach ($lines as $l): ?>
-            <option value="<?= esc($l['production_line']) ?>"
-                <?= $line==$l['production_line']?'selected':'' ?>>
-                <?= esc($l['production_line']) ?>
-            </option>
-            <?php endforeach; ?>
+                <option value="<?= esc($l['production_line']) ?>"
+                    <?= $line==$l['production_line']?'selected':'' ?>>
+                    <?= esc($l['production_line']) ?>
+                </option>
+            <?php endforeach ?>
         </select>
     </div>
 
@@ -29,40 +29,37 @@
 </form>
 
 <a href="/master/machine/create" class="btn btn-success mb-3">
-    <i class="bi bi-plus"></i> Tambah Machine
+    Tambah Machine
 </a>
 
-<?php if (session()->getFlashdata('success')): ?>
-<div class="alert alert-success">
-    <?= session()->getFlashdata('success') ?>
-</div>
-<?php endif; ?>
-
 <table class="table table-bordered table-striped">
-    <thead>
-        <tr>
-            <th>Code</th>
-            <th>Name</th>
-            <th>Production Line</th>
-            <th width="120">Aksi</th>
-        </tr>
-    </thead>
-    <tbody>
-        <?php foreach ($machines as $m): ?>
-        <tr>
-            <td><?= esc($m['machine_code']) ?></td>
-            <td><?= esc($m['machine_name']) ?></td>
-            <td><?= esc($m['production_line']) ?></td>
-            <td>
-                <a href="/master/machine/edit/<?= $m['id'] ?>"
-                   class="btn btn-sm btn-warning">Edit</a>
-                <a href="/master/machine/delete/<?= $m['id'] ?>"
-                   class="btn btn-sm btn-danger"
-                   onclick="return confirm('Hapus machine ini?')">Hapus</a>
-            </td>
-        </tr>
-        <?php endforeach; ?>
-    </tbody>
+<thead>
+<tr>
+    <th>Code</th>
+    <th>Name</th>
+    <th>Line</th>
+    <th>Line Position</th>
+    <th>Produk</th>
+    <th width="140">Aksi</th>
+</tr>
+</thead>
+<tbody>
+<?php foreach ($machines as $m): ?>
+<tr>
+    <td><?= esc($m['machine_code']) ?></td>
+    <td><?= esc($m['machine_name']) ?></td>
+    <td><?= esc($m['production_line']) ?></td>
+    <td>Line <?= esc($m['line_position']) ?></td>
+    <td><?= esc($m['products'] ?? '-') ?></td>
+    <td>
+        <a href="/master/machine/edit/<?= $m['id'] ?>" class="btn btn-sm btn-warning">Edit</a>
+        <a href="/master/machine/delete/<?= $m['id'] ?>"
+           class="btn btn-sm btn-danger"
+           onclick="return confirm('Hapus machine?')">Hapus</a>
+    </td>
+</tr>
+<?php endforeach ?>
+</tbody>
 </table>
 
 <?= $this->endSection() ?>

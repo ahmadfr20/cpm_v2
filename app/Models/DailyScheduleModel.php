@@ -14,7 +14,6 @@ class DailyScheduleModel extends Model
         'shift_id',
         'section',
         'is_completed',
-        'created_at',
-        'updated_at'
+        'created_at'
     ];
 }

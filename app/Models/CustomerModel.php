@@ -13,10 +13,8 @@ class CustomerModel extends Model
         'customer_code',
         'customer_name',
         'address',
-        'pic',
         'phone',
-        'email',
-        'notes'
+        'email'
     ];
 
     public function getCustomers($keyword = null)
@@ -27,10 +25,13 @@ class CustomerModel extends Model
             $builder->groupStart()
                 ->like('customer_code', $keyword)
                 ->orLike('customer_name', $keyword)
-                ->orLike('pic', $keyword)
+                ->orLike('address', $keyword)
                 ->groupEnd();
         }
 
-        return $builder->get()->getResultArray();
+        return $builder
+            ->orderBy('customer_name')
+            ->get()
+            ->getResultArray();
     }
 }

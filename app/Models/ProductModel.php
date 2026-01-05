@@ -17,11 +17,17 @@ class ProductModel extends Model
         'notes'
     ];
 
+    /**
+     * LIST PRODUCT (FILTER + JOIN CUSTOMER)
+     */
     public function getProducts($keyword = null, $customerId = null)
     {
         $builder = $this->db->table('products p')
-            ->select('p.*, c.customer_name')
-            ->join('customers c', 'c.id = p.customer_id');
+            ->select('
+                p.*,
+                c.customer_name
+            ')
+            ->join('customers c', 'c.id = p.customer_id', 'left');
 
         if ($keyword) {
             $builder->groupStart()
@@ -34,6 +40,24 @@ class ProductModel extends Model
             $builder->where('p.customer_id', $customerId);
         }
 
-        return $builder->get()->getResultArray();
+        return $builder
+            ->orderBy('p.part_name')
+            ->get()
+            ->getResultArray();
+    }
+
+    /**
+     * PRODUCT BY MACHINE (UNTUK DAILY SCHEDULE)
+     */
+    public function getByMachine($machineId)
+    {
+        return $this->db->table('machine_products mp')
+            ->select('p.id, p.part_no, p.part_name')
+            ->join('products p', 'p.id = mp.product_id')
+            ->where('mp.machine_id', $machineId)
+            ->where('mp.is_active', 1)
+            ->orderBy('p.part_name')
+            ->get()
+            ->getResultArray();
     }
 }

@@ -19,29 +19,61 @@ function isActive($path, $currentUrl)
             </a>
         </li>
 
+
+
         <!-- MASTER DATA -->
         <?php if (in_array($role, ['ADMIN','PPIC'])): ?>
         <li class="nav-item mt-3">
             <a class="nav-link text-white d-flex justify-content-between align-items-center"
-               data-bs-toggle="collapse"
-               href="#menuMaster"
-               aria-expanded="<?= isActive('master', $currentUrl) ? 'true' : 'false' ?>">
+            data-bs-toggle="collapse"
+            href="#menuMaster"
+            aria-expanded="<?= isActive('master', $currentUrl) ? 'true' : 'false' ?>">
                 <span><i class="bi bi-database me-2"></i> Master Data</span>
                 <i class="bi bi-chevron-down"></i>
             </a>
 
             <div class="collapse <?= isActive('master', $currentUrl) ? 'show' : '' ?>"
-                 id="menuMaster">
+                id="menuMaster">
                 <ul class="nav flex-column ms-3 mt-1">
-                    <li class="nav-item"><a class="nav-link <?= isActive('master/shift',$currentUrl)?'active':'' ?>" href="/master/shift">Shift</a></li>
-                    <li class="nav-item"><a class="nav-link <?= isActive('master/time-slot',$currentUrl)?'active':'' ?>" href="/master/time-slot">Time Slot</a></li>
-                    <li class="nav-item"><a class="nav-link <?= isActive('master/product',$currentUrl)?'active':'' ?>" href="/master/product">Product</a></li>
-                    <li class="nav-item"><a class="nav-link <?= isActive('master/machine',$currentUrl)?'active':'' ?>" href="/master/machine">Machine</a></li>
-                    <li class="nav-item"><a class="nav-link <?= isActive('master/customer',$currentUrl)?'active':'' ?>" href="/master/customer">Customer</a></li>
+
+                    <li class="nav-item">
+                        <a class="nav-link <?= isActive('master/shift',$currentUrl)?'active':'' ?>"
+                        href="/master/shift">Shift</a>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link <?= isActive('master/time-slot',$currentUrl)?'active':'' ?>"
+                        href="/master/time-slot">Time Slot</a>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link <?= isActive('master/product',$currentUrl)?'active':'' ?>"
+                        href="/master/product">Product</a>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link <?= isActive('master/machine',$currentUrl)?'active':'' ?>"
+                        href="/master/machine">Machine</a>
+                    </li>
+
+                    <!-- ✅ PRODUCTION STANDARD (BARU) -->
+                    <li class="nav-item">
+                        <a class="nav-link <?= isActive('master/production-standard',$currentUrl)?'active':'' ?>"
+                        href="/master/production-standard">
+                            Production Standard
+                        </a>
+                    </li>
+
+                    <li class="nav-item">
+                        <a class="nav-link <?= isActive('master/customer',$currentUrl)?'active':'' ?>"
+                        href="/master/customer">Customer</a>
+                    </li>
+
                 </ul>
             </div>
         </li>
         <?php endif; ?>
+
 
         <!-- TRANSACTION -->
         <li class="nav-item mt-3">
