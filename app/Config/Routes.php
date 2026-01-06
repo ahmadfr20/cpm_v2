@@ -63,7 +63,7 @@ $routes->group('master', ['filter' => 'auth'], function ($routes) {
     $routes->post('machine/update/(:num)', 'Master\MachineController::update/$1');
     $routes->get('machine/delete/(:num)', 'Master\MachineController::delete/$1');
 
-    $routes->get('machine/products/(:num)', 'Master\MachineController::products/$1');
+    $routes->get('machine/products/(:num)', 'Master\MachineController::manageProducts/$1');
     $routes->post('machine/save-products/(:num)', 'Master\MachineController::saveProducts/$1');
 
     $routes->get('customer', 'Master\CustomerController::index');

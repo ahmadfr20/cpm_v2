@@ -46,13 +46,24 @@ class DailyScheduleController extends BaseController
     {
         $section = $this->request->getGet('section');
 
+        // mapping section → process
+        $processMap = [
+            'Die Casting' => 1,
+            'Machining'  => 2,
+        ];
+
+        if (!isset($processMap[$section])) {
+            return $this->response->setJSON([]);
+        }
+
         return $this->response->setJSON(
             $this->machineModel
-                ->where('production_line', $section)
-                ->orderBy('id')
+                ->where('process_id', $processMap[$section])
+                ->orderBy('line_position')
                 ->findAll()
         );
     }
+
 
     /* =====================================================
      * AJAX: GET PRODUCT BY MACHINE
@@ -63,16 +74,18 @@ class DailyScheduleController extends BaseController
         $machineId = $this->request->getGet('machine_id');
         $db = db_connect();
 
-        $products = $db->table('production_standards ps')
+        $products = $db->table('machine_products mp')
             ->select('p.id, p.part_no, p.part_name')
-            ->join('products p', 'p.id = ps.product_id')
-            ->where('ps.machine_id', $machineId)
+            ->join('products p', 'p.id = mp.product_id')
+            ->where('mp.machine_id', $machineId)
+            ->where('mp.is_active', 1)
             ->orderBy('p.part_no')
             ->get()
             ->getResultArray();
 
         return $this->response->setJSON($products);
     }
+
 
     /* =====================================================
      * HITUNG TOTAL MENIT SHIFT DARI TIME SLOT

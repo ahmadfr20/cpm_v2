@@ -6,75 +6,106 @@ use App\Controllers\BaseController;
 use App\Models\MachineModel;
 use App\Models\ProductModel;
 use App\Models\MachineProductModel;
+use App\Models\ProductionProcessModel;
 
 class MachineController extends BaseController
 {
     protected $machineModel;
     protected $productModel;
     protected $machineProductModel;
+    protected $processModel;
 
     public function __construct()
     {
-        $this->machineModel = new MachineModel();
-        $this->productModel = new ProductModel();
+        $this->machineModel        = new MachineModel();
+        $this->productModel        = new ProductModel();
         $this->machineProductModel = new MachineProductModel();
+        $this->processModel        = new ProductionProcessModel();
     }
 
+    /* ===============================
+     * LIST MACHINE
+     * =============================== */
     public function index()
     {
         return view('master/machine/index', [
-            'machines' => $this->machineModel->getMachinesWithProducts(
-                $this->request->getGet('keyword'),
-                $this->request->getGet('production_line')
-            ),
-            'lines' => $this->machineModel->getLines(),
-            'keyword' => $this->request->getGet('keyword'),
-            'line' => $this->request->getGet('production_line')
+            'machines'  => $this->machineModel->getMachinesFiltered(),
+            'keyword'   => '',
+            'processId' => '',
+            'processes' => $this->processModel->findAll(),
         ]);
     }
 
+    /* ===============================
+     * CREATE MACHINE (INI YANG HILANG)
+     * =============================== */
     public function create()
     {
-        return view('master/machine/create');
+        return view('master/machine/create', [
+            'processes' => $this->processModel->findAll()
+        ]);
     }
 
     public function store()
     {
         $this->machineModel->insert([
-            'machine_code'    => $this->request->getPost('machine_code'),
-            'machine_name'    => $this->request->getPost('machine_name'),
-            'production_line' => $this->request->getPost('production_line'),
-            'line_position'   => $this->request->getPost('line_position'),
+            'machine_code'  => $this->request->getPost('machine_code'),
+            'machine_name'  => $this->request->getPost('machine_name'),
+            'process_id'    => $this->request->getPost('process_id'),
+            'line_position' => $this->request->getPost('line_position'),
         ]);
 
         return redirect()->to('/master/machine')
             ->with('success', 'Machine berhasil ditambahkan');
     }
 
-    public function edit($id)
+    /* ===============================
+     * MANAGE PRODUCT (CHECKBOX)
+     * =============================== */
+    public function manageProducts($machineId)
     {
-        return view('master/machine/edit', [
-            'machine' => $this->machineModel->find($id)
+        $assigned = $this->machineProductModel
+            ->where('machine_id', $machineId)
+            ->findColumn('product_id');
+
+        return view('master/machine/products', [
+            'machine'  => $this->machineModel->find($machineId),
+            'products' => $this->productModel->findAll(),
+            'assigned' => $assigned ?? []
         ]);
     }
 
-    public function update($id)
+    /* ===============================
+     * SAVE PRODUCT (BULK)
+     * =============================== */
+    public function saveProducts($machineId)
     {
-        $this->machineModel->update($id, [
-            'machine_code'    => $this->request->getPost('machine_code'),
-            'machine_name'    => $this->request->getPost('machine_name'),
-            'production_line' => $this->request->getPost('production_line'),
-            'line_position'   => $this->request->getPost('line_position'),
-        ]);
+        $selectedProducts = $this->request->getPost('products') ?? [];
+
+        $existing = $this->machineProductModel
+            ->where('machine_id', $machineId)
+            ->findColumn('product_id') ?? [];
+
+        // DELETE
+        $toDelete = array_diff($existing, $selectedProducts);
+        if ($toDelete) {
+            $this->machineProductModel
+                ->where('machine_id', $machineId)
+                ->whereIn('product_id', $toDelete)
+                ->delete();
+        }
+
+        // INSERT
+        $toInsert = array_diff($selectedProducts, $existing);
+        foreach ($toInsert as $productId) {
+            $this->machineProductModel->insert([
+                'machine_id' => $machineId,
+                'product_id' => $productId,
+                'is_active'  => 1
+            ]);
+        }
 
         return redirect()->to('/master/machine')
-            ->with('success', 'Machine berhasil diupdate');
-    }
-
-    public function delete($id)
-    {
-        $this->machineModel->delete($id);
-        return redirect()->to('/master/machine')
-            ->with('success', 'Machine berhasil dihapus');
+            ->with('success', 'Produk machine berhasil diperbarui');
     }
 }
