@@ -18,40 +18,76 @@ class HourlyController extends BaseController
 
     public function index()
     {
-        $date       = $this->request->getGet('date') ?? date('Y-m-d');
-        $shiftId    = $this->request->getGet('shift_id');
-        $timeSlotId = $this->request->getGet('time_slot_id');
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
 
-        /* ================= STEP 1 : PILIH SHIFT ================= */
-        if (!$shiftId) {
-            return view('machining/hourly/select_shift', [
-                'date'   => $date,
-                'shifts' => $this->db->table('shifts')->get()->getResultArray()
+        /* =====================================================
+         * DETECT ACTIVE SHIFT & TIME SLOT (FIXED – SUPPORT MALAM)
+         * ===================================================== */
+        $now = strtotime(date('Y-m-d H:i:s'));
+        $activeSlot = null;
+
+        $slots = $this->db->table('shift_time_slots sts')
+            ->select('
+                sts.shift_id,
+                sts.time_slot_id,
+                ts.time_start,
+                ts.time_end,
+                s.shift_name
+            ')
+            ->join('time_slots ts', 'ts.id = sts.time_slot_id')
+            ->join('shifts s', 's.id = sts.shift_id')
+            ->where('s.is_active', 1)
+            ->orderBy('sts.shift_id')
+            ->get()
+            ->getResultArray();
+
+        foreach ($slots as $slot) {
+
+            $start = strtotime($date . ' ' . $slot['time_start']);
+            $end   = strtotime($date . ' ' . $slot['time_end']);
+
+            // SHIFT MALAM (lintas hari)
+            if ($end <= $start) {
+                $end += 86400; // +1 hari
+            }
+
+            // jam sekarang lewat tengah malam
+            if ($now < $start) {
+                $start -= 86400;
+                $end   -= 86400;
+            }
+
+            if ($now >= $start && $now <= $end) {
+                $activeSlot = $slot;
+                break;
+            }
+        }
+
+        if (!$activeSlot) {
+            return view('machining/hourly/locked', [
+                'message' => 'Tidak ada time slot aktif saat ini'
             ]);
         }
 
-        /* ================= STEP 2 : PILIH TIME SLOT ================= */
-        if (!$timeSlotId) {
-            $timeSlots = $this->db->table('time_slots ts')
-                ->join('shift_time_slots sts', 'sts.time_slot_id = ts.id')
-                ->where('sts.shift_id', $shiftId)
-                ->orderBy('ts.time_start')
-                ->get()
-                ->getResultArray();
+        $shiftId    = $activeSlot['shift_id'];
+        $timeSlotId = $activeSlot['time_slot_id'];
 
-            return view('machining/hourly/select_time', [
-                'date'      => $date,
-                'shiftId'   => $shiftId,
-                'timeSlots' => $timeSlots
-            ]);
-        }
+        /* =====================================================
+         * AMBIL DATA SHIFT & TIME SLOT
+         * ===================================================== */
+        $shift = $this->db->table('shifts')
+            ->where('id', $shiftId)
+            ->get()
+            ->getRowArray();
 
-        /* ================= STEP 3 : INPUT HOURLY ================= */
+        $timeSlot = $this->db->table('time_slots')
+            ->where('id', $timeSlotId)
+            ->get()
+            ->getRowArray();
 
-        $shift = $this->db->table('shifts')->where('id', $shiftId)->get()->getRowArray();
-        $timeSlot = $this->db->table('time_slots')->where('id', $timeSlotId)->get()->getRowArray();
-
-        // 🔥 INI KUNCI: AMBIL DARI DAILY SCHEDULE
+        /* =====================================================
+         * AMBIL DATA DARI DAILY SCHEDULE (MACHINING)
+         * ===================================================== */
         $items = $this->db->table('daily_schedule_items dsi')
             ->select('
                 p.part_no,
@@ -59,12 +95,17 @@ class HourlyController extends BaseController
                 m.machine_code,
                 dsi.machine_id,
                 dsi.product_id,
-                dsi.cycle_time,
-                dsi.target_per_hour
+                dsi.target_per_hour,
+                ps.cycle_time_sec
             ')
             ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
-            ->join('products p', 'p.id = dsi.product_id')
             ->join('machines m', 'm.id = dsi.machine_id')
+            ->join('products p', 'p.id = dsi.product_id')
+            ->join(
+                'production_standards ps',
+                'ps.machine_id = dsi.machine_id AND ps.product_id = dsi.product_id',
+                'left'
+            )
             ->where('ds.schedule_date', $date)
             ->where('ds.shift_id', $shiftId)
             ->where('ds.section', 'Machining')
@@ -75,14 +116,16 @@ class HourlyController extends BaseController
         return view('machining/hourly/index', [
             'date'       => $date,
             'shiftId'    => $shiftId,
-            'shiftName'  => $shift['shift_name'] ?? 'Shift '.$shiftId,
+            'shiftName'  => $shift['shift_name'],
             'timeSlotId' => $timeSlotId,
-            'timeLabel'  => ($timeSlot['time_start'] ?? '-') . ' - ' . ($timeSlot['time_end'] ?? '-'),
-            'items'      => $items, // ✅ FIXED
+            'timeLabel'  => $timeSlot['time_start'] . ' - ' . $timeSlot['time_end'],
+            'items'      => $items
         ]);
     }
 
-    /* ================= STORE ================= */
+    /* =====================================================
+     * SIMPAN DATA HOURLY
+     * ===================================================== */
     public function store()
     {
         $items = $this->request->getPost('items');
@@ -97,7 +140,7 @@ class HourlyController extends BaseController
                 continue;
             }
 
-            $this->hourlyModel->insert([
+            $this->hourlyModel->replace([
                 'production_date' => $this->request->getPost('date'),
                 'shift_id'        => $this->request->getPost('shift_id'),
                 'time_slot_id'    => $this->request->getPost('time_slot_id'),
@@ -111,6 +154,7 @@ class HourlyController extends BaseController
             ]);
         }
 
-        return redirect()->back()->with('success', 'Hourly Production Machining tersimpan');
+        return redirect()->back()
+            ->with('success', 'Hourly Production Machining berhasil disimpan');
     }
 }

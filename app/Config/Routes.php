@@ -103,22 +103,110 @@ $routes->group('material', ['filter'=>'auth'], function ($routes) {
     $routes->post('transfer-dc/store', 'Material\TransferToDieCastingController::store');
 });
 
-$routes->group('die-casting', ['filter'=>'auth'], function ($routes) {
+$routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
 
-    // 🔹 Schedule Die Casting (PPIC)
-    $routes->get('schedule', 'DieCasting\ScheduleController::index');
-    $routes->post('schedule/store', 'DieCasting\ScheduleController::store');
+    // =====================================================
+    // 1️⃣ DAILY PRODUCTION SCHEDULE (PLAN vs ACTUAL)
+    // =====================================================
+    // Ringkasan harian: target (P) vs actual (A & NG)
+    $routes->get(
+        'daily-production-schedule',
+        'DieCasting\DailyProductionScheduleController::index'
+    );
 
-    // 🔹 Production Die Casting (Operator / Production)
-    $routes->get('production', 'DieCasting\ProductionController::index');
-    $routes->post('production/store', 'DieCasting\ProductionController::store');
+    $routes->post(
+        'daily-production-schedule/save',
+        'DieCasting\DailyProductionScheduleController::save'
+    );
 
-    $routes->get('dandori', 'DieCasting\DandoriController::index');
-    $routes->post('dandori/store', 'DieCasting\DandoriController::store');
+    // =====================================================
+    // 2️⃣ DAILY PRODUCTION (HOURLY INPUT – OPERATOR)
+    // =====================================================
+    // Input FG & NG per jam (sesuai time slot & shift)
+    $routes->get(
+        'daily-production',
+        'DieCasting\DailyProductionController::index'
+    );
 
-    $routes->get('hourly', 'DieCasting\HourlyController::index');
-    $routes->post('hourly/store', 'DieCasting\HourlyController::store');
+    $routes->post(
+        'daily-production/store',
+        'DieCasting\DailyProductionController::store'
+    );
+
+    // =====================================================
+    // 3️⃣ DAILY SCHEDULE DIE CASTING (PLAN / TARGET – PPIC)
+    // =====================================================
+    // Input target P per mesin & shift
+    $routes->get(
+        'daily-schedule',
+        'DieCasting\DailyScheduleController::index'
+    );
+
+    $routes->post(
+        'daily-schedule/store',
+        'DieCasting\DailyScheduleController::store'
+    );
+
+    // View hasil daily schedule
+    $routes->get(
+        'daily-schedule/view',
+        'DieCasting\DailyScheduleController::view'
+    );
+
+    // AJAX: product by machine
+    $routes->get(
+        'daily-schedule/products',
+        'DieCasting\DailyScheduleController::getProducts'
+    );
+
+    // (opsional) AJAX: product + target
+    $routes->get(
+        'daily-schedule/product-target',
+        'DieCasting\DailyScheduleController::getProductAndTarget'
+    );
+
+    // =====================================================
+    // 4️⃣ PRODUCTION PER SHIFT (OPERATOR / PRODUCTION)
+    // =====================================================
+    $routes->get(
+        'production',
+        'DieCasting\DailyProductionController::index'
+    );
+
+    $routes->post(
+        'production/store',
+        'DieCasting\DailyProductionController::store'
+    );
+
+    // =====================================================
+    // 5️⃣ HOURLY LEGACY / BACKUP
+    // =====================================================
+    $routes->get(
+        'hourly',
+        'DieCasting\HourlyController::index'
+    );
+
+    $routes->post(
+        'hourly/store',
+        'DieCasting\HourlyController::store'
+    );
+
+    // =====================================================
+    // 6️⃣ DANDORI
+    // =====================================================
+    $routes->get(
+        'dandori',
+        'DieCasting\DandoriController::index'
+    );
+
+    $routes->post(
+        'dandori/store',
+        'DieCasting\DandoriController::store'
+    );
+
 });
+
+
 
 $routes->group('shotblast', ['filter' => 'auth'], function ($routes) {
     $routes->get('schedule', 'ShotBlast\ScheduleController::index');

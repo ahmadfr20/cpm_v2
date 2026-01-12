@@ -11,25 +11,22 @@ class ProductionController extends BaseController
         $db   = db_connect();
         $date = $this->request->getGet('date') ?? date('Y-m-d');
 
-        /* ===============================
-           AMBIL SEMUA SHIFT AKTIF
-        =============================== */
-        $shifts = $db->table('shifts s')
-            ->select('s.id, s.shift_name')
-            ->where('s.is_active', 1)
-            ->orderBy('s.id')
+        /* ================= SHIFT AKTIF ================= */
+        $shifts = $db->table('shifts')
+            ->where('is_active', 1)
+            ->orderBy('id')
             ->get()->getResultArray();
 
-        /* ===============================
-           LOOP PER SHIFT
-        =============================== */
         $result = [];
+
+        /* ===== GRAND TOTAL (HARIAN) ===== */
+        $grandTarget = 0;
+        $grandFG     = 0;
+        $grandWeight = 0;
 
         foreach ($shifts as $shift) {
 
-            // ===============================
-            // AMBIL JAM SHIFT DARI TIME SLOT
-            // ===============================
+            /* ================= JAM SHIFT ================= */
             $slots = $db->table('shift_time_slots sts')
                 ->select('ts.time_start, ts.time_end')
                 ->join('time_slots ts', 'ts.id = sts.time_slot_id')
@@ -48,15 +45,15 @@ class ProductionController extends BaseController
                 }
             }
 
-            /* ===============================
-               DATA SCHEDULED PART
-            =============================== */
+            /* ================= DATA ================= */
             $rows = $db->table('daily_schedule_items dsi')
                 ->select('
+                    dsi.id schedule_item_id,
                     m.machine_code,
                     m.line_position,
                     p.part_no,
                     p.part_name,
+                    p.weight,
                     dsi.target_per_shift,
                     IFNULL(SUM(h.qty_fg),0) fg,
                     IFNULL(SUM(h.qty_ng),0) ng,
@@ -80,20 +77,22 @@ class ProductionController extends BaseController
                 ->orderBy('m.line_position')
                 ->get()->getResultArray();
 
-            /* ===============================
-               HITUNG TOTAL SHIFT
-            =============================== */
+            /* ================= TOTAL SHIFT ================= */
             $totalTarget = 0;
             $totalFG     = 0;
+            $totalWeight = 0;
 
-            foreach ($rows as $r) {
+            foreach ($rows as &$r) {
                 $totalTarget += (int)$r['target_per_shift'];
                 $totalFG     += (int)$r['fg'];
+                $r['total_weight'] = $r['fg'] * $r['weight'];
+                $totalWeight += $r['total_weight'];
             }
+            unset($r);
 
-            $efficiency = $totalTarget > 0
-                ? round(($totalFG / $totalTarget) * 100, 1)
-                : 0;
+            $grandTarget += $totalTarget;
+            $grandFG     += $totalFG;
+            $grandWeight += $totalWeight;
 
             $result[] = [
                 'shift'       => $shift,
@@ -102,27 +101,54 @@ class ProductionController extends BaseController
                 'rows'        => $rows,
                 'totalTarget' => $totalTarget,
                 'totalFG'     => $totalFG,
-                'efficiency'  => $efficiency,
-                'canEdit'     => $this->canEdit($endTime)
+                'totalWeight' => $totalWeight,
+                'efficiency'  => $totalTarget > 0 ? round(($totalFG / $totalTarget) * 100, 1) : 0,
+                'canEdit'     => $this->canEdit($date, $startTime, $endTime)
             ];
         }
 
         return view('die_casting/production/index', [
-            'date'  => $date,
-            'data'  => $result
+            'date'            => $date,
+            'data'            => $result,
+            'dailyTarget'     => $grandTarget,
+            'dailyFG'         => $grandFG,
+            'dailyWeight'     => $grandWeight,
+            'dailyEfficiency' => $grandTarget > 0 ? round(($grandFG / $grandTarget) * 100, 1) : 0
         ]);
     }
 
-    /* ===============================
-       OPERATOR HANYA BOLEH EDIT AKHIR SHIFT
-    =============================== */
-    private function canEdit($endTime)
+    /* ================= KOREKSI WINDOW ================= */
+    private function canEdit($date, $start, $end)
     {
-        if (!$endTime) return false;
+        if (!$start || !$end) return false;
 
-        $now = strtotime(date('H:i:s'));
-        $end = strtotime($endTime);
+        $now   = strtotime(date('Y-m-d H:i:s'));
+        $start = strtotime("$date $start");
+        $end   = strtotime("$date $end");
+
+        // SHIFT MALAM
+        if ($end <= $start) {
+            $end += 86400;
+        }
 
         return ($now >= ($end - 3600) && $now <= ($end + 3600));
+    }
+
+    /* ================= SIMPAN KOREKSI ================= */
+    public function saveCorrection()
+    {
+        $db = db_connect();
+
+        foreach ($this->request->getPost('items') as $item) {
+            $db->table('die_casting_hourly')
+                ->where('id', $item['hourly_id'])
+                ->update([
+                    'qty_fg'          => $item['fg'],
+                    'qty_ng'          => $item['ng'],
+                    'downtime_minute' => $item['downtime']
+                ]);
+        }
+
+        return redirect()->back()->with('success', 'Koreksi produksi berhasil disimpan');
     }
 }

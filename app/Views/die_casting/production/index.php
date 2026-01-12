@@ -1,47 +1,81 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-3">DIE CASTING – DAILY PRODUCTION ACHIEVEMENT</h4>
+<h4 class="mb-3">
+    <i class="bi bi-bar-chart-fill me-2"></i>
+    DIE CASTING – DAILY PRODUCTION ACHIEVEMENT
+</h4>
 
-<!-- ================= FILTER TANGGAL ================= -->
-<form method="get" class="row g-2 mb-4 align-items-end">
-
+<!-- ================= FILTER ================= -->
+<form method="get" class="row g-2 mb-3 align-items-end">
     <div class="col-md-3">
         <label class="form-label">Tanggal Produksi</label>
-        <input type="date"
-               name="date"
-               value="<?= esc($date) ?>"
-               class="form-control">
+        <input type="date" name="date" value="<?= esc($date) ?>" class="form-control">
     </div>
-
     <div class="col-md-2">
         <button class="btn btn-primary">
             <i class="bi bi-search"></i> Load Data
         </button>
     </div>
-
 </form>
 
-<?php if (empty($data)): ?>
-    <div class="alert alert-warning">
-        Tidak ada Daily Production Schedule untuk tanggal ini.
+<!-- ================= DAILY SUMMARY ================= -->
+<div class="card mb-4 border-info">
+    <div class="card-header bg-info text-white fw-bold">
+        DAILY SUMMARY – <?= esc($date) ?>
     </div>
-<?php endif; ?>
+    <div class="card-body">
+        <div class="row text-center fw-bold">
+            <div class="col-md-3">
+                Target<br><?= number_format($dailyTarget) ?> pcs
+            </div>
+            <div class="col-md-3">
+                FG<br><?= number_format($dailyFG) ?> pcs
+            </div>
+            <div class="col-md-3">
+                Total Weight<br><?= number_format($dailyWeight, 2) ?> kg
+            </div>
+            <div class="col-md-3">
+                Efficiency<br>
+                <span class="badge
+                    <?= $dailyEfficiency >= 95 ? 'bg-success'
+                       : ($dailyEfficiency >= 80 ? 'bg-primary'
+                       : 'bg-warning') ?>">
+                    <?= $dailyEfficiency ?> %
+                </span>
+            </div>
+        </div>
+    </div>
+</div>
 
-<!-- ================= LOOP PER SHIFT ================= -->
-<?php foreach ($data as $shiftData): ?>
+<!-- ================= PER SHIFT ================= -->
+<?php foreach ($data as $shiftIndex => $shiftData): ?>
+
+<form method="post" action="/die-casting/production/save-correction">
+<?= csrf_field() ?>
 
 <div class="card mb-4">
 
     <!-- ===== SHIFT HEADER ===== -->
-    <div class="card-header bg-light fw-bold">
-        <?= esc($shiftData['shift']['shift_name']) ?>
-        (<?= esc($shiftData['start_time']) ?> - <?= esc($shiftData['end_time']) ?>)
+    <div class="card-header bg-light fw-bold d-flex justify-content-between">
+        <div>
+            <?= esc($shiftData['shift']['shift_name']) ?>
+            (<?= esc($shiftData['start_time']) ?> - <?= esc($shiftData['end_time']) ?>)
+        </div>
+        <?php if ($shiftData['canEdit']): ?>
+            <span class="badge bg-warning text-dark">
+                ⏱ Koreksi Diizinkan
+            </span>
+        <?php else: ?>
+            <span class="badge bg-secondary">
+                🔒 Terkunci
+            </span>
+        <?php endif ?>
     </div>
 
-    <!-- ===== TABLE ===== -->
     <div class="card-body p-0">
-        <table class="table table-bordered table-sm text-center mb-0 align-middle">
+
+        <table class="table table-bordered table-sm align-middle text-center mb-0">
 
             <thead class="table-secondary">
             <tr>
@@ -51,50 +85,78 @@
                 <th>Target</th>
                 <th>FG</th>
                 <th>NG</th>
+                <th>Weight / pcs (kg)</th>
+                <th>Total Weight (kg)</th>
                 <th>Downtime (min)</th>
             </tr>
             </thead>
 
             <tbody>
-            <?php foreach ($shiftData['rows'] as $r): ?>
+            <?php foreach ($shiftData['rows'] as $i => $r): ?>
                 <tr>
                     <td>Line <?= esc($r['line_position']) ?></td>
                     <td><?= esc($r['machine_code']) ?></td>
                     <td><?= esc($r['part_no']) ?> - <?= esc($r['part_name']) ?></td>
                     <td><?= esc($r['target_per_shift']) ?></td>
 
+                    <!-- FG -->
                     <td>
-                        <input type="number"
-                               class="form-control form-control-sm text-end"
-                               value="<?= esc($r['fg']) ?>"
-                               <?= !$shiftData['canEdit'] ? 'readonly' : '' ?>>
+                        <?php if ($shiftData['canEdit']): ?>
+                            <input type="number"
+                                   name="items[<?= $i ?>][fg]"
+                                   value="<?= esc($r['fg']) ?>"
+                                   class="form-control form-control-sm text-end">
+                        <?php else: ?>
+                            <?= esc($r['fg']) ?>
+                        <?php endif ?>
                     </td>
 
+                    <!-- NG -->
                     <td>
-                        <input type="number"
-                               class="form-control form-control-sm text-end"
-                               value="<?= esc($r['ng']) ?>"
-                               <?= !$shiftData['canEdit'] ? 'readonly' : '' ?>>
+                        <?php if ($shiftData['canEdit']): ?>
+                            <input type="number"
+                                   name="items[<?= $i ?>][ng]"
+                                   value="<?= esc($r['ng']) ?>"
+                                   class="form-control form-control-sm text-end">
+                        <?php else: ?>
+                            <?= esc($r['ng']) ?>
+                        <?php endif ?>
                     </td>
 
+                    <td><?= number_format($r['weight'], 2) ?></td>
+                    <td><?= number_format($r['total_weight'], 2) ?></td>
+
+                    <!-- Downtime -->
                     <td>
-                        <input type="number"
-                               class="form-control form-control-sm text-end"
-                               value="<?= esc($r['downtime']) ?>"
-                               <?= !$shiftData['canEdit'] ? 'readonly' : '' ?>>
+                        <?php if ($shiftData['canEdit']): ?>
+                            <input type="number"
+                                   name="items[<?= $i ?>][downtime]"
+                                   value="<?= esc($r['downtime']) ?>"
+                                   class="form-control form-control-sm text-end">
+                        <?php else: ?>
+                            <?= esc($r['downtime']) ?>
+                        <?php endif ?>
                     </td>
+
+                    <!-- hidden id -->
+                    <input type="hidden"
+                           name="items[<?= $i ?>][hourly_id]"
+                           value="<?= esc($r['schedule_item_id']) ?>">
                 </tr>
             <?php endforeach ?>
             </tbody>
 
-            <!-- ===== TOTAL PER SHIFT ===== -->
+            <!-- ===== TOTAL SHIFT ===== -->
             <tfoot class="table-light fw-bold">
             <tr>
-                <td colspan="3" class="text-end">TOTAL</td>
+                <td colspan="3" class="text-end">TOTAL SHIFT</td>
                 <td><?= esc($shiftData['totalTarget']) ?></td>
                 <td><?= esc($shiftData['totalFG']) ?></td>
                 <td colspan="2">
-                    Efficiency :
+                    Weight<br><?= number_format($shiftData['totalWeight'], 2) ?> kg
+                </td>
+                <td colspan="2">
+                    Efficiency<br>
                     <span class="badge
                         <?= $shiftData['efficiency'] >= 95 ? 'bg-success'
                            : ($shiftData['efficiency'] >= 80 ? 'bg-primary'
@@ -106,16 +168,25 @@
             </tfoot>
 
         </table>
+
+        <!-- ===== SAVE BUTTON ===== -->
+        <?php if ($shiftData['canEdit']): ?>
+            <div class="p-3 text-end">
+                <button class="btn btn-warning">
+                    <i class="bi bi-pencil-square"></i>
+                    Simpan Koreksi Shift
+                </button>
+            </div>
+        <?php else: ?>
+            <div class="alert alert-secondary m-3 text-center">
+                ⛔ Koreksi hanya diperbolehkan ±1 jam dari akhir shift
+            </div>
+        <?php endif ?>
+
     </div>
-
-    <!-- ===== INFO LOCK ===== -->
-    <?php if (!$shiftData['canEdit']): ?>
-        <div class="alert alert-warning m-2">
-            ⛔ Koreksi hanya diperbolehkan pada waktu akhir shift
-        </div>
-    <?php endif ?>
-
 </div>
+
+</form>
 
 <?php endforeach ?>
 
