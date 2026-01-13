@@ -3,8 +3,13 @@
 
 <h4>DIE CASTING – DAILY PRODUCTION SCHEDULE</h4>
 
+<!-- DATE PICKER -->
 <form method="get" class="mb-3">
-    <input type="date" name="date" value="<?= $date ?>" class="form-control w-25">
+    <input type="date"
+           name="date"
+           value="<?= esc($date) ?>"
+           class="form-control w-25"
+           onchange="this.form.submit()">
 </form>
 
 <form method="post" action="/die-casting/daily-schedule/store">
@@ -13,22 +18,23 @@
 <?php foreach ($shifts as $shift): ?>
 <h5 class="mt-4"><?= esc($shift['shift_name']) ?></h5>
 
-<table class="table table-bordered table-sm text-center align-middle">
+<table class="table table-bordered table-sm text-center align-middle dc-table">
 <thead class="table-secondary">
 <tr>
-    <th>Mesin</th>
-    <th>Part</th>
-    <th>P</th>
-    <th>A</th>
-    <th>NG</th>
-    <th>Weight (kg)</th>
-    <th>Status</th>
+    <th class="col-machine">Mesin</th>
+    <th class="col-part">Part</th>
+    <th class="col-p">P</th>
+    <th class="col-a">A</th>
+    <th class="col-ng">NG</th>
+    <th class="col-weight">Weight (kg)</th>
+    <th class="col-status">Status</th>
 </tr>
 </thead>
-<tbody>
 
+<tbody>
 <?php foreach ($machines as $m):
-    $p = $map[$shift['id']][$m['id']] ?? null;
+    $p = $existing[$shift['id']][$m['id']] ?? null;
+    $key = $shift['id'].'_'.$m['id'];
 ?>
 <tr>
 <td><?= esc($m['machine_code']) ?></td>
@@ -37,70 +43,122 @@
 <select class="form-select form-select-sm product"
         data-machine="<?= $m['id'] ?>"
         data-shift="<?= $shift['id'] ?>"
-        name="items[<?= $shift['id'].$m['id'] ?>][product_id]">
+        data-selected="<?= $p['product_id'] ?? '' ?>"
+        name="items[<?= $key ?>][product_id]">
+    <option value="">-- pilih --</option>
 </select>
 </td>
 
 <td>
-<input type="number" max="1200"
+<input type="number"
+       max="1200"
        class="form-control form-control-sm qty-p text-end"
-       name="items[<?= $shift['id'].$m['id'] ?>][qty_p]"
+       name="items[<?= $key ?>][qty_p]"
        value="<?= $p['qty_p'] ?? 0 ?>">
 </td>
 
 <td><?= $p['qty_a'] ?? 0 ?></td>
 <td><?= $p['qty_ng'] ?? 0 ?></td>
-<td class="weight">0</td>
+
+<td class="weight text-end">
+    <?= isset($p['weight_kg']) ? number_format($p['weight_kg'],2) : '0.00' ?>
+</td>
 
 <td>
 <select class="form-select form-select-sm status"
-        name="items[<?= $shift['id'].$m['id'] ?>][status]">
+        name="items[<?= $key ?>][status]">
 <?php foreach(['Normal','Recovery','Trial','OFF'] as $s): ?>
-<option <?= ($p['status']??'Normal')==$s?'selected':'' ?>><?= $s ?></option>
+<option value="<?= $s ?>"
+    <?= ($p['status'] ?? 'Normal') === $s ? 'selected' : '' ?>>
+    <?= $s ?>
+</option>
 <?php endforeach ?>
 </select>
 </td>
 
-<input type="hidden" name="items[<?= $shift['id'].$m['id'] ?>][machine_id]" value="<?= $m['id'] ?>">
-<input type="hidden" name="items[<?= $shift['id'].$m['id'] ?>][shift_id]" value="<?= $shift['id'] ?>">
-<input type="hidden" name="items[<?= $shift['id'].$m['id'] ?>][date]" value="<?= $date ?>">
-<input type="hidden" name="items[<?= $shift['id'].$m['id'] ?>][qty_a]" value="<?= $p['qty_a'] ?? 0 ?>">
-<input type="hidden" name="items[<?= $shift['id'].$m['id'] ?>][qty_ng]" value="<?= $p['qty_ng'] ?? 0 ?>">
-<input type="hidden" class="weight-input" name="items[<?= $shift['id'].$m['id'] ?>][weight]" value="0">
-
+<input type="hidden" name="items[<?= $key ?>][machine_id]" value="<?= $m['id'] ?>">
+<input type="hidden" name="items[<?= $key ?>][shift_id]" value="<?= $shift['id'] ?>">
+<input type="hidden" name="items[<?= $key ?>][date]" value="<?= $date ?>">
+<input type="hidden" name="items[<?= $key ?>][qty_a]" value="<?= $p['qty_a'] ?? 0 ?>">
+<input type="hidden" name="items[<?= $key ?>][qty_ng]" value="<?= $p['qty_ng'] ?? 0 ?>">
+<input type="hidden" class="weight-input"
+       name="items[<?= $key ?>][weight]"
+       value="<?= isset($p['weight_kg'], $p['qty_p']) && $p['qty_p'] > 0
+                ? ($p['weight_kg'] / $p['qty_p'])
+                : 0 ?>">
 </tr>
 <?php endforeach ?>
-
 </tbody>
 </table>
 <?php endforeach ?>
 
-    <a href="/die-casting/daily-schedule/view?date=<?= $date ?>"
+<div class="d-flex gap-2 mt-3">
+    <button class="btn btn-success">
+        <i class="bi bi-save"></i> Simpan Schedule
+    </button>
+
+    <a href="/die-casting/daily-schedule/view?date=<?= esc($date) ?>"
        class="btn btn-outline-primary">
         <i class="bi bi-eye"></i> View Result
     </a>
+</div>
 
-<button class="btn btn-success">Simpan Schedule</button>
 </form>
 
+<!-- ================= CSS ================= -->
+<style>
+/* ===== TABLE LAYOUT ===== */
+.dc-table {
+    table-layout: fixed;
+}
 
+/* ===== COLUMN WIDTHS ===== */
+.col-machine { width: 90px; }
+.col-part    { width: 280px; }
+.col-p       { width: 80px; }   /* 🔥 DIPERSEMPIT */
+.col-a       { width: 70px; }
+.col-ng      { width: 70px; }
+.col-weight  { width: 120px; }
+.col-status  { width: 120px; }
 
+/* ===== INPUT P ===== */
+.qty-p {
+    max-width: 70px;
+    margin: auto;
+    padding-right: 6px;
+}
+</style>
 
-
+<!-- ================= JS ================= -->
 <script>
+/* =========================
+ * LOAD PRODUCT & TARGET
+ * ========================= */
 document.querySelectorAll('.product').forEach(sel=>{
-    fetch(`/die-casting/daily-schedule/product-target?machine_id=${sel.dataset.machine}&shift_id=${sel.dataset.shift}`)
-    .then(r=>r.json()).then(res=>{
-        sel.innerHTML='<option value="">-- pilih --</option>';
+    fetch(`/die-casting/daily-schedule/getProductAndTarget?machine_id=${sel.dataset.machine}&shift_id=${sel.dataset.shift}`)
+    .then(r=>r.json())
+    .then(res=>{
+        const selected = sel.dataset.selected;
+        sel.innerHTML = '<option value="">-- pilih --</option>';
+
         res.forEach(p=>{
-            sel.innerHTML+=`<option data-weight="${p.weight}" data-target="${p.target}" value="${p.id}">
-                ${p.part_no} - ${p.part_name}
-            </option>`;
+            const opt = document.createElement('option');
+            opt.value = p.id;
+            opt.textContent = `${p.part_no} - ${p.part_name}`;
+            opt.dataset.target = p.target;
+            opt.dataset.weight = p.weight;
+
+            if (selected && selected == p.id) opt.selected = true;
+            sel.appendChild(opt);
         });
+
+        if (selected) sel.dispatchEvent(new Event('change'));
     });
 
     sel.addEventListener('change',e=>{
         const opt = e.target.selectedOptions[0];
+        if (!opt) return;
+
         const tr  = e.target.closest('tr');
         const qty = tr.querySelector('.qty-p');
         const w   = tr.querySelector('.weight');
@@ -112,13 +170,39 @@ document.querySelectorAll('.product').forEach(sel=>{
     });
 });
 
+/* =========================
+ * VALIDASI QTY P ≤ 1200
+ * ========================= */
 document.querySelectorAll('.qty-p').forEach(inp=>{
     inp.addEventListener('input',()=>{
-        if (inp.value > 1200) inp.value = 1200;
+        let val = parseInt(inp.value || 0);
+        if (val > 1200) {
+            alert('Qty P tidak boleh lebih dari 1200');
+            val = 1200;
+            inp.value = 1200;
+        }
+
         const tr = inp.closest('tr');
         const w  = tr.querySelector('.weight');
         const wi = tr.querySelector('.weight-input');
-        w.innerText = (inp.value * wi.value).toFixed(2);
+
+        w.innerText = (val * (wi.value || 0)).toFixed(2);
+    });
+});
+
+/* =========================
+ * AUTO SET OFF → P = 0
+ * ========================= */
+document.querySelectorAll('.status').forEach(sel=>{
+    sel.addEventListener('change',()=>{
+        const tr  = sel.closest('tr');
+        const qty = tr.querySelector('.qty-p');
+        const w   = tr.querySelector('.weight');
+
+        if (sel.value === 'OFF') {
+            qty.value = 0;
+            w.innerText = '0.00';
+        }
     });
 });
 </script>

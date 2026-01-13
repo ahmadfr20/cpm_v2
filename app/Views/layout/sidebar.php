@@ -8,196 +8,138 @@ function isActive($path, $currentUrl)
 }
 ?>
 
-<div id="sidebar" class="sidebar p-3">
+<div id="sidebar" class="sidebar bg-dark p-3">
+<ul class="nav nav-pills flex-column">
 
-<ul class="nav nav-pills flex-column sidebar-nav">
+<!-- ================= DASHBOARD ================= -->
+<li class="nav-item">
+    <a class="nav-link <?= $currentUrl === 'dashboard' ? 'active' : '' ?>"
+       href="/dashboard">
+        <i class="bi bi-speedometer2 me-2"></i> Dashboard
+    </a>
+</li>
 
-    <!-- ================= DASHBOARD ================= -->
-    <li class="nav-item">
-        <a class="nav-link <?= $currentUrl === 'dashboard' ? 'active' : '' ?>"
-           href="/dashboard">
-            <i class="bi bi-speedometer2 me-2"></i>
-            <span>Dashboard</span>
-        </a>
-    </li>
+<!-- ================= MASTER DATA ================= -->
+<?php if (in_array($role, ['ADMIN','PPIC'])): ?>
+<li class="nav-item mt-3">
+    <a class="nav-link text-white d-flex justify-content-between align-items-center"
+       data-bs-toggle="collapse"
+       href="#menuMaster">
+        <span><i class="bi bi-database me-2"></i> Master Data</span>
+        <i class="bi bi-chevron-down"></i>
+    </a>
 
-    <!-- ================= MASTER DATA ================= -->
-    <?php if (in_array($role, ['ADMIN','PPIC'])): ?>
-    <li class="nav-section">MASTER DATA</li>
+    <div class="collapse <?= isActive('master',$currentUrl)?'show':'' ?>" id="menuMaster">
+        <ul class="nav flex-column ms-3">
+            <li><a class="nav-link <?= isActive('master/shift',$currentUrl)?'active':'' ?>" href="/master/shift">Shift</a></li>
+            <li><a class="nav-link <?= isActive('master/time-slot',$currentUrl)?'active':'' ?>" href="/master/time-slot">Time Slot</a></li>
+            <li><a class="nav-link <?= isActive('master/product',$currentUrl)?'active':'' ?>" href="/master/product">Product</a></li>
+            <li><a class="nav-link <?= isActive('master/machine',$currentUrl)?'active':'' ?>" href="/master/machine">Machine</a></li>
+            <li><a class="nav-link <?= isActive('master/production-standard',$currentUrl)?'active':'' ?>" href="/master/production-standard">Production Standard</a></li>
+            <li><a class="nav-link <?= isActive('master/customer',$currentUrl)?'active':'' ?>" href="/master/customer">Customer</a></li>
+        </ul>
+    </div>
+</li>
+<?php endif; ?>
 
-    <li class="nav-item">
-        <a class="nav-link nav-collapse <?= isActive('master',$currentUrl)?'active':'' ?>"
-           data-bs-toggle="collapse"
-           href="#menuMaster"
-           aria-expanded="<?= isActive('master',$currentUrl)?'true':'false' ?>">
-            <span>
-                <i class="bi bi-database me-2"></i> Master Data
-            </span>
-            <i class="bi bi-chevron-down"></i>
-        </a>
+<!-- ================= PPC ================= -->
+<li class="nav-item mt-3">
+<a class="nav-link text-white d-flex justify-content-between align-items-center"
+   data-bs-toggle="collapse"
+   href="#menuPPC">
+    <span><i class="bi bi-clipboard-check me-2"></i> PPC</span>
+    <i class="bi bi-chevron-down"></i>
+</a>
 
-        <div class="collapse <?= isActive('master',$currentUrl)?'show':'' ?>" id="menuMaster">
-            <ul class="nav flex-column nav-sub">
+<div class="collapse <?= isActive('ppc',$currentUrl)?'show':'' ?>" id="menuPPC">
+<ul class="nav flex-column ms-3">
 
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('master/shift',$currentUrl)?'active':'' ?>"
-                       href="/master/shift">Shift</a>
-                </li>
+<li><a class="nav-link" href="/ppc/good-receive">Good Receive</a></li>
 
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('master/time-slot',$currentUrl)?'active':'' ?>"
-                       href="/master/time-slot">Time Slot</a>
-                </li>
+<li class="text-secondary small mt-2">Die Casting</li>
+<li><a class="nav-link" href="/die-casting/daily-schedule">Daily Schedule</a></li>
+<li><a class="nav-link" href="/die-casting/dandori">Daily Dandori Schedule</a></li>
 
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('master/product',$currentUrl)?'active':'' ?>"
-                       href="/master/product">Product</a>
-                </li>
+<li class="text-secondary small mt-2">Machining</li>
+<li><a class="nav-link" href="/machining/daily-schedule">Daily Schedule</a></li>
+<li><a class="nav-link" href="/machining/dandori">Daily Dandori Schedule</a></li>
+<li><a class="nav-link" href="/machining/sub-assy-daily-schedule">Sub Assy Daily Schedule</a></li>
 
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('master/machine',$currentUrl)?'active':'' ?>"
-                       href="/master/machine">Machine</a>
-                </li>
+<li class="text-secondary small mt-2">Shotblast</li>
+<li><a class="nav-link" href="/shotblast/daily-schedule">Daily Schedule</a></li>
+<li><a class="nav-link" href="/shotblast/delivery-external">Delivery to External</a></li>
+<li><a class="nav-link" href="/shotblast/receive-external">Receiving from External</a></li>
 
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('master/production-standard',$currentUrl)?'active':'' ?>"
-                       href="/master/production-standard">Production Standard</a>
-                </li>
+<li class="text-secondary small mt-2">Baritori</li>
+<li><a class="nav-link" href="/baritori/daily-schedule">Daily Schedule</a></li>
+<li><a class="nav-link" href="/baritori/delivery-external">Delivery to External</a></li>
+<li><a class="nav-link" href="/baritori/receive-external">Receiving from External</a></li>
+<li><a class="nav-link" href="/baritori/internal">Internal Schedule</a></li>
 
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('master/customer',$currentUrl)?'active':'' ?>"
-                       href="/master/customer">Customer</a>
-                </li>
+<li class="text-secondary small mt-2">Painting</li>
+<li><a class="nav-link" href="/painting/daily-schedule">Daily Schedule</a></li>
+<li><a class="nav-link" href="/painting/delivery-external">Delivery to External</a></li>
+<li><a class="nav-link" href="/painting/receive-external">Receiving from External</a></li>
 
-            </ul>
-        </div>
-    </li>
-    <?php endif; ?>
+<li class="text-secondary small mt-2">Others</li>
+<li><a class="nav-link" href="/raw-material">Raw Material</a></li>
+<li><a class="nav-link" href="/maintenance">Maintenance</a></li>
+<li><a class="nav-link" href="/part-transfer/machining">Part Transfer to Machining</a></li>
 
+</ul>
+</div>
+</li>
 
-    <!-- ================= PPC ================= -->
-    <li class="nav-section">PPC</li>
+<!-- ================= CASTING ================= -->
+<li class="nav-item mt-3">
+<a class="nav-link text-white d-flex justify-content-between align-items-center"
+   data-bs-toggle="collapse"
+   href="#menuCasting">
+    <span><i class="bi bi-fire me-2"></i> Casting</span>
+    <i class="bi bi-chevron-down"></i>
+</a>
 
-    <li class="nav-item">
-        <a class="nav-link nav-collapse <?= 
-            isActive('production',$currentUrl) ||
-            isActive('material',$currentUrl) ||
-            isActive('die-casting',$currentUrl) ||
-            isActive('machining',$currentUrl)
-            ? 'active' : '' ?>"
-           data-bs-toggle="collapse"
-           href="#menuPPC"
-           aria-expanded="<?= 
-                isActive('production',$currentUrl) ||
-                isActive('material',$currentUrl) ||
-                isActive('die-casting',$currentUrl) ||
-                isActive('machining',$currentUrl)
-                ? 'true' : 'false' ?>">
-            <span>
-                <i class="bi bi-clipboard-check me-2"></i> PPC
-            </span>
-            <i class="bi bi-chevron-down"></i>
-        </a>
+<div class="collapse <?= isActive('casting',$currentUrl)?'show':'' ?>" id="menuCasting">
+<ul class="nav flex-column ms-3">
+<li><a class="nav-link" href="#">Request Ingot - SPK/SPB</a></li>
+<li><a class="nav-link" href="#">Melting Output</a></li>
+<li><a class="nav-link" href="#">Supply Ingot</a></li>
+<li><a class="nav-link" href="/die-casting/production">Production Result per Jam</a></li>
+<li><a class="nav-link" href="/die-casting/daily-production-achievement">Production Result per Shift</a></li>
+<li><a class="nav-link text-danger" href="/casting/scrap">Casting - Scrap</a></li>
+</ul>
+</div>
+</li>
 
-        <div class="collapse <?= 
-                isActive('production',$currentUrl) ||
-                isActive('material',$currentUrl) ||
-                isActive('die-casting',$currentUrl) ||
-                isActive('machining',$currentUrl)
-                ? 'show' : '' ?>" id="menuPPC">
+<!-- ================= MACHINING ================= -->
+<li class="nav-item mt-3">
+<a class="nav-link text-white d-flex justify-content-between align-items-center"
+   data-bs-toggle="collapse"
+   href="#menuMachining">
+    <span><i class="bi bi-gear me-2"></i> Machining</span>
+    <i class="bi bi-chevron-down"></i>
+</a>
 
-            <ul class="nav flex-column nav-sub">
+<div class="collapse <?= isActive('machining',$currentUrl)?'show':'' ?>" id="menuMachining">
+<ul class="nav flex-column ms-3">
+<li><a class="nav-link" href="/machining/hourly">Production Result per Jam</a></li>
+<li><a class="nav-link" href="/machining/production">Production Result per Shift</a></li>
+<li><a class="nav-link text-danger" href="#">Scrap</a></li>
 
-            <?php if (in_array($role, ['ADMIN','PPIC'])): ?>
+<li class="text-secondary small mt-2">Leak Test</li>
+<li><a class="nav-link" href="#">Production Result per Jam</a></li>
+<li><a class="nav-link" href="#">Production Result per Shift</a></li>
 
-                <li class="nav-subtitle">Production Plan</li>
+<li class="text-secondary small mt-2">Assy Bushing</li>
+<li><a class="nav-link" href="#">Production Result per Jam</a></li>
+<li><a class="nav-link" href="#">Production Result per Shift</a></li>
 
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('production/daily-schedule',$currentUrl)?'active':'' ?>"
-                       href="/production/daily-schedule">
-                        Daily Schedule
-                    </a>
-                </li>
-
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('production/daily-schedule/list',$currentUrl)?'active':'' ?>"
-                       href="/production/daily-schedule/list">
-                        Schedule List
-                    </a>
-                </li>
-
-                <li class="nav-subtitle">Raw Material</li>
-
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('material/incoming',$currentUrl)?'active':'' ?>"
-                       href="/material/incoming">Receiving</a>
-                </li>
-
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('material/transfer-dc',$currentUrl)?'active':'' ?>"
-                       href="/material/transfer-dc">Transfer to Die Casting</a>
-                </li>
-
-                <li class="nav-subtitle">Die Casting</li>
-
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('die-casting/daily-schedule',$currentUrl)?'active':'' ?>"
-                       href="/die-casting/daily-schedule">Schedule</a>
-                </li>
-
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('die-casting/dandori',$currentUrl)?'active':'' ?>"
-                       href="/die-casting/dandori">Daily Dandori</a>
-                </li>
-
-                <li class="nav-subtitle">Machining</li>
-
-                <li class="nav-item">
-                    <a class="nav-link <?= isActive('machining/schedule',$currentUrl)?'active':'' ?>"
-                       href="/machining/schedule">Daily Schedule</a>
-                </li>
-
-            <?php endif; ?>
-
-            </ul>
-        </div>
-    </li>
-
-
-    <!-- ================= PRODUCTION ================= -->
-    <?php if (in_array($role, ['ADMIN','PRODUCTION','OPERATOR'])): ?>
-
-    <li class="nav-section">PRODUCTION</li>
-
-    <li class="nav-item">
-        <a class="nav-link <?= isActive('die-casting/production',$currentUrl)?'active':'' ?>"
-           href="/die-casting/production">
-            <i class="bi bi-cpu me-2"></i> Die Casting Production
-        </a>
-    </li>
-
-    <li class="nav-item">
-        <a class="nav-link <?= isActive('die-casting/hourly',$currentUrl)?'active':'' ?>"
-           href="/die-casting/hourly">
-            <i class="bi bi-clock-history me-2"></i> Hourly DC
-        </a>
-    </li>
-
-    <li class="nav-item">
-        <a class="nav-link <?= isActive('machining/production',$currentUrl)?'active':'' ?>"
-           href="/machining/production">
-            <i class="bi bi-gear-wide-connected me-2"></i> Machining Shift
-        </a>
-    </li>
-
-    <li class="nav-item">
-        <a class="nav-link <?= isActive('machining/hourly',$currentUrl)?'active':'' ?>"
-           href="/machining/hourly">
-            <i class="bi bi-clock-history me-2"></i> Hourly Machining
-        </a>
-    </li>
-
-    <?php endif; ?>
+<li class="text-secondary small mt-2">Assy Shaft</li>
+<li><a class="nav-link" href="#">Production Result per Jam</a></li>
+<li><a class="nav-link" href="#">Production Result per Shift</a></li>
+</ul>
+</div>
+</li>
 
 </ul>
 </div>

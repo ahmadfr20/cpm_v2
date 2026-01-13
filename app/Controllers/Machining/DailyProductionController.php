@@ -4,7 +4,7 @@ namespace App\Controllers\Machining;
 
 use App\Controllers\BaseController;
 
-class HourlyController extends BaseController
+class DailyProductionController extends BaseController
 {
     public function index()
     {
@@ -13,7 +13,7 @@ class HourlyController extends BaseController
         $operator = session()->get('fullname') ?? '-';
 
         /**
-         * HANYA SHIFT MACHINING
+         * 🔥 SHIFT MACHINING SAJA
          */
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
@@ -26,15 +26,14 @@ class HourlyController extends BaseController
         foreach ($shifts as &$shift) {
 
             /**
-             * TIME SLOT PER SHIFT
+             * TIME SLOT
              */
             $shift['slots'] = $db->table('shift_time_slots sts')
                 ->select('ts.id, ts.time_start, ts.time_end')
                 ->join('time_slots ts', 'ts.id = sts.time_slot_id')
                 ->where('sts.shift_id', $shift['id'])
                 ->orderBy('ts.time_start')
-                ->get()
-                ->getResultArray();
+                ->get()->getResultArray();
 
             /**
              * TOTAL MENIT SHIFT
@@ -43,22 +42,20 @@ class HourlyController extends BaseController
             foreach ($shift['slots'] as &$slot) {
                 $start = strtotime($slot['time_start']);
                 $end   = strtotime($slot['time_end']);
-                if ($end <= $start) {
-                    $end += 86400;
-                }
+                if ($end <= $start) $end += 86400;
                 $slot['minute'] = ($end - $start) / 60;
                 $totalMinute += $slot['minute'];
             }
             $shift['total_minute'] = $totalMinute;
 
             /**
-             * TARGET PER SHIFT (AMBIL DARI DAILY SCHEDULE MACHINING)
+             * 🔥 DAILY SCHEDULE MACHINING
              */
             $shift['items'] = $db->table('daily_schedule_items dsi')
                 ->select('
                     dsi.machine_id,
-                    m.line_position,
                     m.machine_code,
+                    m.line_position,
                     dsi.product_id,
                     p.part_no,
                     p.part_name,
@@ -76,7 +73,7 @@ class HourlyController extends BaseController
                 ->getResultArray();
 
             /**
-             * HOURLY MAP
+             * 🔥 HOURLY MAP
              */
             $hourly = $db->table('machining_hourly')
                 ->where('production_date', $date)
@@ -93,20 +90,22 @@ class HourlyController extends BaseController
             }
         }
 
-        return view('machining/hourly/index', [
+        return view('machining/daily_production/index', [
             'date'     => $date,
             'operator' => $operator,
             'shifts'   => $shifts
         ]);
     }
 
+    /**
+     * SIMPAN HOURLY
+     */
     public function store()
     {
         $db    = db_connect();
         $items = $this->request->getPost('items') ?? [];
 
         foreach ($items as $row) {
-
             $db->table('machining_hourly')->replace([
                 'production_date' => $row['date'],
                 'shift_id'        => $row['shift_id'],
@@ -116,12 +115,11 @@ class HourlyController extends BaseController
                 'qty_fg'          => (int)($row['fg'] ?? 0),
                 'qty_ng'          => (int)($row['ng'] ?? 0),
                 'ng_category'     => $row['ng_remark'] ?? null,
-                'downtime'        => (int)($row['downtime'] ?? 0),
-                'remark'          => $row['remark'] ?? null,
                 'created_at'      => date('Y-m-d H:i:s')
             ]);
         }
 
-        return redirect()->back()->with('success', 'Hourly Machining tersimpan');
+        return redirect()->back()
+            ->with('success', 'Hourly production machining tersimpan');
     }
 }

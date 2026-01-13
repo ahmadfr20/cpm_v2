@@ -29,157 +29,77 @@ body {
     align-items: center;
     padding: 0 16px;
     position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
+    inset: 0 0 auto 0;
     z-index: 1100;
 }
 
 /* ================= SIDEBAR ================= */
 .sidebar {
     position: fixed;
-    top: 56px;
+    top: 28px;
     left: 0;
     bottom: 0;
     width: 260px;
     background: #1e293b;
     color: #cbd5e1;
     overflow-y: auto;
-    transform: translateX(-100%);
     transition: transform .25s ease;
-    z-index: 1200;
+    z-index: 1000;
 }
 
+/* desktop default open */
 body.sidebar-open .sidebar {
     transform: translateX(0);
 }
 
-.sidebar .nav-link {
-    color: #cbd5e1;
-    padding: 8px 12px;
-    border-radius: 6px;
-    font-size: 14px;
-}
-
-.sidebar .nav-link:hover {
-    background: #334155;
-    color: #fff;
-}
-
-.sidebar .nav-link.active {
-    background: #475569;
-    color: #fff;
-    font-weight: 500;
-}
-
-.nav-section {
-    margin: 16px 0 6px;
-    font-size: 11px;
-    text-transform: uppercase;
-    color: #94a3b8;
-}
-
-.nav-sub {
-    padding-left: 12px;
-}
-
-/* ================= SIDEBAR ================= */
-.sidebar-inner {
-    padding: 12px;
-}
-
-.sidebar-nav .nav-link {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    color: #cbd5e1;
-    font-size: 14px;
-    padding: 8px 10px;
-    border-radius: 6px;
-}
-
-.sidebar-nav .nav-link i {
-    width: 18px;
-    text-align: center;
-    font-size: 15px;
-}
-
-.sidebar-nav .nav-link:hover {
-    background-color: #334155;
-    color: #fff;
-}
-
-.sidebar-nav .nav-link.active {
-    background-color: #475569;
-    color: #fff;
-    font-weight: 500;
-}
-
-.nav-collapse {
-    justify-content: space-between;
-}
-
-.nav-collapse .caret {
-    font-size: 12px;
-    opacity: .8;
-}
-
-.nav-sub {
-    margin-top: 6px;
-    padding-left: 18px;
-}
-
-.nav-sub .nav-link {
-    font-size: 13px;
-    padding: 6px 10px;
-}
-
-.nav-section {
-    margin: 18px 0 6px;
-    font-size: 11px;
-    letter-spacing: .08em;
-    text-transform: uppercase;
-    color: #94a3b8;
-}
-
-.nav-subtitle {
-    margin: 10px 0 4px;
-    font-size: 11px;
-    color: #94a3b8;
-}
-
-
-
-/* ================= OVERLAY ================= */
-.sidebar-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0,0,0,.4);
-    z-index: 1100;
-    display: none;
-}
-
-body.sidebar-open .sidebar-overlay {
-    display: block;
+body:not(.sidebar-open) .sidebar {
+    transform: translateX(-260px);
 }
 
 /* ================= MAIN CONTENT ================= */
 .main-content {
-    padding: 72px 16px 16px;
+    padding: 72px 20px 20px;
     height: 100vh;
     overflow-y: auto;
-    overflow-x: hidden;
+    transition: margin-left .25s ease;
 }
 
-/* ================= TABLE SCROLL ================= */
-.table-scroll {
-    width: 100%;
-    overflow-x: auto;
+/* sidebar open → content geser */
+body.sidebar-open .main-content {
+    margin-left: 260px;
 }
 
-.production-table {
-    min-width: 2600px;
-    table-layout: fixed;
+/* sidebar close */
+body:not(.sidebar-open) .main-content {
+    margin-left: 0;
+}
+
+/* ================= OVERLAY (MOBILE) ================= */
+.sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0,0,0,.4);
+    z-index: 900;
+    display: none;
+}
+
+/* mobile behavior */
+@media (max-width: 992px) {
+    body.sidebar-open .sidebar-overlay {
+        display: block;
+    }
+
+    body.sidebar-open .main-content {
+        margin-left: 0;
+    }
+
+    .sidebar {
+        transform: translateX(-260px);
+    }
+
+    body.sidebar-open .sidebar {
+        transform: translateX(0);
+    }
 }
 
 /* ================= TOGGLE BUTTON ================= */
@@ -189,13 +109,47 @@ body.sidebar-open .sidebar-overlay {
     color: #fff;
     font-size: 20px;
     margin-right: 12px;
+    cursor: pointer;
 }
+
+/* ================= SIDEBAR LINK COLOR FIX ================= */
+.sidebar a,
+.sidebar .nav-link {
+    color: #cbd5e1 !important;
+    text-decoration: none;
+}
+
+/* HOVER */
+.sidebar .nav-link:hover {
+    background-color: #334155;
+    color: #ffffff !important;
+}
+
+/* ACTIVE */
+.sidebar .nav-link.active {
+    background-color: #475569;
+    color: #ffffff !important;
+    font-weight: 500;
+}
+
+/* SUB MENU (LEVEL DALAM) */
+.sidebar .nav-sub .nav-link,
+.sidebar ul ul .nav-link {
+    color: #cbd5e1 !important;
+}
+
+/* SUB MENU ACTIVE */
+.sidebar ul ul .nav-link.active {
+    background-color: #475569;
+    color: #ffffff !important;
+}
+
 </style>
 </head>
 
-<body>
+<body class="sidebar-open"><!-- default OPEN -->
 
-<!-- HEADER -->
+<!-- ================= HEADER ================= -->
 <header class="app-header">
     <button id="toggleSidebarBtn" onclick="toggleSidebar()">
         <i class="bi bi-list"></i>
@@ -211,15 +165,15 @@ body.sidebar-open .sidebar-overlay {
     </div>
 </header>
 
-<!-- SIDEBAR -->
+<!-- ================= SIDEBAR ================= -->
 <aside class="sidebar">
     <?= $this->include('layout/sidebar') ?>
 </aside>
 
-<!-- OVERLAY -->
+<!-- ================= OVERLAY ================= -->
 <div class="sidebar-overlay" onclick="toggleSidebar()"></div>
 
-<!-- MAIN -->
+<!-- ================= MAIN ================= -->
 <main class="main-content">
     <?= $this->renderSection('content') ?>
 </main>

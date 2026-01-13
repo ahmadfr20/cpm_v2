@@ -108,4 +108,40 @@ class MachineController extends BaseController
         return redirect()->to('/master/machine')
             ->with('success', 'Produk machine berhasil diperbarui');
     }
+
+    /* ===============================
+ * EDIT MACHINE
+ * =============================== */
+    public function edit($id)
+    {
+        $machine = $this->machineModel->find($id);
+
+        if (!$machine) {
+            throw new \CodeIgniter\Exceptions\PageNotFoundException('Machine tidak ditemukan');
+        }
+
+        return view('master/machine/edit', [
+            'machine'   => $machine,
+            'processes' => $this->processModel->findAll(),
+            'lines'     => ['Machining', 'Die Casting']
+        ]);
+    }
+
+    /* ===============================
+    * UPDATE MACHINE
+    * =============================== */
+    public function update($id)
+    {
+        $this->machineModel->update($id, [
+            'machine_code'    => $this->request->getPost('machine_code'),
+            'machine_name'    => $this->request->getPost('machine_name'),
+            'process_id'      => $this->request->getPost('process_id'),
+            'production_line' => $this->request->getPost('production_line'),
+            'line_position'   => $this->request->getPost('line_position'),
+        ]);
+
+        return redirect()->to('/master/machine')
+            ->with('success', 'Machine berhasil diperbarui');
+    }
+
 }

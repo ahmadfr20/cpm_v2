@@ -8,13 +8,18 @@ class ProductionController extends BaseController
 {
     public function index()
     {
-        $db   = db_connect();
-        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        $db       = db_connect();
+        $date     = $this->request->getGet('date') ?? date('Y-m-d');
+        $operator = session()->get('fullname') ?? '-';
 
-        /* ================= SHIFT AKTIF ================= */
+        /**
+         * 🔥 SHIFT MACHINING SAJA (MC)
+         */
         $shifts = $db->table('shifts')
+            ->select('id, shift_code, shift_name')
             ->where('is_active', 1)
-            ->orderBy('id')
+            ->like('shift_name', 'MC')
+            ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
             ->get()
             ->getResultArray();
 
@@ -28,11 +33,14 @@ class ProductionController extends BaseController
 
         foreach ($shifts as $shift) {
 
-            /* ================= JAM SHIFT ================= */
+            /**
+             * ================= JAM SHIFT
+             */
             $slots = $db->table('shift_time_slots sts')
-                ->select('ts.time_start, ts.time_end')
+                ->select('ts.id, ts.time_start, ts.time_end')
                 ->join('time_slots ts', 'ts.id = sts.time_slot_id')
                 ->where('sts.shift_id', $shift['id'])
+                ->orderBy('ts.time_start')
                 ->get()
                 ->getResultArray();
 
@@ -48,28 +56,32 @@ class ProductionController extends BaseController
                 }
             }
 
-            /* ================= DATA ================= */
+            /**
+             * ================= DATA PLAN + ACTUAL
+             */
             $rows = $db->table('daily_schedule_items dsi')
                 ->select('
-                    dsi.id schedule_item_id,
+                    dsi.id              AS schedule_item_id,
+                    dsi.target_per_shift,
+                    m.id                AS machine_id,
                     m.machine_code,
                     m.line_position,
+                    p.id                AS product_id,
                     p.part_no,
                     p.part_name,
-                    dsi.target_per_shift,
-                    IFNULL(SUM(mh.qty_fg),0) fg,
-                    IFNULL(SUM(mh.qty_ng),0) ng,
-                    IFNULL(SUM(mh.downtime),0) downtime
+                    IFNULL(SUM(mh.qty_fg),0) AS fg,
+                    IFNULL(SUM(mh.qty_ng),0) AS ng,
+                    IFNULL(SUM(mh.downtime),0) AS downtime
                 ')
-                ->join('daily_schedules ds', 'ds.id=dsi.daily_schedule_id')
-                ->join('machines m', 'm.id=dsi.machine_id')
-                ->join('products p', 'p.id=dsi.product_id')
+                ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
+                ->join('machines m', 'm.id = dsi.machine_id')
+                ->join('products p', 'p.id = dsi.product_id')
                 ->join(
                     'machining_hourly mh',
-                    'mh.machine_id=dsi.machine_id
-                     AND mh.product_id=dsi.product_id
-                     AND mh.shift_id=ds.shift_id
-                     AND mh.production_date="'.$date.'"',
+                    'mh.machine_id = dsi.machine_id
+                     AND mh.product_id = dsi.product_id
+                     AND mh.shift_id = ds.shift_id
+                     AND mh.production_date = "'.$date.'"',
                     'left'
                 )
                 ->where('ds.schedule_date', $date)
@@ -80,7 +92,9 @@ class ProductionController extends BaseController
                 ->get()
                 ->getResultArray();
 
-            /* ================= TOTAL SHIFT ================= */
+            /**
+             * ================= TOTAL SHIFT
+             */
             $totalTarget = 0;
             $totalFG     = 0;
             $totalNG     = 0;
@@ -93,7 +107,7 @@ class ProductionController extends BaseController
                 $totalDT     += (int)$r['downtime'];
             }
 
-            /* ================= GRAND ================= */
+            /* ===== GRAND ===== */
             $grandTarget += $totalTarget;
             $grandFG     += $totalFG;
             $grandNG     += $totalNG;
@@ -101,6 +115,7 @@ class ProductionController extends BaseController
 
             $result[] = [
                 'shift'       => $shift,
+                'slots'       => $slots,
                 'start_time'  => $startTime,
                 'end_time'    => $endTime,
                 'rows'        => $rows,
@@ -115,20 +130,26 @@ class ProductionController extends BaseController
             ];
         }
 
+        /* ================= DAILY EFFICIENCY ================= */
+        $dailyEfficiency = $grandTarget > 0
+            ? round(($grandFG / $grandTarget) * 100, 1)
+            : 0;
+
         return view('machining/production/index', [
-            'date'   => $date,
-            'data'   => $result,
-            'dailyTarget' => $grandTarget,
-            'dailyFG'     => $grandFG,
-            'dailyNG'     => $grandNG,
-            'dailyDT'     => $grandDT,
-            'dailyEfficiency' => $grandTarget > 0
-                ? round(($grandFG / $grandTarget) * 100, 1)
-                : 0
+            'date'            => $date,
+            'operator'        => $operator,
+            'data'            => $result,
+            'dailyTarget'     => $grandTarget,
+            'dailyFG'         => $grandFG,
+            'dailyNG'         => $grandNG,
+            'dailyDT'         => $grandDT,
+            'dailyEfficiency' => $dailyEfficiency
         ]);
     }
 
-    /* ================= WINDOW KOREKSI ================= */
+    /**
+     * ================= WINDOW KOREKSI
+     */
     private function canEdit($date, $start, $end)
     {
         if (!$start || !$end) return false;
@@ -137,30 +158,10 @@ class ProductionController extends BaseController
         $start = strtotime("$date $start");
         $end   = strtotime("$date $end");
 
-        // shift malam
         if ($end <= $start) {
-            $end += 86400;
+            $end += 86400; // shift malam
         }
 
         return ($now >= ($end - 3600) && $now <= ($end + 3600));
-    }
-
-    /* ================= SIMPAN KOREKSI ================= */
-    public function saveCorrection()
-    {
-        $db = db_connect();
-
-        foreach ($this->request->getPost('items') as $item) {
-            $db->table('machining_hourly')
-                ->where('id', $item['hourly_id'])
-                ->update([
-                    'qty_fg'  => $item['fg'],
-                    'qty_ng'  => $item['ng'],
-                    'downtime'=> $item['downtime'],
-                ]);
-        }
-
-        return redirect()->back()
-            ->with('success', 'Koreksi machining berhasil disimpan');
     }
 }

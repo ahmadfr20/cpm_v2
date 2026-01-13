@@ -160,10 +160,8 @@ $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
     );
 
     // (opsional) AJAX: product + target
-    $routes->get(
-        'daily-schedule/product-target',
-        'DieCasting\DailyScheduleController::getProductAndTarget'
-    );
+    $routes->get('daily-schedule/getProductAndTarget', 
+        'DieCasting\DailyScheduleController::getProductAndTarget');
 
     // =====================================================
     // 4️⃣ PRODUCTION PER SHIFT (OPERATOR / PRODUCTION)
@@ -204,6 +202,20 @@ $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
         'DieCasting\DandoriController::store'
     );
 
+        // =====================================================
+    // 5️⃣ DAILY PRODUCTION ACHIEVEMENT (END SHIFT KOREKSI)
+    // =====================================================
+    // Rekap per shift + koreksi FG, NG, NG Category, Downtime
+    $routes->get(
+        'daily-production-achievement',
+        'DieCasting\DailyProductionAchievementController::index'
+    );
+
+    $routes->post(
+        'daily-production-achievement/store',
+        'DieCasting\DailyProductionAchievementController::store'
+    );
+
 });
 
 
@@ -239,18 +251,57 @@ $routes->group('baritori', ['filter' => 'auth'], function ($routes) {
 
 $routes->group('machining', ['filter' => 'auth'], function ($routes) {
 
-    $routes->get('production', 'Machining\ProductionController::index');
-    $routes->post('production/store', 'Machining\ProductionController::store');
+    /* ================= DAILY PRODUCTION ================= */
+    $routes->get(
+        'production',
+        'Machining\ProductionController::index'
+    );
 
+    $routes->post(
+        'production/store',
+        'Machining\ProductionController::store'
+    );
+
+    /* ================= DAILY SCHEDULE ================= */
+    $routes->get(
+        'daily-schedule',
+        'Machining\DailyScheduleController::index'
+    );
+
+    $routes->post(
+        'daily-schedule/store',
+        'Machining\DailyScheduleController::store'
+    );
+
+    $routes->get(
+        'daily-schedule/product-target',
+        'Machining\DailyScheduleController::getProductAndTarget'
+    );
+
+    $routes->get(
+        'daily-schedule/result',
+        'Machining\DailyScheduleResultController::index'
+    );
+
+    /* ================= HOURLY INPUT ================= */
+    $routes->get(
+        'hourly',
+        'Machining\HourlyController::index'
+    );
+
+    $routes->post(
+        'hourly/store',
+        'Machining\HourlyController::store'
+    );
+
+    /* ================= SUPPORT MODULE ================= */
     $routes->get('dandori', 'Machining\DandoriController::index');
     $routes->post('dandori/store', 'Machining\DandoriController::store');
 
     $routes->get('sub-assy', 'Machining\SubAssyController::index');
     $routes->post('sub-assy/store', 'Machining\SubAssyController::store');
-
-        $routes->get('hourly', 'Machining\HourlyController::index');
-    $routes->post('hourly/store', 'Machining\HourlyController::store');
 });
+
 
 $routes->group('painting', ['filter' => 'auth'], function ($routes) {
 
