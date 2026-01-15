@@ -68,4 +68,19 @@ class ProductionStandardModel extends Model
             ->get()
             ->getResultArray();
     }
+
+    public function getWithRelation()
+    {
+        return $this
+            ->select('
+                production_standards.*,
+                m.machine_code,
+                p.part_no,
+                p.part_name
+            ')
+            ->join('machines m', 'm.id = production_standards.machine_id')
+            ->join('products p', 'p.id = production_standards.product_id')
+            ->orderBy('m.machine_code')
+            ->orderBy('p.part_no');
+    }
 }

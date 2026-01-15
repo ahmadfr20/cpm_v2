@@ -8,7 +8,6 @@
     <strong>Operator:</strong> <?= esc($operator) ?>
 </div>
 
-<!-- FILTER TANGGAL -->
 <form method="get" class="mb-3">
     <label class="fw-bold me-2">Tanggal Produksi:</label>
     <input type="date"
@@ -49,7 +48,7 @@
     <th class="col-slot-target">Target</th>
     <th class="col-slot-fg">FG</th>
     <th class="col-slot-ng">NG</th>
-    <th class="col-slot-remark">Ket.</th>
+    <th class="col-slot-remark">NG Category</th>
 <?php endforeach ?>
 </tr>
 </thead>
@@ -101,12 +100,18 @@ $exist = $shift['hourly_map']
 </td>
 
 <td>
-<input type="text"
-       class="form-control form-control-sm slot-input"
-       data-start="<?= $slot['time_start'] ?>"
-       data-end="<?= $slot['time_end'] ?>"
-       value="<?= $exist['ng_category'] ?? '' ?>"
-       name="items[<?= $shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'] ?>][ng_remark]">
+<select class="form-select form-select-sm slot-input"
+        data-start="<?= $slot['time_start'] ?>"
+        data-end="<?= $slot['time_end'] ?>"
+        name="items[<?= $shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'] ?>][ng_category_id]">
+    <option value="">-- NG --</option>
+    <?php foreach ($ngCategories as $ng): ?>
+        <option value="<?= $ng['id'] ?>"
+            <?= ($exist['ng_category_id'] ?? '') == $ng['id'] ? 'selected' : '' ?>>
+            <?= esc($ng['ng_code'].' - '.$ng['ng_name']) ?>
+        </option>
+    <?php endforeach ?>
+</select>
 </td>
 
 <input type="hidden" name="items[<?= $shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'] ?>][shift_id]" value="<?= $shift['id'] ?>">
@@ -121,24 +126,20 @@ $exist = $shift['hourly_map']
 </tbody>
 
 <tfoot>
-
-<!-- TOTAL PER JAM -->
 <tr class="total-slot-row fw-bold">
     <td colspan="2" class="text-end">TOTAL / JAM</td>
     <?php foreach ($shift['slots'] as $slot): ?>
         <td class="total-slot-target text-center">0</td>
         <td class="total-slot-fg text-center">0</td>
         <td class="total-slot-ng text-center">0</td>
-        <td class="total-slot-eff text-center">0%</td>
+        <td class="total-slot-eff text-center"> </td>
     <?php endforeach ?>
 </tr>
-
 </tfoot>
 
 </table>
 </div>
 
-<!-- ===== SUMMARY SHIFT (DI LUAR TABEL) ===== -->
 <div class="shift-summary mt-2 mb-4 p-2 border rounded bg-light">
     <strong>SUMMARY <?= esc($shift['shift_name']) ?> :</strong>
     <span class="ms-3">FG: <span class="total-fg">0</span></span>
@@ -149,12 +150,12 @@ $exist = $shift['hourly_map']
 <?php endforeach ?>
 
 <button class="btn btn-success mt-3">
-<i class="bi bi-save"></i> Simpan
+    <i class="bi bi-save"></i> Simpan
 </button>
 
 </form>
 
-<!-- ================= CSS ================= -->
+<!-- ================= CSS & JS ================= -->
 <style>
 .table-scroll{overflow-x:auto}
 .production-table{min-width:2600px}
@@ -166,7 +167,6 @@ $exist = $shift['hourly_map']
 .slot-header-active{background:#fde68a!important}
 </style>
 
-<!-- ================= JS ================= -->
 <script>
 function isSlotActive(start,end){
  const now=new Date()
@@ -207,32 +207,7 @@ function calcTotals(){
  })
 }
 
-function calcSlotTotals(){
- document.querySelectorAll('.production-table').forEach(t=>{
-  const rows=t.querySelectorAll('tbody tr')
-  const slots=t.querySelectorAll('.total-slot-target').length
-  let tg=Array(slots).fill(0),
-      fg=Array(slots).fill(0),
-      ng=Array(slots).fill(0)
 
-  rows.forEach(r=>{
-   const c=r.querySelectorAll('td')
-   for(let i=2;i<c.length;i+=4){
-    const idx=(i-2)/4
-    tg[idx]+=+c[i].innerText||0
-    fg[idx]+=+(c[i+1].querySelector('.fg')?.value||0)
-    ng[idx]+=+(c[i+2].querySelector('.ng')?.value||0)
-   }
-  })
-
-  t.querySelectorAll('.total-slot-target').forEach((e,i)=>e.innerText=tg[i])
-  t.querySelectorAll('.total-slot-fg').forEach((e,i)=>e.innerText=fg[i])
-  t.querySelectorAll('.total-slot-ng').forEach((e,i)=>e.innerText=ng[i])
-  t.querySelectorAll('.total-slot-eff').forEach((e,i)=>{
-   e.innerText=tg[i]?((fg[i]/tg[i])*100).toFixed(1)+'%':'0%'
-  })
- })
-}
 
 function recalcAll(){calcTotals();calcSlotTotals()}
 updateActiveSlots();recalcAll()

@@ -25,10 +25,16 @@ class ProductionStandardController extends BaseController
      * ========================= */
     public function index()
     {
+        $standards = $this->standardModel
+            ->getWithRelation()
+            ->paginate(15, 'standards'); // 🔥 pagination group
+
         return view('master/production_standard/index', [
-            'standards' => $this->standardModel->getAllWithRelation()
+            'standards' => $standards,
+            'pager'     => $this->standardModel->pager
         ]);
     }
+
 
     /* =========================
      * CREATE

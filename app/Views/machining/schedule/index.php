@@ -37,7 +37,7 @@
     <th>MESIN</th>
     <th>PART</th>
     <th>CT</th>
-    <th>P</th>
+    <th>Planning</th>
     <th>A</th>
 </tr>
 </thead>

@@ -6,14 +6,15 @@ use CodeIgniter\Model;
 
 class ProductModel extends Model
 {
-    protected $table = 'products';
+    protected $table      = 'products';
     protected $primaryKey = 'id';
 
     protected $allowedFields = [
         'part_no',
         'part_name',
         'customer_id',
-        'weight',
+        'weight_ascas',
+        'weight_runner',
         'notes'
     ];
 
@@ -23,10 +24,7 @@ class ProductModel extends Model
     public function getProducts($keyword = null, $customerId = null)
     {
         $builder = $this->db->table('products p')
-            ->select('
-                p.*,
-                c.customer_name
-            ')
+            ->select('p.*, c.customer_name')
             ->join('customers c', 'c.id = p.customer_id', 'left');
 
         if ($keyword) {
@@ -44,6 +42,26 @@ class ProductModel extends Model
             ->orderBy('p.part_name')
             ->get()
             ->getResultArray();
+    }
+
+    public function filterProducts($keyword = null, $customerId = null)
+    {
+        $builder = $this
+            ->select('products.*, customers.customer_name')
+            ->join('customers', 'customers.id = products.customer_id', 'left');
+
+        if ($keyword) {
+            $builder->groupStart()
+                ->like('products.part_no', $keyword)
+                ->orLike('products.part_name', $keyword)
+                ->groupEnd();
+        }
+
+        if ($customerId) {
+            $builder->where('products.customer_id', $customerId);
+        }
+
+        return $builder->orderBy('products.part_name');
     }
 
     /**

@@ -4,7 +4,7 @@ namespace App\Database\Seeds;
 
 use CodeIgniter\Database\Seeder;
 
-class ProductSeeder extends Seeder
+class ProductSeederV2 extends Seeder
 {
     public function run()
     {
@@ -144,14 +144,33 @@ class ProductSeeder extends Seeder
         ];
 
         foreach ($products as $p) {
-            $this->db->query(
-                "INSERT INTO products (part_no, part_name, weight_ascas, weight_runner)
-                 VALUES (?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE
-                    weight_ascas = VALUES(weight_ascas),
-                    weight_runner = VALUES(weight_runner)",
-                [$p[0], $p[0], $p[1], $p[2]]
-            );
+
+            // cari existing by part_no atau part_name
+            $existing = $this->db->table('products')
+                ->groupStart()
+                    ->where('part_no', $p[0])
+                    ->orWhere('part_name', $p[0])
+                ->groupEnd()
+                ->get()
+                ->getRowArray();
+
+            if ($existing) {
+                // UPDATE
+                $this->db->table('products')
+                    ->where('id', $existing['id'])
+                    ->update([
+                        'weight_ascas'  => $p[1],
+                        'weight_runner' => $p[2],
+                    ]);
+            } else {
+                // INSERT
+                $this->db->table('products')->insert([
+                    'part_no'        => $p[0],
+                    'part_name'      => $p[0],
+                    'weight_ascas'   => $p[1],
+                    'weight_runner'  => $p[2],
+                ]);
+            }
         }
     }
 }

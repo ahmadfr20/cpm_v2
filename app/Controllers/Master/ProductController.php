@@ -22,13 +22,19 @@ class ProductController extends BaseController
         $keyword    = $this->request->getGet('keyword');
         $customerId = $this->request->getGet('customer_id');
 
+        $products = $this->productModel
+            ->filterProducts($keyword, $customerId)
+            ->paginate(15, 'products');
+
         return view('master/product/index', [
-            'products'  => $this->productModel->getProducts($keyword, $customerId),
-            'customers' => $this->customerModel->findAll(),
-            'keyword'   => $keyword,
-            'customerId'=> $customerId
+            'products'   => $products,
+            'pager'      => $this->productModel->pager, // 🔥 WAJIB
+            'customers'  => $this->customerModel->findAll(),
+            'keyword'    => $keyword,
+            'customerId' => $customerId
         ]);
     }
+
 
     public function create()
     {
@@ -39,7 +45,14 @@ class ProductController extends BaseController
 
     public function store()
     {
-        $this->productModel->insert($this->request->getPost());
+        $this->productModel->insert([
+            'part_no'        => $this->request->getPost('part_no'),
+            'part_name'      => $this->request->getPost('part_name'),
+            'customer_id'    => $this->request->getPost('customer_id'),
+            'weight_ascas'   => $this->request->getPost('weight_ascas'),
+            'weight_runner'  => $this->request->getPost('weight_runner'),
+            'notes'          => $this->request->getPost('notes'),
+        ]);
 
         return redirect()->to('/master/product')
             ->with('success', 'Product berhasil ditambahkan');
@@ -55,7 +68,14 @@ class ProductController extends BaseController
 
     public function update($id)
     {
-        $this->productModel->update($id, $this->request->getPost());
+        $this->productModel->update($id, [
+            'part_no'        => $this->request->getPost('part_no'),
+            'part_name'      => $this->request->getPost('part_name'),
+            'customer_id'    => $this->request->getPost('customer_id'),
+            'weight_ascas'   => $this->request->getPost('weight_ascas'),
+            'weight_runner'  => $this->request->getPost('weight_runner'),
+            'notes'          => $this->request->getPost('notes'),
+        ]);
 
         return redirect()->to('/master/product')
             ->with('success', 'Product berhasil diupdate');
