@@ -53,6 +53,10 @@
     <th>Customer</th>
     <th>As-Cast (gr)</th>
     <th>Runner (gr)</th>
+    <th>Cycle Time (sec)</th>
+    <th>Cavity</th>
+    <th>Efficiency (%)</th>
+
     <th>Notes</th>
     <th width="120">Aksi</th>
 </tr>
@@ -73,6 +77,10 @@ $no = 1 + ($page - 1) * $perPage;
         <td><?= esc($p['customer_name']) ?></td>
         <td class="text-end"><?= number_format($p['weight_ascas'] ?? 0) ?></td>
         <td class="text-end"><?= number_format($p['weight_runner'] ?? 0) ?></td>
+        <td class="text-center"><?= esc($p['cycle_time']) ?></td>
+        <td class="text-center"><?= esc($p['cavity']) ?></td>
+        <td class="text-center"><?= esc($p['efficiency_rate']) ?></td>
+
         <td><?= esc($p['notes']) ?></td>
         <td>
             <a href="/master/product/edit/<?= $p['id'] ?>"

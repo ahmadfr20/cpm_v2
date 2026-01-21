@@ -42,6 +42,22 @@
            value="<?= esc($product['weight_runner']) ?>">
 </div>
 
+    <div class="col-md-4">
+        <label>Cycle Time (sec)</label>
+        <input type="number" name="cycle_time" class="form-control" required>
+    </div>
+
+    <div class="col-md-4">
+        <label>Cavity</label>
+        <input type="number" name="cavity" class="form-control" required>
+    </div>
+
+    <div class="col-md-4">
+        <label>Efficiency (%)</label>
+        <input type="number" step="0.01" name="efficiency_rate"
+               class="form-control" value="100">
+    </div>
+
 <div class="mb-3">
     <label>Notes</label>
     <textarea name="notes" class="form-control" rows="3"><?= esc($product['notes']) ?></textarea>

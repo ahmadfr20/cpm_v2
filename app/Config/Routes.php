@@ -133,6 +133,12 @@ $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
         'DieCasting\DailyProductionController::store'
     );
 
+    $routes->post(
+        'daily-production/save-slot',
+        'DieCasting\DailyProductionController::saveSlot'
+    );
+
+
     // =====================================================
     // 3️⃣ DAILY SCHEDULE DIE CASTING (PLAN / TARGET – PPIC)
     // =====================================================

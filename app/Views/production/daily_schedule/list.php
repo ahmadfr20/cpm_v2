@@ -1,63 +1,90 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4>Daily Production Schedule List</h4>
+<div class="container-fluid">
 
-<form method="get" class="row mb-3">
-    <div class="col-md-3">
-        <input type="date"
-               name="date"
-               value="<?= esc($date) ?>"
-               class="form-control">
+    <!-- =========================
+         HEADER
+    ========================== -->
+    <div class="d-flex justify-content-between align-items-center mb-3">
+        <h3 class="mb-0">Daily Schedule</h3>
+
+        <form method="get" class="d-flex gap-2">
+            <input
+                type="date"
+                name="date"
+                value="<?= esc($date) ?>"
+                class="form-control"
+            >
+            <button class="btn btn-primary">
+                Filter
+            </button>
+        </form>
     </div>
-    <div class="col-md-4">
-        <button class="btn btn-primary">Filter</button>
-        <a href="/production/daily-schedule/list" class="btn btn-secondary">
-            Today
-        </a>
-    </div>
-</form>
 
-<table class="table table-bordered table-sm">
-<thead class="table-light">
-<tr>
-    <th>Date</th>
-    <th>Shift</th>
-    <th>Section</th>
-    <th>Status</th>
-    <th width="120">Action</th>
-</tr>
-</thead>
-<tbody>
+    <!-- =========================
+         LOOP PER SHIFT
+    ========================== -->
+    <?php foreach ($grouped as $group): ?>
 
-<?php if (empty($schedules)): ?>
-<tr>
-    <td colspan="5" class="text-center text-muted">
-        No schedule found
-    </td>
-</tr>
-<?php endif; ?>
+        <div class="card mb-4 shadow-sm">
 
-<?php foreach ($schedules as $s): ?>
-<tr>
-    <td><?= esc($s['schedule_date']) ?></td>
-    <td><?= esc($s['shift_name']) ?></td>
-    <td><?= esc($s['section']) ?></td>
-    <td>
-        <?= $s['is_completed']
-            ? '<span class="badge bg-success">Completed</span>'
-            : '<span class="badge bg-warning">Open</span>' ?>
-    </td>
-    <td>
-        <a href="/production/daily-schedule/view/<?= $s['id'] ?>"
-           class="btn btn-sm btn-info">
-            View
-        </a>
-    </td>
-</tr>
-<?php endforeach ?>
+            <!-- SHIFT HEADER -->
+            <div class="card-header bg-secondary text-white">
+                <strong><?= esc($group['shift']['shift_name']) ?></strong>
+            </div>
 
-</tbody>
-</table>
+            <div class="card-body p-0">
+
+                <?php if (empty($group['schedules'])): ?>
+                    <div class="p-3 text-muted fst-italic">
+                        Tidak ada schedule untuk shift ini
+                    </div>
+                <?php else: ?>
+
+                    <table class="table table-bordered table-hover mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th style="width: 40%">Section</th>
+                                <th style="width: 30%">Status</th>
+                                <th style="width: 30%" class="text-center">Aksi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+
+                        <?php foreach ($group['schedules'] as $row): ?>
+                            <tr>
+                                <td><?= esc($row['section']) ?></td>
+
+                                <td>
+                                    <?php if ($row['is_completed']): ?>
+                                        <span class="badge bg-success">Completed</span>
+                                    <?php else: ?>
+                                        <span class="badge bg-warning text-dark">Open</span>
+                                    <?php endif ?>
+                                </td>
+
+                                <td class="text-center">
+                                    <a
+                                        href="<?= site_url('production/daily-schedule/view/' . $row['id']) ?>"
+                                        class="btn btn-sm btn-outline-primary"
+                                    >
+                                        Detail
+                                    </a>
+                                </td>
+                            </tr>
+                        <?php endforeach ?>
+
+                        </tbody>
+                    </table>
+
+                <?php endif ?>
+
+            </div>
+        </div>
+
+    <?php endforeach ?>
+
+</div>
 
 <?= $this->endSection() ?>

@@ -89,7 +89,7 @@ $grandAs = $grandRun = 0;
             <th>Machine</th>
             <th class="text-start">Part</th>
             <th>P</th>
-            <th>As-Cast (kg)</th>
+            <th>Ascas (kg)</th>
             <th>A</th>
             <th>Runner (kg)</th>
             <th>NG</th>

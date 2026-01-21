@@ -93,31 +93,104 @@ class DailyProductionController extends BaseController
     public function store()
     {
         $db    = db_connect();
-        $items = $this->request->getPost('items') ?? [];
+        $items = $this->request->getPost('items');
 
-        foreach ($items as $row) {
-            $db->table('die_casting_hourly')->replace([
-                'production_date' => $row['date'],
-                'shift_id'        => $row['shift_id'],
-                'machine_id'      => $row['machine_id'],
-                'product_id'      => $row['product_id'],
-                'time_slot_id'    => $row['time_slot_id'],
-                'qty_fg'          => (int)($row['fg'] ?? 0),
-                'qty_ng'          => (int)($row['ng'] ?? 0),
-                'ng_category_id'  => $row['ng_category_id'] ?? null,
-                'created_at'      => date('Y-m-d H:i:s')
+        if (!$items || !is_array($items)) {
+            return redirect()->back()->with('error', 'Data kosong / terpotong');
+        }
+
+        $db->transBegin();
+
+        try {
+
+            foreach ($items as $row) {
+
+                if (
+                    empty($row['date']) ||
+                    empty($row['shift_id']) ||
+                    empty($row['machine_id']) ||
+                    empty($row['product_id']) ||
+                    empty($row['time_slot_id'])
+                ) {
+                    continue;
+                }
+
+                $db->table('die_casting_hourly')->replace([
+                    'production_date' => $row['date'],
+                    'shift_id'        => $row['shift_id'],
+                    'machine_id'      => $row['machine_id'],
+                    'product_id'      => $row['product_id'],
+                    'time_slot_id'    => $row['time_slot_id'],
+                    'qty_fg'          => (int) ($row['fg'] ?? 0),
+                    'qty_ng'          => (int) ($row['ng'] ?? 0),
+                    'ng_category_id'  => $row['ng_category_id'] ?? null,
+                    'created_at'      => date('Y-m-d H:i:s')
+                ]);
+            }
+
+            // sync ke production (PER SHIFT)
+            $first = reset($items);
+            $this->syncDailyScheduleActual(
+                $first['date'],
+                $first['shift_id']
+            );
+
+            if ($db->transStatus() === false) {
+                throw new \Exception('DB error');
+            }
+
+            $db->transCommit();
+            return redirect()->back()->with('success', 'Daily production tersimpan');
+
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            return redirect()->back()->with('error', $e->getMessage());
+        }
+    }
+
+    public function saveSlot()
+    {
+        $db = db_connect();
+
+        $data = $this->request->getPost();
+
+        if (
+            empty($data['date']) ||
+            empty($data['shift_id']) ||
+            empty($data['machine_id']) ||
+            empty($data['product_id']) ||
+            empty($data['time_slot_id'])
+        ) {
+            return $this->response->setJSON([
+                'status' => false,
+                'message' => 'Data tidak lengkap'
             ]);
         }
 
-        if (!empty($items)) {
-            $this->syncDailyScheduleActual(
-                $items[array_key_first($items)]['date'],
-                $items[array_key_first($items)]['shift_id']
-            );
-        }
+        $db->table('die_casting_hourly')->replace([
+            'production_date' => $data['date'],
+            'shift_id'        => $data['shift_id'],
+            'machine_id'      => $data['machine_id'],
+            'product_id'      => $data['product_id'],
+            'time_slot_id'    => $data['time_slot_id'],
+            'qty_fg'          => (int) ($data['fg'] ?? 0),
+            'qty_ng'          => (int) ($data['ng'] ?? 0),
+            'ng_category_id'  => $data['ng_category_id'] ?? null,
+            'created_at'      => date('Y-m-d H:i:s')
+        ]);
 
-        return redirect()->back()->with('success', 'Daily production tersimpan');
+        // sync ke header production
+        $this->syncDailyScheduleActual(
+            $data['date'],
+            $data['shift_id']
+        );
+
+        return $this->response->setJSON([
+            'status' => true
+        ]);
     }
+
+
 
     private function syncDailyScheduleActual($date, $shiftId)
     {

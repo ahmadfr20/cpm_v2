@@ -167,52 +167,138 @@ $exist = $shift['hourly_map']
 .slot-header-active{background:#fde68a!important}
 </style>
 
-<script>
-function isSlotActive(start,end){
- const now=new Date()
- const today=now.toISOString().slice(0,10)
- let s=new Date(`${today}T${start}`)
- let e=new Date(`${today}T${end}`)
- if(e<=s){
-  if(now>=s)e.setDate(e.getDate()+1)
-  else s.setDate(s.getDate()-1)
- }
- return now>=s&&now<=e
-}
+    <script>
+            function isSlotActive(start,end){
+            const now=new Date()
+            const today=now.toISOString().slice(0,10)
+            let s=new Date(`${today}T${start}`)
+            let e=new Date(`${today}T${end}`)
+            if(e<=s){
+            if(now>=s)e.setDate(e.getDate()+1)
+            else s.setDate(s.getDate()-1)
+            }
+            return now>=s&&now<=e
+            }
 
-function updateActiveSlots(){
- document.querySelectorAll('.slot-input').forEach(i=>{
-  const a=isSlotActive(i.dataset.start,i.dataset.end)
-  i.disabled=!a
-  i.closest('td').classList.toggle('slot-active',a)
- })
- document.querySelectorAll('.slot-header').forEach(h=>{
-  h.classList.toggle('slot-header-active',
-   isSlotActive(h.dataset.start,h.dataset.end))
- })
-}
+            /* ===============================
+            * HIGHLIGHT SLOT AKTIF (TANPA DISABLE)
+            * =============================== */
+            function updateActiveSlots(){
+            document.querySelectorAll('.slot-input').forEach(i=>{
+            const a=isSlotActive(i.dataset.start,i.dataset.end)
+            i.readOnly = !a
+            i.closest('td').classList.toggle('slot-active',a)
+            })
+            document.querySelectorAll('.slot-header').forEach(h=>{
+            h.classList.toggle(
+                'slot-header-active',
+                isSlotActive(h.dataset.start,h.dataset.end)
+            )
+            })
+            }
 
-function calcTotals(){
- document.querySelectorAll('.production-table').forEach(t=>{
-  let fg=0,ng=0,target=0
-  t.querySelectorAll('.fg').forEach(i=>fg+=+i.value||0)
-  t.querySelectorAll('.ng').forEach(i=>ng+=+i.value||0)
-  t.querySelectorAll('.target-shift').forEach(td=>target+=+td.innerText||0)
+            /* ===============================
+            * TOTAL PER SHIFT
+            * =============================== */
+            function calcTotals(){
+            document.querySelectorAll('.production-table').forEach(table=>{
 
-  const wrap=t.closest('.table-scroll').parentElement
-  wrap.querySelector('.total-fg').innerText=fg
-  wrap.querySelector('.total-ng').innerText=ng
-  wrap.querySelector('.eff').innerText=
-    target?((fg/target)*100).toFixed(1)+'%':'0%'
- })
-}
+            let fg = 0, ng = 0, target = 0
 
+            table.querySelectorAll('.fg').forEach(i=> fg += +i.value || 0)
+            table.querySelectorAll('.ng').forEach(i=> ng += +i.value || 0)
+            table.querySelectorAll('.target-shift').forEach(td=> target += +td.innerText || 0)
 
+            /* ============================
+            * CARI SUMMARY SHIFT TERDEKAT
+            * ============================ */
+            const summary = table.closest('.table-scroll')
+                                .nextElementSibling
 
-function recalcAll(){calcTotals();calcSlotTotals()}
-updateActiveSlots();recalcAll()
-setInterval(updateActiveSlots,30000)
-document.addEventListener('input',recalcAll)
-</script>
+            if(!summary || !summary.classList.contains('shift-summary')) return
+
+            summary.querySelector('.total-fg').innerText = fg
+            summary.querySelector('.total-ng').innerText = ng
+            summary.querySelector('.eff').innerText =
+                target ? ((fg/target)*100).toFixed(1)+'%' : '0%'
+            })
+            }
+
+            /* ===============================
+            * TOTAL PER SLOT (INI YANG HILANG)
+            * =============================== */
+            function calcSlotTotals(){
+            document.querySelectorAll('.production-table').forEach(t=>{
+            const rows = t.querySelectorAll('tbody tr')
+            const slotCount = t.querySelectorAll('.total-slot-target').length
+
+            let tg = Array(slotCount).fill(0)
+            let fg = Array(slotCount).fill(0)
+            let ng = Array(slotCount).fill(0)
+
+            rows.forEach(r=>{
+                const cells = r.querySelectorAll('td')
+                for(let i=2;i<cells.length;i+=4){
+                const idx = (i-2)/4
+                tg[idx] += +cells[i].innerText || 0
+                fg[idx] += +(cells[i+1].querySelector('.fg')?.value || 0)
+                ng[idx] += +(cells[i+2].querySelector('.ng')?.value || 0)
+                }
+            })
+
+            t.querySelectorAll('.total-slot-target').forEach((e,i)=>e.innerText=tg[i])
+            t.querySelectorAll('.total-slot-fg').forEach((e,i)=>e.innerText=fg[i])
+            t.querySelectorAll('.total-slot-ng').forEach((e,i)=>e.innerText=ng[i])
+            })
+            }
+
+            /* ===============================
+            * REKALKULASI GLOBAL
+            * =============================== */
+            function recalcAll(){
+            calcTotals()
+            calcSlotTotals()
+            }
+
+            updateActiveSlots()
+            recalcAll()
+            setInterval(updateActiveSlots,30000)
+            document.addEventListener('input',recalcAll)
+
+            document.querySelectorAll('.slot-input').forEach(input => {
+            input.addEventListener('change', () => {
+
+                const td = input.closest('td')
+                const tr = input.closest('tr')
+
+                const data = {
+                    date: '<?= $date ?>',
+                    shift_id: tr.querySelector('[name$="[shift_id]"]').value,
+                    machine_id: tr.querySelector('[name$="[machine_id]"]').value,
+                    product_id: tr.querySelector('[name$="[product_id]"]').value,
+                    time_slot_id: tr.querySelector('[name$="[time_slot_id]"]').value,
+                    fg: tr.querySelector('.fg')?.value || 0,
+                    ng: tr.querySelector('.ng')?.value || 0,
+                    ng_category_id: tr.querySelector('select')?.value || ''
+                }
+
+                fetch('/die-casting/daily-production/save-slot', {
+                    method: 'POST',
+                    headers: {
+                        'X-CSRF-TOKEN': '<?= csrf_hash() ?>'
+                    },
+                    body: new URLSearchParams(data)
+                })
+                .then(r => r.json())
+                .then(res => {
+                    if(res.status){
+                        td.classList.add('bg-success-subtle')
+                        setTimeout(()=>td.classList.remove('bg-success-subtle'),800)
+                    }
+                })
+            })
+        })
+    </script>
+
 
 <?= $this->endSection() ?>

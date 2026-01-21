@@ -19,6 +19,13 @@ function isActive($path, $currentUrl)
     </a>
 </li>
 
+<li class="nav-item">
+    <a class="nav-link <?= $currentUrl === 'dashboard' ? 'active' : '' ?>"
+       href="/production/daily-schedule/list">
+        <i class="bi bi-alarm me-2"></i> All Daily Schedules
+    </a>
+</li>
+
 <!-- ================= MASTER DATA ================= -->
 <?php if (in_array($role, ['ADMIN','PPIC'])): ?>
 <li class="nav-item mt-3">
@@ -35,7 +42,7 @@ function isActive($path, $currentUrl)
             <li><a class="nav-link <?= isActive('master/time-slot',$currentUrl)?'active':'' ?>" href="/master/time-slot">Time Slot</a></li>
             <li><a class="nav-link <?= isActive('master/product',$currentUrl)?'active':'' ?>" href="/master/product">Product</a></li>
             <li><a class="nav-link <?= isActive('master/machine',$currentUrl)?'active':'' ?>" href="/master/machine">Machine</a></li>
-            <li><a class="nav-link <?= isActive('master/production-standard',$currentUrl)?'active':'' ?>" href="/master/production-standard">Production Standard</a></li>
+            <!-- <li><a class="nav-link <?= isActive('master/production-standard',$currentUrl)?'active':'' ?>" href="/master/production-standard">Production Standard</a></li> -->
             <li><a class="nav-link <?= isActive('master/customer',$currentUrl)?'active':'' ?>" href="/master/customer">Customer</a></li>
         </ul>
     </div>

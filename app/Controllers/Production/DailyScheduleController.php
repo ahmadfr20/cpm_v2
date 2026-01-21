@@ -213,30 +213,93 @@ class DailyScheduleController extends BaseController
         /* =====================================================
         * LIST DAILY SCHEDULE
         * ===================================================== */
-        public function list()
-        {
-            $date = $this->request->getGet('date') ?? date('Y-m-d');
-            $db = db_connect();
+public function list()
+{
+    $date    = $this->request->getGet('date') ?? date('Y-m-d');
+    $type    = $this->request->getGet('type'); // DC / MC (optional)
+    $db      = db_connect();
 
-            $data = $db->table('daily_schedules ds')
-                ->select('
-                    ds.id,
-                    ds.schedule_date,
-                    ds.section,
-                    ds.is_completed,
-                    s.shift_name
-                ')
-                ->join('shifts s', 's.id = ds.shift_id')
-                ->where('ds.schedule_date', $date)
-                ->orderBy('ds.section')
-                ->get()
-                ->getResultArray();
+    // =========================
+    // FILTER SHIFT NAME
+    // =========================
+    $shiftQuery = $db->table('shifts')
+        ->where('is_active', 1);
 
-            return view('production/daily_schedule/list', [
-                'date'      => $date,
-                'schedules' => $data
-            ]);
+    if ($type === 'DC') {
+        $shiftQuery->like('shift_name', 'DC');
+    } elseif ($type === 'MC') {
+        $shiftQuery->like('shift_name', 'MC');
+    }
+
+    // =========================
+    // URUTKAN SHIFT:
+    // DC dulu, MC setelahnya
+    // lalu nomor shift
+    // =========================
+    $shiftQuery->orderBy("
+        CASE
+            WHEN shift_name LIKE '%DC%' THEN 1
+            WHEN shift_name LIKE '%MC%' THEN 2
+            ELSE 3
+        END
+    ", '', false);
+
+    $shiftQuery->orderBy("
+        CAST(
+            REGEXP_SUBSTR(shift_name, '[0-9]+')
+            AS UNSIGNED
+        )
+    ", '', false);
+
+    $shifts = $shiftQuery->get()->getResultArray();
+
+    // =========================
+    // AMBIL DAILY SCHEDULE
+    // =========================
+    $rows = $db->table('daily_schedules ds')
+        ->select('
+            ds.id,
+            ds.schedule_date,
+            ds.section,
+            ds.is_completed,
+            ds.shift_id,
+            s.shift_name
+        ')
+        ->join('shifts s', 's.id = ds.shift_id')
+        ->where('ds.schedule_date', $date);
+
+    if ($type === 'DC') {
+        $rows->like('s.shift_name', 'DC');
+    } elseif ($type === 'MC') {
+        $rows->like('s.shift_name', 'MC');
+    }
+
+    $rows = $rows->get()->getResultArray();
+
+    // =========================
+    // GROUP BY SHIFT
+    // =========================
+    $grouped = [];
+
+    foreach ($shifts as $shift) {
+        $grouped[$shift['id']] = [
+            'shift'     => $shift,
+            'schedules' => []
+        ];
+    }
+
+    foreach ($rows as $row) {
+        if (isset($grouped[$row['shift_id']])) {
+            $grouped[$row['shift_id']]['schedules'][] = $row;
         }
+    }
+
+    return view('production/daily_schedule/list', [
+        'date'    => $date,
+        'grouped' => $grouped,
+        'type'    => $type
+    ]);
+}
 
 
     /* =====================================================

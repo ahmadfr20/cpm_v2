@@ -15,15 +15,15 @@
     <input type="text" name="part_name" class="form-control" required>
 </div>
 
-<div class="mb-3">
-    <label>Customer</label>
-    <select name="customer_id" class="form-control">
-        <option value="">-- Pilih Customer --</option>
-        <?php foreach ($customers as $c): ?>
-        <option value="<?= $c['id'] ?>"><?= esc($c['customer_name']) ?></option>
-        <?php endforeach ?>
-    </select>
-</div>
+<select name="customer_id" class="form-control" required>
+    <option value="">-- Pilih Customer --</option>
+    <?php foreach ($customers as $c): ?>
+        <option value="<?= $c['id'] ?>">
+            <?= esc($c['customer_name']) ?>
+        </option>
+    <?php endforeach ?>
+</select>
+
 
 <div class="mb-3">
     <label>Weight As-Cast (gr)</label>
@@ -34,6 +34,22 @@
     <label>Weight Runner (gr)</label>
     <input type="number" name="weight_runner" class="form-control">
 </div>
+
+    <div class="col-md-4">
+        <label>Cycle Time (sec)</label>
+        <input type="number" name="cycle_time" class="form-control" required>
+    </div>
+
+    <div class="col-md-4">
+        <label>Cavity</label>
+        <input type="number" name="cavity" class="form-control" required>
+    </div>
+
+    <div class="col-md-4">
+        <label>Efficiency (%)</label>
+        <input type="number" step="0.01" name="efficiency_rate"
+               class="form-control" value="100">
+    </div>
 
 <div class="mb-3">
     <label>Notes</label>

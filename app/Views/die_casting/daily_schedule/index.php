@@ -17,13 +17,13 @@
 <?php foreach ($shifts as $shift): ?>
 <h5 class="mt-4"><?= esc($shift['shift_name']) ?></h5>
 
-<table class="table table-bordered table-sm text-center align-middle dc-table">
+<table class="table table-bordered table-sm text-center align-middle">
 <thead class="table-secondary">
 <tr>
     <th>Mesin</th>
     <th>Part</th>
     <th>Plan</th>
-    <th>As-Cast (kg)</th>
+    <th>Ascas (kg)</th>
     <th>A</th>
     <th>Runner (kg)</th>
     <th>NG</th>
@@ -36,44 +36,39 @@
     $p   = $map[$shift['id']][$m['id']] ?? null;
     $key = $shift['id'].'_'.$m['id'];
 ?>
-<tr>
+<tr data-has-product="<?= $p ? 1 : 0 ?>">
 <td><?= esc($m['machine_code']) ?></td>
 
 <td>
 <select class="form-select form-select-sm product"
         data-machine="<?= $m['id'] ?>"
         data-shift="<?= $shift['id'] ?>"
-        data-selected="<?= $p['product_id'] ?? '' ?>" <!-- 🔥 -->
+        data-selected="<?= $p['product_id'] ?? '' ?>"
         name="items[<?= $key ?>][product_id]">
     <option value="">-- pilih --</option>
 </select>
 </td>
 
-<!-- PLAN -->
 <td>
 <input type="number"
-       min="0"
-       max="1200"
        class="form-control form-control-sm qty-p text-end"
        name="items[<?= $key ?>][qty_p]"
-       value="<?= $p['qty_p'] ?? 0 ?>">
+       value="<?= $p['qty_p'] ?? 0 ?>"
+       min="0"
+       max="1200">
 </td>
 
-<!-- ASCAS -->
 <td class="ascas text-end">0.00</td>
 
-<!-- A (READ ONLY) -->
 <td>
 <input type="number"
-       class="form-control form-control-sm text-end qty-a"
+       class="form-control form-control-sm text-end"
        value="<?= $p['qty_a'] ?? 0 ?>"
        readonly>
 </td>
 
-<!-- RUNNER -->
 <td class="runner text-end">0.00</td>
 
-<!-- NG (READ ONLY) -->
 <td>
 <input type="number"
        class="form-control form-control-sm text-end"
@@ -108,27 +103,40 @@
 </table>
 <?php endforeach ?>
 
+<input type="hidden" name="mode" id="formMode" value="save">
+
 <div class="d-flex gap-2 mt-4">
-    <button class="btn btn-success">
-        <i class="bi bi-save"></i> Simpan Schedule
+    <button type="submit" class="btn btn-success"
+            onclick="document.getElementById('formMode').value='save'">
+        💾 Simpan Baru
+    </button>
+
+    <button type="submit" class="btn btn-warning"
+            onclick="document.getElementById('formMode').value='update'">
+        🔄 Update Jadwal
     </button>
 
     <a href="/die-casting/daily-schedule/view?date=<?= esc($date) ?>"
        class="btn btn-outline-primary">
-        <i class="bi bi-eye"></i> View Result
+        👁 View Result
     </a>
 </div>
+
 </form>
 
 <!-- ================= JS ================= -->
 <script>
+const productUrl = "<?= site_url('die-casting/daily-schedule/getProductAndTarget') ?>";
+
 document.querySelectorAll('.product').forEach(sel => {
+    const selected = sel.dataset.selected;
+    const tr = sel.closest('tr');
 
-    const selected = sel.dataset.selected; // 🔥 ambil existing product
-
-    fetch(`/die-casting/daily-schedule/getProductAndTarget?machine_id=${sel.dataset.machine}&shift_id=${sel.dataset.shift}`)
+    fetch(`${productUrl}?machine_id=${sel.dataset.machine}&shift_id=${sel.dataset.shift}`)
         .then(r => r.json())
         .then(res => {
+
+            sel.innerHTML = '<option value="">-- pilih --</option>';
 
             res.forEach(p => {
                 const opt = document.createElement('option');
@@ -138,60 +146,78 @@ document.querySelectorAll('.product').forEach(sel => {
                 opt.dataset.runner = p.weight_runner || 0;
                 opt.dataset.target = p.target || 0;
 
-                if (selected && selected == p.id) {
-                    opt.selected = true; // 🔥 auto select
+                if (selected == p.id) {
+                    opt.selected = true;
+
+                    // 🔥 SET WA & WR SAAT LOAD
+                    tr.querySelector('.wa').value = opt.dataset.ascas;
+                    tr.querySelector('.wr').value = opt.dataset.runner;
                 }
 
                 sel.appendChild(opt);
             });
 
-            // 🔥 trigger ulang kalkulasi setelah load
+            // 🔥 AUTO HITUNG SETELAH REFRESH
             if (selected) {
-                sel.dispatchEvent(new Event('change'));
+                calculate(tr);
             }
         });
-
-    sel.addEventListener('change', () => {
-        const opt = sel.selectedOptions[0];
-        if (!opt) return;
-
-        const tr = sel.closest('tr');
-        tr.querySelector('.wa').value = opt.dataset.ascas;
-        tr.querySelector('.wr').value = opt.dataset.runner;
-
-        // auto isi plan hanya jika kosong
-        const qtyP = tr.querySelector('.qty-p');
-        if (!qtyP.value || qtyP.value == 0) {
-            qtyP.value = opt.dataset.target || 0;
-        }
-
-        calculate(tr);
-    });
 });
 
 /* =========================
- * VALIDASI P ≤ 1200
+ * EVENT PILIH PRODUCT
  * ========================= */
-document.querySelectorAll('.qty-p').forEach(inp => {
-    inp.addEventListener('input', () => {
-        let val = parseInt(inp.value || 0);
-        if (val > 1200) {
-            alert('Qty P tidak boleh lebih dari 1200');
-            inp.value = 1200;
-        }
-        calculate(inp.closest('tr'));
-    });
+document.addEventListener('change', e => {
+    if (!e.target.classList.contains('product')) return;
+
+    const sel = e.target;
+    const tr  = sel.closest('tr');
+    const opt = sel.selectedOptions[0];
+    if (!opt || !opt.value) return;
+
+    tr.querySelector('.wa').value = opt.dataset.ascas || 0;
+    tr.querySelector('.wr').value = opt.dataset.runner || 0;
+
+    const qtyP = tr.querySelector('.qty-p');
+    if (!qtyP.value || qtyP.value == 0) {
+        qtyP.value = opt.dataset.target || 0;
+    }
+
+    calculate(tr);
 });
 
-function calculate(tr) {
-    const qtyP = +tr.querySelector('.qty-p').value;
-    const qtyA = +tr.querySelector('.qty-a').value;
-    const wa   = +tr.querySelector('.wa').value;
-    const wr   = +tr.querySelector('.wr').value;
+/* =========================
+ * EVENT UBAH QTY P
+ * ========================= */
+document.addEventListener('input', e => {
+    if (!e.target.classList.contains('qty-p')) return;
 
-    tr.querySelector('.ascas').innerText  = ((qtyP * wa) / 1000).toFixed(2);
-    tr.querySelector('.runner').innerText = ((qtyA * wr) / 1000).toFixed(2);
+    let val = parseInt(e.target.value || 0);
+    if (val > 1200) {
+        alert('Qty P tidak boleh lebih dari 1200');
+        e.target.value = 1200;
+    }
+
+    calculate(e.target.closest('tr'));
+});
+
+/* =========================
+ * KALKULASI
+ * ========================= */
+function calculate(tr) {
+    const qtyP = +tr.querySelector('.qty-p').value || 0;
+    const qtyA = +tr.querySelector('[name$="[qty_a]"]').value || 0;
+    const wa   = +tr.querySelector('.wa').value || 0;
+    const wr   = +tr.querySelector('.wr').value || 0;
+
+    const ascas  = (qtyP * wa) / 1000;
+    const runner = (qtyA * wr) / 1000;
+
+    tr.querySelector('.ascas').innerText  = ascas.toFixed(2);
+    tr.querySelector('.runner').innerText = runner.toFixed(2);
 }
 </script>
+
+
 
 <?= $this->endSection() ?>

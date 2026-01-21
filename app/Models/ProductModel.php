@@ -13,37 +13,23 @@ class ProductModel extends Model
         'part_no',
         'part_name',
         'customer_id',
+
+        // 🔥 MASTER PRODUCT DIE CASTING
+        'cycle_time',
+        'cavity',
+        'efficiency_rate',
+
         'weight_ascas',
         'weight_runner',
-        'notes'
+        'notes',
+        'is_active'
     ];
 
+    protected $useTimestamps = true;
+
     /**
-     * LIST PRODUCT (FILTER + JOIN CUSTOMER)
+     * FILTER + PAGINATION
      */
-    public function getProducts($keyword = null, $customerId = null)
-    {
-        $builder = $this->db->table('products p')
-            ->select('p.*, c.customer_name')
-            ->join('customers c', 'c.id = p.customer_id', 'left');
-
-        if ($keyword) {
-            $builder->groupStart()
-                ->like('p.part_no', $keyword)
-                ->orLike('p.part_name', $keyword)
-                ->groupEnd();
-        }
-
-        if ($customerId) {
-            $builder->where('p.customer_id', $customerId);
-        }
-
-        return $builder
-            ->orderBy('p.part_name')
-            ->get()
-            ->getResultArray();
-    }
-
     public function filterProducts($keyword = null, $customerId = null)
     {
         $builder = $this
@@ -61,7 +47,9 @@ class ProductModel extends Model
             $builder->where('products.customer_id', $customerId);
         }
 
-        return $builder->orderBy('products.part_name');
+        return $builder
+            ->where('products.is_active', 1)
+            ->orderBy('products.part_name');
     }
 
     /**
@@ -70,10 +58,20 @@ class ProductModel extends Model
     public function getByMachine($machineId)
     {
         return $this->db->table('machine_products mp')
-            ->select('p.id, p.part_no, p.part_name')
+            ->select('
+                p.id,
+                p.part_no,
+                p.part_name,
+                p.weight_ascas,
+                p.weight_runner,
+                p.cycle_time,
+                p.cavity,
+                p.efficiency_rate
+            ')
             ->join('products p', 'p.id = mp.product_id')
             ->where('mp.machine_id', $machineId)
             ->where('mp.is_active', 1)
+            ->where('p.is_active', 1)
             ->orderBy('p.part_name')
             ->get()
             ->getResultArray();
