@@ -6,36 +6,83 @@ use App\Controllers\BaseController;
 
 class DailyScheduleController extends BaseController
 {
-    public function index()
-    {
-        $db   = db_connect();
-        $date = $this->request->getGet('date') ?? date('Y-m-d');
+public function index()
+{
+    $db   = db_connect();
+    $date = $this->request->getGet('date') ?? date('Y-m-d');
 
-        $shifts = $db->table('shifts')
-            ->select('id, shift_code, shift_name')
-            ->where('is_active', 1)
-            ->like('shift_name', 'DC')
-            ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
-            ->get()->getResultArray();
+    /* =========================
+     * SHIFT DIE CASTING
+     * ========================= */
+    $shifts = $db->table('shifts')
+        ->select('id, shift_code, shift_name')
+        ->where('is_active', 1)
+        ->like('shift_name', 'DC')
+        ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
+        ->get()
+        ->getResultArray();
 
-        $machines = $db->table('machines')
-            ->where('production_line', 'Die Casting')
-            ->orderBy('line_position')
-            ->get()->getResultArray();
+    /* =========================
+     * HITUNG TOTAL MENIT PER SHIFT
+     * ========================= */
+    foreach ($shifts as &$shift) {
 
-        $existing = $db->table('die_casting_production')
-            ->where('production_date', $date)
-            ->get()->getResultArray();
+        $slots = $db->table('shift_time_slots sts')
+            ->select('ts.time_start, ts.time_end')
+            ->join('time_slots ts', 'ts.id = sts.time_slot_id')
+            ->where('sts.shift_id', $shift['id'])
+            ->get()
+            ->getResultArray();
 
-        $map = [];
-        foreach ($existing as $e) {
-            $map[$e['shift_id']][$e['machine_id']] = $e;
+        $totalMinute = 0;
+
+        foreach ($slots as $s) {
+            $start = strtotime($s['time_start']);
+            $end   = strtotime($s['time_end']);
+
+            // handle lintas hari
+            if ($end <= $start) {
+                $end += 86400;
+            }
+
+            $totalMinute += ($end - $start) / 60;
         }
 
-        return view('die_casting/daily_schedule/index', compact(
-            'date', 'shifts', 'machines', 'map'
-        ));
+        // ⬅️ INI YANG DIPAKAI DI VIEW
+        $shift['total_minute'] = $totalMinute;
     }
+    unset($shift);
+
+    /* =========================
+     * MACHINE DIE CASTING
+     * ========================= */
+    $machines = $db->table('machines')
+        ->where('production_line', 'Die Casting')
+        ->orderBy('line_position')
+        ->get()
+        ->getResultArray();
+
+    /* =========================
+     * DATA EXISTING PRODUCTION
+     * ========================= */
+    $existing = $db->table('die_casting_production')
+        ->where('production_date', $date)
+        ->get()
+        ->getResultArray();
+
+    $map = [];
+    foreach ($existing as $e) {
+        $map[$e['shift_id']][$e['machine_id']] = $e;
+    }
+
+    return view('die_casting/daily_schedule/index', [
+        'date'     => $date,
+        'shifts'   => $shifts,
+        'machines' => $machines,
+        'map'      => $map
+    ]);
+}
+
 
     /* =========================
      * AJAX PRODUCT & TARGET

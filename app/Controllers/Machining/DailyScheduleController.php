@@ -98,9 +98,9 @@ class DailyScheduleController extends BaseController
             return $this->response->setJSON([]);
         }
 
-        /**
-         * TOTAL DETIK SHIFT
-         */
+        /* =========================
+        * TOTAL DETIK SHIFT
+        * ========================= */
         $slots = $db->table('shift_time_slots sts')
             ->select('ts.time_start, ts.time_end')
             ->join('time_slots ts', 'ts.id = sts.time_slot_id')
@@ -115,34 +115,47 @@ class DailyScheduleController extends BaseController
             $totalSecond += ($end - $start);
         }
 
-        /**
-         * PRODUCT SESUAI MESIN
-         */
+        /* =========================
+        * PRODUCT DARI PRODUCTS
+        * ========================= */
         $products = $db->table('machine_products mp')
             ->select('
                 p.id,
                 p.part_no,
                 p.part_name,
-                ps.cycle_time_sec
+                p.cycle_time,
+                p.cavity,
+                p.efficiency_rate
             ')
             ->join('products p', 'p.id = mp.product_id')
-            ->join(
-                'production_standards ps',
-                'ps.product_id = p.id AND ps.machine_id = mp.machine_id',
-                'left'
-            )
             ->where('mp.machine_id', $machineId)
             ->where('mp.is_active', 1)
-            ->get()->getResultArray();
+            ->orderBy('p.part_no')
+            ->get()
+            ->getResultArray();
 
+        /* =========================
+        * HITUNG TARGET
+        * ========================= */
         foreach ($products as &$p) {
-            $p['target'] = !empty($p['cycle_time_sec'])
-                ? min(floor($totalSecond / $p['cycle_time_sec']), 1200)
-                : 0;
+
+            $cycle  = (int) $p['cycle_time'];
+            $cavity = (int) $p['cavity'];
+            $eff    = ((float) $p['efficiency_rate']) / 100;
+
+            if ($cycle > 0 && $cavity > 0) {
+                $p['target'] = min(
+                    floor(($totalSecond / $cycle) * $cavity * $eff),
+                    1200
+                );
+            } else {
+                $p['target'] = 0;
+            }
         }
 
         return $this->response->setJSON($products);
     }
+
 
     /**
      * =========================
@@ -151,32 +164,154 @@ class DailyScheduleController extends BaseController
      */
     public function store()
     {
-        $db      = db_connect();
-        $date    = $this->request->getPost('date');
-        $shiftId = $this->request->getPost('shift_id');
+        $db    = db_connect();
+        $date  = $this->request->getPost('date');
+        $items = $this->request->getPost('items');
 
-        $db->table('daily_schedules')->insert([
-            'schedule_date' => $date,
-            'shift_id'      => $shiftId,
-            'section'       => 'Machining',
-            'created_at'    => date('Y-m-d H:i:s')
-        ]);
-
-        $scheduleId = $db->insertID();
-
-        foreach ($this->request->getPost('items') as $row) {
-            if (empty($row['product_id'])) continue;
-
-            $db->table('daily_schedule_items')->insert([
-                'daily_schedule_id' => $scheduleId,
-                'machine_id'        => $row['machine_id'],
-                'product_id'        => $row['product_id'],
-                'cycle_time'        => $row['cycle_time'],
-                'target_per_shift'  => min((int)$row['plan'], 1200)
-            ]);
+        if (!$date || !$items || !is_array($items)) {
+            return redirect()->back()->with('error', 'Data tidak valid');
         }
 
-        return redirect()->back()
-            ->with('success', 'Daily schedule machining tersimpan');
+        $db->transBegin();
+
+        try {
+
+            foreach ($items as $row) {
+
+                if (
+                    empty($row['shift_id']) ||
+                    empty($row['machine_id']) ||
+                    empty($row['product_id'])
+                ) {
+                    continue;
+                }
+
+                $shiftId   = (int) $row['shift_id'];
+                $machineId = (int) $row['machine_id'];
+                $productId = (int) $row['product_id'];
+
+                /* =========================
+                * MASTER PRODUCT
+                * ========================= */
+                $product = $db->table('products')
+                    ->select('cycle_time, cavity, efficiency_rate')
+                    ->where('id', $productId)
+                    ->get()
+                    ->getRowArray();
+
+                if (!$product) continue;
+
+                $cycle  = (int) $product['cycle_time'];        // detik
+                $cavity = (int) $product['cavity'];
+                $eff    = ((float) $product['efficiency_rate']) / 100;
+
+                if ($cycle <= 0 || $cavity <= 0) continue;
+
+                /* =========================
+                * TOTAL DETIK SHIFT
+                * ========================= */
+                $slots = $db->table('shift_time_slots sts')
+                    ->select('ts.time_start, ts.time_end')
+                    ->join('time_slots ts', 'ts.id = sts.time_slot_id')
+                    ->where('sts.shift_id', $shiftId)
+                    ->get()
+                    ->getResultArray();
+
+                $totalSecond = 0;
+                foreach ($slots as $s) {
+                    $start = strtotime($s['time_start']);
+                    $end   = strtotime($s['time_end']);
+                    if ($end <= $start) $end += 86400;
+                    $totalSecond += ($end - $start);
+                }
+
+                if ($totalSecond <= 0) continue;
+
+                /* =========================
+                * TARGET PER HOUR & SHIFT
+                * ========================= */
+                $targetPerHour = floor(
+                    (3600 / $cycle) * $cavity * $eff
+                );
+
+                $targetPerShift = min(
+                    floor(($totalSecond / $cycle) * $cavity * $eff),
+                    1200
+                );
+
+                if ($targetPerShift <= 0) continue;
+
+                /* =========================
+                * DAILY SCHEDULE HEADER
+                * ========================= */
+                $schedule = $db->table('daily_schedules')
+                    ->where([
+                        'schedule_date' => $date,
+                        'shift_id'      => $shiftId,
+                        'section'       => 'Machining'
+                    ])
+                    ->get()
+                    ->getRowArray();
+
+                if (!$schedule) {
+                    $db->table('daily_schedules')->insert([
+                        'schedule_date' => $date,
+                        'shift_id'      => $shiftId,
+                        'section'       => 'Machining',
+                        'is_completed'  => 0,
+                        'created_at'    => date('Y-m-d H:i:s')
+                    ]);
+                    $scheduleId = $db->insertID();
+                } else {
+                    $scheduleId = $schedule['id'];
+                }
+
+                /* =========================
+                * DAILY SCHEDULE ITEM (UPSERT)
+                * ========================= */
+                $existItem = $db->table('daily_schedule_items')
+                    ->where([
+                        'daily_schedule_id' => $scheduleId,
+                        'machine_id'        => $machineId,
+                        'product_id'        => $productId
+                    ])
+                    ->get()
+                    ->getRowArray();
+
+                $dataItem = [
+                    'cycle_time'       => $cycle,
+                    'cavity'            => $cavity,
+                    'target_per_hour'  => $targetPerHour,
+                    'target_per_shift' => $targetPerShift,
+                    'is_selected'      => 1
+                ];
+
+                if ($existItem) {
+                    $db->table('daily_schedule_items')
+                        ->where('id', $existItem['id'])
+                        ->update($dataItem);
+                } else {
+                    $db->table('daily_schedule_items')->insert(
+                        $dataItem + [
+                            'daily_schedule_id' => $scheduleId,
+                            'shift_id'          => $shiftId,
+                            'machine_id'        => $machineId,
+                            'product_id'        => $productId
+                        ]
+                    );
+                }
+            }
+
+            $db->transCommit();
+            return redirect()->back()
+                ->with('success', 'Daily schedule Machining berhasil disimpan');
+
+        } catch (\Throwable $e) {
+
+            $db->transRollback();
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
+
+
 }

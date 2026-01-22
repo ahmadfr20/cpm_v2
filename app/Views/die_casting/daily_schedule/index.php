@@ -15,12 +15,16 @@
 <?= csrf_field() ?>
 
 <?php foreach ($shifts as $shift): ?>
-<h5 class="mt-4"><?= esc($shift['shift_name']) ?></h5>
+<h5 class="mt-4">
+    <?= esc($shift['shift_name']) ?>
+    <small class="text-muted">(Total <?= $shift['total_minute'] ?> menit)</small>
+</h5>
 
 <table class="table table-bordered table-sm text-center align-middle">
 <thead class="table-secondary">
 <tr>
     <th>Mesin</th>
+    <th>Total Menit</th>
     <th>Part</th>
     <th>Plan</th>
     <th>Ascas (kg)</th>
@@ -36,8 +40,10 @@
     $p   = $map[$shift['id']][$m['id']] ?? null;
     $key = $shift['id'].'_'.$m['id'];
 ?>
-<tr data-has-product="<?= $p ? 1 : 0 ?>">
+<tr>
 <td><?= esc($m['machine_code']) ?></td>
+
+<td class="fw-bold bg-light"><?= $shift['total_minute'] ?></td>
 
 <td>
 <select class="form-select form-select-sm product"
@@ -54,8 +60,7 @@
        class="form-control form-control-sm qty-p text-end"
        name="items[<?= $key ?>][qty_p]"
        value="<?= $p['qty_p'] ?? 0 ?>"
-       min="0"
-       max="1200">
+       min="0" max="1200">
 </td>
 
 <td class="ascas text-end">0.00</td>
@@ -77,7 +82,7 @@
 </td>
 
 <td>
-<select class="form-select form-select-sm status"
+<select class="form-select form-select-sm"
         name="items[<?= $key ?>][status]">
 <?php foreach (['Normal','Recovery','Trial','OFF'] as $s): ?>
 <option value="<?= $s ?>"
@@ -88,7 +93,7 @@
 </select>
 </td>
 
-<!-- HIDDEN -->
+<!-- hidden -->
 <input type="hidden" name="items[<?= $key ?>][machine_id]" value="<?= $m['id'] ?>">
 <input type="hidden" name="items[<?= $key ?>][shift_id]" value="<?= $shift['id'] ?>">
 <input type="hidden" name="items[<?= $key ?>][date]" value="<?= $date ?>">
@@ -103,23 +108,10 @@
 </table>
 <?php endforeach ?>
 
-<input type="hidden" name="mode" id="formMode" value="save">
-
-<div class="d-flex gap-2 mt-4">
-    <button type="submit" class="btn btn-success"
-            onclick="document.getElementById('formMode').value='save'">
-        💾 Simpan Baru
-    </button>
-
-    <button type="submit" class="btn btn-warning"
-            onclick="document.getElementById('formMode').value='update'">
-        🔄 Update Jadwal
-    </button>
-
+<div class="mt-3 d-flex gap-2">
+    <button class="btn btn-success">💾 Simpan</button>
     <a href="/die-casting/daily-schedule/view?date=<?= esc($date) ?>"
-       class="btn btn-outline-primary">
-        👁 View Result
-    </a>
+       class="btn btn-outline-primary">👁 View Result</a>
 </div>
 
 </form>
@@ -129,51 +121,34 @@
 const productUrl = "<?= site_url('die-casting/daily-schedule/getProductAndTarget') ?>";
 
 document.querySelectorAll('.product').forEach(sel => {
-    const selected = sel.dataset.selected;
     const tr = sel.closest('tr');
+    const selected = sel.dataset.selected;
 
     fetch(`${productUrl}?machine_id=${sel.dataset.machine}&shift_id=${sel.dataset.shift}`)
         .then(r => r.json())
         .then(res => {
-
             sel.innerHTML = '<option value="">-- pilih --</option>';
 
             res.forEach(p => {
                 const opt = document.createElement('option');
                 opt.value = p.id;
                 opt.textContent = `${p.part_no} - ${p.part_name}`;
-                opt.dataset.ascas  = p.weight_ascas || 0;
+                opt.dataset.ascas = p.weight_ascas || 0;
                 opt.dataset.runner = p.weight_runner || 0;
                 opt.dataset.target = p.target || 0;
-
-                if (selected == p.id) {
-                    opt.selected = true;
-
-                    // 🔥 SET WA & WR SAAT LOAD
-                    tr.querySelector('.wa').value = opt.dataset.ascas;
-                    tr.querySelector('.wr').value = opt.dataset.runner;
-                }
-
+                if (selected == p.id) opt.selected = true;
                 sel.appendChild(opt);
             });
 
-            // 🔥 AUTO HITUNG SETELAH REFRESH
-            if (selected) {
-                calculate(tr);
-            }
+            if (selected) calculate(tr);
         });
 });
 
-/* =========================
- * EVENT PILIH PRODUCT
- * ========================= */
 document.addEventListener('change', e => {
     if (!e.target.classList.contains('product')) return;
-
-    const sel = e.target;
-    const tr  = sel.closest('tr');
-    const opt = sel.selectedOptions[0];
-    if (!opt || !opt.value) return;
+    const tr = e.target.closest('tr');
+    const opt = e.target.selectedOptions[0];
+    if (!opt) return;
 
     tr.querySelector('.wa').value = opt.dataset.ascas || 0;
     tr.querySelector('.wr').value = opt.dataset.runner || 0;
@@ -182,42 +157,22 @@ document.addEventListener('change', e => {
     if (!qtyP.value || qtyP.value == 0) {
         qtyP.value = opt.dataset.target || 0;
     }
-
     calculate(tr);
 });
 
-/* =========================
- * EVENT UBAH QTY P
- * ========================= */
 document.addEventListener('input', e => {
     if (!e.target.classList.contains('qty-p')) return;
-
-    let val = parseInt(e.target.value || 0);
-    if (val > 1200) {
-        alert('Qty P tidak boleh lebih dari 1200');
-        e.target.value = 1200;
-    }
-
     calculate(e.target.closest('tr'));
 });
 
-/* =========================
- * KALKULASI
- * ========================= */
-function calculate(tr) {
+function calculate(tr){
     const qtyP = +tr.querySelector('.qty-p').value || 0;
-    const qtyA = +tr.querySelector('[name$="[qty_a]"]').value || 0;
     const wa   = +tr.querySelector('.wa').value || 0;
     const wr   = +tr.querySelector('.wr').value || 0;
 
-    const ascas  = (qtyP * wa) / 1000;
-    const runner = (qtyA * wr) / 1000;
-
-    tr.querySelector('.ascas').innerText  = ascas.toFixed(2);
-    tr.querySelector('.runner').innerText = runner.toFixed(2);
+    tr.querySelector('.ascas').innerText  = ((qtyP * wa) / 1000).toFixed(2);
+    tr.querySelector('.runner').innerText = ((qtyP * wr) / 1000).toFixed(2);
 }
 </script>
-
-
 
 <?= $this->endSection() ?>

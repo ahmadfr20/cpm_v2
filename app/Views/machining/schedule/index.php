@@ -1,10 +1,11 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4>DAILY PRODUCTION SCHEDULE – MACHINING</h4>
+<h4 class="mb-3">DAILY PRODUCTION SCHEDULE – MACHINING</h4>
 
-<form method="get" class="mb-3 w-25">
-    <label>Tanggal</label>
+<!-- ================= FILTER TANGGAL ================= -->
+<form method="get" class="mb-3" style="max-width:220px">
+    <label class="form-label fw-bold">Tanggal</label>
     <input type="date"
            name="date"
            value="<?= esc($date) ?>"
@@ -12,128 +13,163 @@
            onchange="this.form.submit()">
 </form>
 
-<div class="d-flex gap-2 mb-3">
+<div class="mb-3">
     <a href="/machining/daily-schedule/result?date=<?= esc($date) ?>"
-       class="btn btn-outline-primary">
-        <i class="bi bi-graph-up"></i>
-        Lihat Hasil & Efektivitas
+       class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-graph-up"></i> Lihat Hasil & Efektivitas
     </a>
 </div>
 
 <?php foreach ($shifts as $shift): ?>
 
-<h5 class="mt-4"><?= esc($shift['shift_name']) ?></h5>
+<hr>
+<h5 class="mt-4 mb-3"><?= esc($shift['shift_name']) ?></h5>
 
 <form method="post" action="/machining/daily-schedule/store">
 <?= csrf_field() ?>
 
-<input type="hidden" name="date" value="<?= $date ?>">
-<input type="hidden" name="shift_id" value="<?= $shift['id'] ?>">
+<input type="hidden" name="date" value="<?= esc($date) ?>">
 
-<table class="table table-bordered table-sm text-center align-middle">
+<table class="table table-bordered table-sm align-middle text-center">
 <thead class="table-secondary">
 <tr>
-    <th>LINE</th>
-    <th>MESIN</th>
-    <th>PART</th>
-    <th>CT</th>
-    <th>Planning</th>
-    <th>A</th>
+    <th style="width:60px">Line</th>
+    <th>Mesin</th>
+    <th style="width:260px">Part</th>
+    <th style="width:80px">CT</th>
+    <th style="width:120px">Planning</th>
+    <th style="width:80px">Actual</th>
 </tr>
 </thead>
 
 <tbody>
-<?php foreach ($machines as $i => $m):
+<?php foreach ($machines as $idx => $machine):
 
-    $plan = $planMap[$shift['id'].'_'.$m['id']] ?? null;
+    $keyPlan = $shift['id'].'_'.$machine['id'];
+    $plan    = $planMap[$keyPlan] ?? null;
 
-    $act  = $actualMap[
-        $shift['id'].'_'.$m['id'].'_'.($plan['product_id'] ?? 0)
-    ]['act'] ?? 0;
+    $actKey  = $shift['id'].'_'.$machine['id'].'_'.($plan['product_id'] ?? 0);
+    $actual  = $actualMap[$actKey]['act'] ?? 0;
 ?>
 <tr>
-<td><?= esc($m['line_position']) ?></td>
-<td><?= esc($m['machine_name']) ?></td>
+
+<td><?= esc($machine['line_position']) ?></td>
+
+<td class="text-start"><?= esc($machine['machine_name']) ?></td>
 
 <td>
-<select class="form-select product"
-        data-machine="<?= $m['id'] ?>"
+<select class="form-select form-select-sm product-select"
+        data-machine="<?= $machine['id'] ?>"
         data-shift="<?= $shift['id'] ?>"
-        name="items[<?= $i ?>][product_id]">
-    <option value="">-- pilih --</option>
+        data-selected="<?= $plan['product_id'] ?? '' ?>"
+        name="items[<?= $idx ?>][product_id]">
+    <option value="">-- pilih part --</option>
 </select>
+
 </td>
 
 <td>
-<input class="form-control ct" readonly
-       value="<?= $plan['cycle_time'] ?? '' ?>">
-<input type="hidden" class="ct-hidden"
-       name="items[<?= $i ?>][cycle_time]"
-       value="<?= $plan['cycle_time'] ?? '' ?>">
+<input type="text"
+       class="form-control form-control-sm text-center cycle-time"
+       value="<?= esc($plan['cycle_time'] ?? '') ?>"
+       readonly>
 </td>
 
 <td>
 <input type="number"
-       class="form-control plan"
-       name="items[<?= $i ?>][plan]"
+       class="form-control form-control-sm text-center plan-input"
+       name="items[<?= $idx ?>][plan]"
        max="1200"
-       value="<?= $plan['target_per_shift'] ?? '' ?>">
+       value="<?= esc($plan['target_per_shift'] ?? '') ?>">
 </td>
 
 <td>
-<input class="form-control text-center"
-       value="<?= $act ?>" readonly>
+<input type="text"
+       class="form-control form-control-sm text-center"
+       value="<?= esc($actual) ?>"
+       readonly>
 </td>
 
+<!-- ===== HIDDEN (WAJIB) ===== -->
 <input type="hidden"
-       name="items[<?= $i ?>][machine_id]"
-       value="<?= $m['id'] ?>">
+       name="items[<?= $idx ?>][machine_id]"
+       value="<?= $machine['id'] ?>">
+
+<input type="hidden"
+       name="items[<?= $idx ?>][shift_id]"
+       value="<?= $shift['id'] ?>">
 
 </tr>
 <?php endforeach ?>
 </tbody>
 </table>
 
-<button class="btn btn-success mb-4">
-    <i class="bi bi-save"></i> Simpan <?= esc($shift['shift_name']) ?>
+<button class="btn btn-success btn-sm mb-4">
+    <i class="bi bi-save"></i>
+    Simpan <?= esc($shift['shift_name']) ?>
 </button>
 
 </form>
 <?php endforeach ?>
 
-<!-- ================= JS ================= -->
+<!-- ================= JAVASCRIPT ================= -->
 <script>
-async function loadProducts(sel) {
-    const m = sel.dataset.machine;
-    const s = sel.dataset.shift;
+/**
+ * Load product & target per machine + shift
+ */
+async function loadProducts(selectEl) {
+    const machineId  = selectEl.dataset.machine;
+    const shiftId    = selectEl.dataset.shift;
+    const selectedId = selectEl.dataset.selected;
 
-    const res = await fetch(
-        `/machining/daily-schedule/product-target?machine_id=${m}&shift_id=${s}`
-    );
-    const data = await res.json();
+    try {
+        const res  = await fetch(
+            `/machining/daily-schedule/product-target?machine_id=${machineId}&shift_id=${shiftId}`
+        );
+        const data = await res.json();
 
-    sel.innerHTML = '<option value="">-- pilih --</option>';
-    data.forEach(p => {
-        sel.innerHTML += `
-            <option value="${p.id}"
-                    data-ct="${p.cycle_time_sec ?? ''}"
-                    data-target="${p.target ?? 0}">
-                ${p.part_no} - ${p.part_name}
-            </option>`;
-    });
+        selectEl.innerHTML = '<option value="">-- pilih part --</option>';
+
+        data.forEach(p => {
+            const selected = (p.id == selectedId) ? 'selected' : '';
+            selectEl.insertAdjacentHTML('beforeend', `
+                <option value="${p.id}"
+                        data-ct="${p.cycle_time}"
+                        data-target="${p.target}"
+                        ${selected}>
+                    ${p.part_no} - ${p.part_name}
+                </option>
+            `);
+        });
+
+        // ⬇️ jika ada data lama, trigger change agar CT & plan muncul
+        if (selectedId) {
+            selectEl.dispatchEvent(new Event('change'));
+        }
+
+    } catch (e) {
+        console.error('Gagal load product', e);
+    }
 }
 
-document.querySelectorAll('.product').forEach(sel => {
-    loadProducts(sel);
+/**
+ * Init product selector
+ */
+document.querySelectorAll('.product-select').forEach(selectEl => {
 
-    sel.addEventListener('change', () => {
-        const opt = sel.selectedOptions[0];
+    loadProducts(selectEl);
+
+    selectEl.addEventListener('change', () => {
+        const opt = selectEl.selectedOptions[0];
         if (!opt) return;
 
-        const tr = sel.closest('tr');
-        tr.querySelector('.ct').value = opt.dataset.ct || '';
-        tr.querySelector('.ct-hidden').value = opt.dataset.ct || '';
-        tr.querySelector('.plan').value = opt.dataset.target || 0;
+        const row = selectEl.closest('tr');
+
+        row.querySelector('.cycle-time').value =
+            opt.dataset.ct || '';
+
+        row.querySelector('.plan-input').value =
+            opt.dataset.target || 0;
     });
 });
 </script>

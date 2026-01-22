@@ -127,24 +127,58 @@ function isActive($path, $currentUrl)
     <i class="bi bi-chevron-down"></i>
 </a>
 
-<div class="collapse <?= isActive('machining',$currentUrl)?'show':'' ?>" id="menuMachining">
-<ul class="nav flex-column ms-3">
-<li><a class="nav-link" href="/machining/hourly">Production Result per Jam</a></li>
-<li><a class="nav-link" href="/machining/production">Production Result per Shift</a></li>
-<li><a class="nav-link text-danger" href="#">Scrap</a></li>
+        <div class="collapse <?= isActive('machining',$currentUrl)?'show':'' ?>" id="menuMachining">
+            <ul class="nav flex-column ms-3">
+            <li><a class="nav-link" href="/machining/hourly">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/production">Production Result per Shift</a></li>
+            <li><a class="nav-link text-danger" href="#">Scrap</a></li>
 
-<li class="text-secondary small mt-2">Leak Test</li>
-<li><a class="nav-link" href="#">Production Result per Jam</a></li>
-<li><a class="nav-link" href="#">Production Result per Shift</a></li>
+            <li class="text-secondary small mt-2">Leak Test</li>
+            <li><a class="nav-link" href="/machining/leak-test">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/leak-test/production-shift">Production Result per Shift</a></li>
 
-<li class="text-secondary small mt-2">Assy Bushing</li>
-<li><a class="nav-link" href="#">Production Result per Jam</a></li>
-<li><a class="nav-link" href="#">Production Result per Shift</a></li>
+            <li class="text-secondary small mt-2">Assy Bushing</li>
+            <li><a class="nav-link" href="/machining/assy-bushing/hourly">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/assy-bushing/production-shift">Production Result per Shift</a></li>
 
-<li class="text-secondary small mt-2">Assy Shaft</li>
-<li><a class="nav-link" href="#">Production Result per Jam</a></li>
-<li><a class="nav-link" href="#">Production Result per Shift</a></li>
-</ul>
+            <li class="text-secondary small mt-2">Assy Shaft</li>
+            <li><a class="nav-link" href="/machining/assy-shaft/hourly">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/assy-shaft/production/shift">Production Result per Shift</a></li>
+    </ul>
+</div>
+</li>
+
+
+<!-- Delivery -->
+<li class="nav-item mt-3">
+<a class="nav-link text-white d-flex justify-content-between align-items-center"
+   data-bs-toggle="collapse"
+   href="#menuDelivery">
+    <span><i class="bi bi-gear me-2"></i> Delivery</span>
+    <i class="bi bi-chevron-down"></i>
+</a>
+
+        <div class="collapse <?= isActive('delivery',$currentUrl)?'show':'' ?>" id="menuDelivery">
+            <ul class="nav flex-column ms-3">
+            <li><a class="nav-link" href="#">Delivery to Shot Blast</a></li>
+            <li><a class="nav-link" href="#">Delivery to Baritori</a></li>
+    </ul>
+</div>
+</li>
+
+<!-- receiving -->
+<li class="nav-item mt-3">
+<a class="nav-link text-white d-flex justify-content-between align-items-center"
+   data-bs-toggle="collapse"
+   href="#menuReceiving">
+    <span><i class="bi bi-gear me-2"></i> Receiving</span>
+    <i class="bi bi-chevron-down"></i>
+</a>
+
+        <div class="collapse <?= isActive('receiving',$currentUrl)?'show':'' ?>" id="menuReceiving">
+            <ul class="nav flex-column ms-3">
+            <li><a class="nav-link" href="#">Receiving from Shot Blast</a></li>
+            <li><a class="nav-link" href="#">Receiving from Baritori</a></li>
 </div>
 </li>
 

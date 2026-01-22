@@ -300,6 +300,56 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
         'Machining\HourlyController::store'
     );
 
+    $routes->get(
+    'leak-test',
+    'Machining\LeakTestDailyProductionController::index'
+    );
+
+    $routes->post(
+        'leak-test/hourly/store',
+        'Machining\LeakTestDailyProductionController::store'
+    );
+
+    $routes->get(
+    'leak-test/production-shift',
+    'Machining\LeakTestProductionController::index'
+    );
+
+    $routes->get(
+    'assy-bushing/hourly',
+    'Machining\AssyBushingDailyProductionController::index'
+    );
+
+    $routes->post(
+        'assy-bushing/hourly/store',
+        'Machining\AssyBushingDailyProductionController::store'
+    );
+
+
+    $routes->get(
+    'assy-bushing/production-shift',
+    'Machining\AssyBushingProductionShiftController::index'
+    );
+
+        $routes->get(
+        'assy-shaft/hourly',
+        'Machining\AssyShaftDailyProductionController::index'
+    );
+
+    $routes->post(
+        'assy-shaft/hourly/store',
+        'Machining\AssyShaftDailyProductionController::store'
+    );
+
+    $routes->get(
+    'assy-shaft/production/shift',
+    'Machining\AssyShaftShiftProductionController::index'
+)   ;
+
+
+
+
+
     /* ================= SUPPORT MODULE ================= */
     $routes->get('dandori', 'Machining\DandoriController::index');
     $routes->post('dandori/store', 'Machining\DandoriController::store');
