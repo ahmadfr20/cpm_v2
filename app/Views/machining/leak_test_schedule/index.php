@@ -1,7 +1,7 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-3">DAILY PRODUCTION SCHEDULE – MACHINING</h4>
+<h4 class="mb-3">DAILY PRODUCTION SCHEDULE – LEAK TEST</h4>
 
 <!-- ================= FILTER TANGGAL ================= -->
 <form method="get" class="mb-3" style="max-width:220px">
@@ -13,19 +13,12 @@
            onchange="this.form.submit()">
 </form>
 
-<div class="mb-3">
-    <a href="/machining/daily-schedule/result?date=<?= esc($date) ?>"
-       class="btn btn-outline-primary btn-sm">
-        <i class="bi bi-graph-up"></i> Lihat Hasil & Efektivitas
-    </a>
-</div>
-
 <?php foreach ($shifts as $shift): ?>
 
 <hr>
-<h5 class="mt-4 mb-3"><?= esc($shift['shift_name']) ?></h5>
+<h5 class="mt-4 mb-3"><?= esc($shift['shift_name']) ?> – Leak Test</h5>
 
-<form method="post" action="/machining/daily-schedule/store">
+<form method="post" action="/machining/leak-test/schedule/store">
 <?= csrf_field() ?>
 
 <input type="hidden" name="date" value="<?= esc($date) ?>">
@@ -34,14 +27,13 @@
 <thead class="table-secondary">
 <tr>
     <th style="width:60px">Line</th>
-    <th style="width:120px">Alamat Mesin</th>
-    <th>Tipe Mesin</th>
+    <th style="width:120px">Kode Mesin</th>
+    <th>Mesin</th>
     <th style="width:260px">Part</th>
     <th style="width:80px">CT</th>
     <th style="width:120px">Planning</th>
     <th style="width:80px">Actual</th>
 </tr>
-
 </thead>
 
 <tbody>
@@ -61,10 +53,7 @@
     <?= esc($machine['machine_code']) ?>
 </td>
 
-<td class="text-start">
-    <?= esc($machine['machine_name']) ?>
-</td>
-
+<td class="text-start"><?= esc($machine['machine_name']) ?></td>
 
 <td>
 <select class="form-select form-select-sm product-select"
@@ -74,7 +63,6 @@
         name="items[<?= $idx ?>][product_id]">
     <option value="">-- pilih part --</option>
 </select>
-
 </td>
 
 <td>
@@ -99,7 +87,7 @@
        readonly>
 </td>
 
-<!-- ===== HIDDEN (WAJIB) ===== -->
+<!-- ===== HIDDEN ===== -->
 <input type="hidden"
        name="items[<?= $idx ?>][machine_id]"
        value="<?= $machine['id'] ?>">
@@ -115,7 +103,7 @@
 
 <button class="btn btn-success btn-sm mb-4">
     <i class="bi bi-save"></i>
-    Simpan <?= esc($shift['shift_name']) ?>
+    Simpan <?= esc($shift['shift_name']) ?> – Leak Test
 </button>
 
 </form>
@@ -124,7 +112,7 @@
 <!-- ================= JAVASCRIPT ================= -->
 <script>
 /**
- * Load product & target per machine + shift
+ * Load product & target per machine + shift (LEAK TEST)
  */
 async function loadProducts(selectEl) {
     const machineId  = selectEl.dataset.machine;
@@ -133,7 +121,7 @@ async function loadProducts(selectEl) {
 
     try {
         const res  = await fetch(
-            `/machining/daily-schedule/product-target?machine_id=${machineId}&shift_id=${shiftId}`
+            `/machining/leak-test/schedule/product-target?machine_id=${machineId}&shift_id=${shiftId}`
         );
         const data = await res.json();
 
@@ -151,13 +139,13 @@ async function loadProducts(selectEl) {
             `);
         });
 
-        // ⬇️ jika ada data lama, trigger change agar CT & plan muncul
+        // Trigger change jika ada data lama
         if (selectedId) {
             selectEl.dispatchEvent(new Event('change'));
         }
 
     } catch (e) {
-        console.error('Gagal load product', e);
+        console.error('Gagal load product Leak Test', e);
     }
 }
 

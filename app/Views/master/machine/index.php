@@ -42,8 +42,8 @@
 <table class="table table-bordered table-striped">
 <thead class="table-secondary">
 <tr>
-    <th>Code</th>
-    <th>Name</th>
+    <th>Alamat Mesin</th>
+    <th>Tipe Mesin</th>
     <th>Process</th>
     <th>Line Position</th>
     <th>Produk</th>

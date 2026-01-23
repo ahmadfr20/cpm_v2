@@ -226,15 +226,12 @@ $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
 
 
 
-$routes->group('shotblast', ['filter' => 'auth'], function ($routes) {
-    $routes->get('schedule', 'ShotBlast\ScheduleController::index');
-    $routes->post('schedule/store', 'ShotBlast\ScheduleController::store');
+$routes->group('shot-blasting', ['filter' => 'auth'], function ($routes) {
+    $routes->get('delivery', 'ShotBlasting\DeliveryController::index');
+    $routes->post('delivery/store', 'ShotBlasting\DeliveryController::store');
 
-    $routes->get('send', 'ShotBlast\SendController::index');
-    $routes->post('send/store', 'ShotBlast\SendController::store');
-
-    $routes->get('receive', 'ShotBlast\ReceiveController::index');
-    $routes->post('receive/store', 'ShotBlast\ReceiveController::store');
+        $routes->get('receiving', 'ShotBlasting\ReceivingController::index');
+    $routes->post('receiving/store', 'ShotBlasting\ReceivingController::store');
 });
 
 $routes->group('baritori', ['filter' => 'auth'], function ($routes) {
@@ -247,12 +244,12 @@ $routes->group('baritori', ['filter' => 'auth'], function ($routes) {
     $routes->get('send-external', 'Baritori\SendExternalController::index');
     $routes->post('send-external/store', 'Baritori\SendExternalController::store');
 
-    $routes->get('receive-external', 'Baritori\ReceiveExternalController::index');
-    $routes->post('receive-external/store', 'Baritori\ReceiveExternalController::store');
+    $routes->get('receiving', 'Baritori\ReceivingController::index');
+    $routes->post('receiving/store', 'Baritori\ReceivingController::store');
 
     // Internal
-    $routes->get('send-internal', 'Baritori\SendInternalController::index');
-    $routes->post('send-internal/store', 'Baritori\SendInternalController::store');
+    $routes->get('delivery', 'Baritori\DeliveryController::index');
+    $routes->post('delivery/store', 'Baritori\DeliveryController::store');
 });
 
 $routes->group('machining', ['filter' => 'auth'], function ($routes) {
@@ -315,6 +312,10 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     'Machining\LeakTestProductionController::index'
     );
 
+    $routes->get('leak-test/schedule', 'Machining\LeakTestDailyScheduleController::index');
+    $routes->get('leak-test/schedule/product-target', 'Machining\LeakTestDailyScheduleController::getProductAndTarget');
+    $routes->post('leak-test/schedule/store', 'Machining\LeakTestDailyScheduleController::store');
+
     $routes->get(
     'assy-bushing/hourly',
     'Machining\AssyBushingDailyProductionController::index'
@@ -331,7 +332,11 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     'Machining\AssyBushingProductionShiftController::index'
     );
 
-        $routes->get(
+    $routes->get('assy-bushing/schedule', 'Machining\AssyBushingDailyScheduleController::index');
+    $routes->get('assy-bushing/schedule/product-target', 'Machining\AssyBushingDailyScheduleController::getProductAndTarget');
+    $routes->post('assy-bushing/schedule/store', 'Machining\AssyBushingDailyScheduleController::store');
+
+    $routes->get(
         'assy-shaft/hourly',
         'Machining\AssyShaftDailyProductionController::index'
     );
@@ -344,7 +349,11 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->get(
     'assy-shaft/production/shift',
     'Machining\AssyShaftShiftProductionController::index'
-)   ;
+    );
+
+    $routes->get('assy-shaft/schedule', 'Machining\AssyShaftDailyScheduleController::index');
+    $routes->get('assy-shaft/schedule/product-target', 'Machining\AssyShaftDailyScheduleController::getProductAndTarget');
+    $routes->post('assy-shaft/schedule/store', 'Machining\AssyShaftDailyScheduleController::store');
 
 
 

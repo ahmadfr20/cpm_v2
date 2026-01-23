@@ -72,6 +72,15 @@ function isActive($path, $currentUrl)
 <li><a class="nav-link" href="/machining/dandori">Daily Dandori Schedule</a></li>
 <li><a class="nav-link" href="/machining/sub-assy-daily-schedule">Sub Assy Daily Schedule</a></li>
 
+<li class="text-secondary small mt-2">Machining Leak Test</li>
+<li><a class="nav-link" href="/machining/leak-test/schedule">Daily Schedule</a></li>
+
+<li class="text-secondary small mt-2">Machining Assy Bushing</li>
+<li><a class="nav-link" href="/machining/assy-bushing/schedule">Daily Schedule</a></li>
+
+<li class="text-secondary small mt-2">Machining Assy Shaft</li>
+<li><a class="nav-link" href="/machining/assy-shaft/schedule">Daily Schedule</a></li>
+
 <li class="text-secondary small mt-2">Shotblast</li>
 <li><a class="nav-link" href="/shotblast/daily-schedule">Daily Schedule</a></li>
 <li><a class="nav-link" href="/shotblast/delivery-external">Delivery to External</a></li>
@@ -160,8 +169,8 @@ function isActive($path, $currentUrl)
 
         <div class="collapse <?= isActive('delivery',$currentUrl)?'show':'' ?>" id="menuDelivery">
             <ul class="nav flex-column ms-3">
-            <li><a class="nav-link" href="#">Delivery to Shot Blast</a></li>
-            <li><a class="nav-link" href="#">Delivery to Baritori</a></li>
+            <li><a class="nav-link" href="/shot-blasting/delivery">Delivery to Shot Blast</a></li>
+            <li><a class="nav-link" href="/baritori/delivery">Delivery to Baritori</a></li>
     </ul>
 </div>
 </li>
@@ -177,8 +186,8 @@ function isActive($path, $currentUrl)
 
         <div class="collapse <?= isActive('receiving',$currentUrl)?'show':'' ?>" id="menuReceiving">
             <ul class="nav flex-column ms-3">
-            <li><a class="nav-link" href="#">Receiving from Shot Blast</a></li>
-            <li><a class="nav-link" href="#">Receiving from Baritori</a></li>
+            <li><a class="nav-link" href="/shot-blasting/receiving">Receiving from Shot Blast</a></li>
+            <li><a class="nav-link" href="/baritori/receiving">Receiving from Baritori</a></li>
 </div>
 </li>
 

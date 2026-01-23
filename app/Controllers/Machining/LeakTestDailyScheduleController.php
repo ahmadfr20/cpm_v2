@@ -4,7 +4,7 @@ namespace App\Controllers\Machining;
 
 use App\Controllers\BaseController;
 
-class DailyScheduleController extends BaseController
+class LeakTestDailyScheduleController extends BaseController
 {
     public function index()
     {
@@ -22,7 +22,8 @@ class DailyScheduleController extends BaseController
             ->get()->getResultArray();
 
         /**
-         * MESIN MACHINING
+         * ✅ MESIN LEAK TEST
+         * (PAKAI MESIN MACHINING)
          */
         $machines = $db->table('machines m')
             ->select('
@@ -32,10 +33,9 @@ class DailyScheduleController extends BaseController
                 m.line_position
             ')
             ->join('production_processes pp', 'pp.id = m.process_id')
-            ->where('pp.process_name', 'Machining')
+            ->where('pp.process_name', 'Machining') // 🔥 FIX UTAMA
             ->orderBy('m.line_position')
             ->get()->getResultArray();
-
 
         /**
          * PLAN EXISTING
@@ -50,7 +50,7 @@ class DailyScheduleController extends BaseController
             ')
             ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
             ->where('ds.schedule_date', $date)
-            ->where('ds.section', 'Machining')
+            ->where('ds.section', 'Leak Test')
             ->get()->getResultArray();
 
         $planMap = [];
@@ -59,14 +59,14 @@ class DailyScheduleController extends BaseController
         }
 
         /**
-         * ACTUAL & NG (DARI HOURLY)
+         * ACTUAL & NG (LEAK TEST HOURLY)
          */
-        $actuals = $db->table('machining_hourly')
+        $actuals = $db->table('machining_leak_test_hourly')
             ->select('
                 shift_id,
                 machine_id,
                 product_id,
-                SUM(qty_fg) act,
+                SUM(qty_ok) act,
                 SUM(qty_ng) ng
             ')
             ->where('production_date', $date)
@@ -80,7 +80,7 @@ class DailyScheduleController extends BaseController
             ] = $a;
         }
 
-        return view('machining/schedule/index', [
+        return view('machining/leak_test_schedule/index', [
             'date'      => $date,
             'shifts'    => $shifts,
             'machines'  => $machines,
@@ -90,9 +90,7 @@ class DailyScheduleController extends BaseController
     }
 
     /**
-     * =========================
      * AJAX: PRODUCT + TARGET
-     * =========================
      */
     public function getProductAndTarget()
     {
@@ -104,9 +102,9 @@ class DailyScheduleController extends BaseController
             return $this->response->setJSON([]);
         }
 
-        /* =========================
-        * TOTAL DETIK SHIFT
-        * ========================= */
+        /**
+         * TOTAL DETIK SHIFT
+         */
         $slots = $db->table('shift_time_slots sts')
             ->select('ts.time_start, ts.time_end')
             ->join('time_slots ts', 'ts.id = sts.time_slot_id')
@@ -121,9 +119,9 @@ class DailyScheduleController extends BaseController
             $totalSecond += ($end - $start);
         }
 
-        /* =========================
-        * PRODUCT DARI PRODUCTS
-        * ========================= */
+        /**
+         * ✅ PRODUCT MACHINING (SAMA DENGAN MACHINING)
+         */
         $products = $db->table('machine_products mp')
             ->select('
                 p.id,
@@ -136,32 +134,23 @@ class DailyScheduleController extends BaseController
             ->join('products p', 'p.id = mp.product_id')
             ->where('mp.machine_id', $machineId)
             ->where('mp.is_active', 1)
+            ->where('p.is_active', 1)
             ->orderBy('p.part_no')
             ->get()
             ->getResultArray();
 
-        /* =========================
-        * HITUNG TARGET
-        * ========================= */
         foreach ($products as &$p) {
-
             $cycle  = (int) $p['cycle_time'];
             $cavity = (int) $p['cavity'];
             $eff    = ((float) $p['efficiency_rate']) / 100;
 
-            if ($cycle > 0 && $cavity > 0) {
-                $p['target'] = min(
-                    floor(($totalSecond / $cycle) * $cavity * $eff),
-                    1200
-                );
-            } else {
-                $p['target'] = 0;
-            }
+            $p['target'] = ($cycle > 0 && $cavity > 0)
+                ? min(floor(($totalSecond / $cycle) * $cavity * $eff), 1200)
+                : 0;
         }
 
         return $this->response->setJSON($products);
     }
-
 
     /**
      * =========================
@@ -196,9 +185,9 @@ class DailyScheduleController extends BaseController
                 $machineId = (int) $row['machine_id'];
                 $productId = (int) $row['product_id'];
 
-                /* =========================
-                * MASTER PRODUCT
-                * ========================= */
+                /**
+                 * MASTER PRODUCT
+                 */
                 $product = $db->table('products')
                     ->select('cycle_time, cavity, efficiency_rate')
                     ->where('id', $productId)
@@ -207,15 +196,15 @@ class DailyScheduleController extends BaseController
 
                 if (!$product) continue;
 
-                $cycle  = (int) $product['cycle_time'];        // detik
+                $cycle  = (int) $product['cycle_time'];
                 $cavity = (int) $product['cavity'];
                 $eff    = ((float) $product['efficiency_rate']) / 100;
 
                 if ($cycle <= 0 || $cavity <= 0) continue;
 
-                /* =========================
-                * TOTAL DETIK SHIFT
-                * ========================= */
+                /**
+                 * TOTAL DETIK SHIFT
+                 */
                 $slots = $db->table('shift_time_slots sts')
                     ->select('ts.time_start, ts.time_end')
                     ->join('time_slots ts', 'ts.id = sts.time_slot_id')
@@ -233,9 +222,9 @@ class DailyScheduleController extends BaseController
 
                 if ($totalSecond <= 0) continue;
 
-                /* =========================
-                * TARGET PER HOUR & SHIFT
-                * ========================= */
+                /**
+                 * TARGET
+                 */
                 $targetPerHour = floor(
                     (3600 / $cycle) * $cavity * $eff
                 );
@@ -247,14 +236,14 @@ class DailyScheduleController extends BaseController
 
                 if ($targetPerShift <= 0) continue;
 
-                /* =========================
-                * DAILY SCHEDULE HEADER
-                * ========================= */
+                /**
+                 * DAILY SCHEDULE HEADER
+                 */
                 $schedule = $db->table('daily_schedules')
                     ->where([
                         'schedule_date' => $date,
                         'shift_id'      => $shiftId,
-                        'section'       => 'Machining'
+                        'section'       => 'Leak Test'
                     ])
                     ->get()
                     ->getRowArray();
@@ -263,7 +252,7 @@ class DailyScheduleController extends BaseController
                     $db->table('daily_schedules')->insert([
                         'schedule_date' => $date,
                         'shift_id'      => $shiftId,
-                        'section'       => 'Machining',
+                        'section'       => 'Leak Test',
                         'is_completed'  => 0,
                         'created_at'    => date('Y-m-d H:i:s')
                     ]);
@@ -272,9 +261,9 @@ class DailyScheduleController extends BaseController
                     $scheduleId = $schedule['id'];
                 }
 
-                /* =========================
-                * DAILY SCHEDULE ITEM (UPSERT)
-                * ========================= */
+                /**
+                 * DAILY SCHEDULE ITEM (UPSERT)
+                 */
                 $existItem = $db->table('daily_schedule_items')
                     ->where([
                         'daily_schedule_id' => $scheduleId,
@@ -310,7 +299,7 @@ class DailyScheduleController extends BaseController
 
             $db->transCommit();
             return redirect()->back()
-                ->with('success', 'Daily schedule Machining berhasil disimpan');
+                ->with('success', 'Daily schedule Leak Test berhasil disimpan');
 
         } catch (\Throwable $e) {
 
@@ -318,6 +307,4 @@ class DailyScheduleController extends BaseController
             return redirect()->back()->with('error', $e->getMessage());
         }
     }
-
-
 }

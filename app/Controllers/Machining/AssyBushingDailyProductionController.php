@@ -70,7 +70,7 @@ class AssyBushingDailyProductionController extends BaseController
                 ->join('products p', 'p.id = dsi.product_id')
                 ->where('ds.schedule_date', $date)
                 ->where('ds.shift_id', $shift['id'])
-                ->where('ds.section', 'Machining')
+                ->where('ds.section', 'Assy Bushing')
                 ->orderBy('m.line_position')
                 ->get()
                 ->getResultArray();
