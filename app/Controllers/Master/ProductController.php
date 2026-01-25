@@ -59,7 +59,7 @@ class ProductController extends BaseController
             'customer_id'      => $customerId,
             'weight_ascas'     => $this->request->getPost('weight_ascas'),
             'weight_runner'    => $this->request->getPost('weight_runner'),
-            'cycle_time'   => $this->request->getPost('cycle_time'),
+            'cycle_time'       => $this->request->getPost('cycle_time'),
             'cavity'           => $this->request->getPost('cavity'),
             'efficiency_rate'  => $this->request->getPost('efficiency_rate'),
             'notes'            => $this->request->getPost('notes'),

@@ -195,7 +195,7 @@ public function store()
         }
 
         /* =========================
-         * LOOP PER ITEM (BISA 1 SAJA)
+         * LOOP ITEM
          * ========================= */
         foreach ($items as $row) {
 
@@ -215,13 +215,12 @@ public function store()
             $qtyA  = (int) ($row['qty_a'] ?? 0);
             $qtyNG = (int) ($row['qty_ng'] ?? 0);
 
-            // kalau semua nol → skip (tapi item lain tetap jalan)
             if ($qtyP <= 0 && $qtyA <= 0 && $qtyNG <= 0) {
                 continue;
             }
 
             /* =========================
-             * DAILY SCHEDULE (HEADER)
+             * DAILY SCHEDULE HEADER
              * ========================= */
             $schedule = $db->table('daily_schedules')
                 ->where([
@@ -249,12 +248,17 @@ public function store()
              * MASTER PRODUCT
              * ========================= */
             $product = $db->table('products')
-                ->select('weight_ascas, weight_runner, cycle_time, cavity, efficiency_rate')
+                ->select('part_name, weight_ascas, weight_runner, cycle_time, cavity, efficiency_rate')
                 ->where('id', $productId)
                 ->get()
                 ->getRowArray();
 
             if (!$product) continue;
+
+            /* =========================
+             * 🔥 PART LABEL KHUSUS DC
+             * ========================= */
+            $partLabel = $product['part_name'] . ' #1';
 
             $wa     = (float) $product['weight_ascas'];
             $wr     = (float) $product['weight_runner'];
@@ -270,7 +274,6 @@ public function store()
 
             /* =========================
              * DIE CASTING PRODUCTION
-             * (UPSERT)
              * ========================= */
             $existProd = $db->table('die_casting_production')
                 ->where([
@@ -283,23 +286,26 @@ public function store()
                 ->getRowArray();
 
             if ($existProd) {
-                // UPDATE
+
                 $db->table('die_casting_production')
                     ->where('id', $existProd['id'])
                     ->update([
-                        'qty_p'     => $qtyP,
-                        'qty_a'     => $qtyA,
-                        'qty_ng'    => $qtyNG,
-                        'weight_kg' => (($qtyP * $wa) + ($qtyA * $wr)) / 1000,
-                        'status'    => $row['status'] ?? $existProd['status']
+                        'qty_p'      => $qtyP,
+                        'qty_a'      => $qtyA,
+                        'qty_ng'     => $qtyNG,
+                        'weight_kg'  => (($qtyP * $wa) + ($qtyA * $wr)) / 1000,
+                        'part_label' => $partLabel,
+                        'status'     => $row['status'] ?? $existProd['status']
                     ]);
+
             } else {
-                // INSERT
+
                 $db->table('die_casting_production')->insert([
                     'production_date' => $date,
                     'shift_id'        => $shiftId,
                     'machine_id'      => $machineId,
                     'product_id'      => $productId,
+                    'part_label'      => $partLabel,
                     'qty_p'           => $qtyP,
                     'qty_a'           => $qtyA,
                     'qty_ng'          => $qtyNG,
@@ -311,7 +317,6 @@ public function store()
 
             /* =========================
              * DAILY SCHEDULE ITEM
-             * (CEK DUPLIKAT)
              * ========================= */
             $existItem = $db->table('daily_schedule_items')
                 ->where([
@@ -354,38 +359,37 @@ public function store()
         $db   = db_connect();
         $date = $this->request->getGet('date') ?? date('Y-m-d');
 
-        $rows = $db->table('die_casting_production dcp')
-            ->select('
+    $rows = $db->table('die_casting_production dcp')
+        ->select('
+            s.shift_name,
+            m.machine_code,
+            m.line_position,
+            p.part_no,
+            COALESCE(dcp.part_label, p.part_name) AS part_name,
+            p.weight_ascas,
+            p.weight_runner,
+            dcp.qty_p,
+            dcp.qty_a,
+            dcp.qty_ng,
+            dcp.status
+        ')
+        ->join('shifts s', 's.id = dcp.shift_id')
+        ->join('machines m', 'm.id = dcp.machine_id')
+        ->join('products p', 'p.id = dcp.product_id')
+        ->where('dcp.production_date', $date)
+        ->orderBy(
+            "FIELD(
                 s.shift_name,
-                m.machine_code,
-                m.line_position,
-                p.part_no,
-                p.weight_ascas,
-                p.weight_runner,
-                dcp.qty_p,
-                dcp.qty_a,
-                dcp.qty_ng,
-                dcp.status
-            ')
-            ->join('shifts s', 's.id = dcp.shift_id')
-            ->join('machines m', 'm.id = dcp.machine_id')
-            ->join('products p', 'p.id = dcp.product_id', 'left')
-            ->where('dcp.production_date', $date)
-
-            // urutan shift
-            ->orderBy(
-                "FIELD(
-                    s.shift_name,
-                    'Shift 1 DC (Mon-Thu)',
-                    'Shift 2 DC (Mon-Thu)',
-                    'Shift 3 DC (Mon-Thu)'
-                )",
-                '',
-                false
-            )
-            ->orderBy('m.line_position')
-            ->get()
-            ->getResultArray();
+                'Shift 1 DC (Mon-Thu)',
+                'Shift 2 DC (Mon-Thu)',
+                'Shift 3 DC (Mon-Thu)'
+            )",
+            '',
+            false
+        )
+        ->orderBy('m.line_position')
+        ->get()
+        ->getResultArray();
 
         return view('die_casting/daily_schedule/view', [
             'date' => $date,

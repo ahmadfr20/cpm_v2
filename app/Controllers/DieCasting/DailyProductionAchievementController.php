@@ -49,7 +49,7 @@ class DailyProductionAchievementController extends BaseController
                     dcp.product_id,
                     dcp.qty_p AS target,
                     p.part_no,
-                    p.part_name,
+                    COALESCE(dcp.part_label, p.part_name) AS part_name,
                     IFNULL(SUM(dh.qty_fg),0) AS total_fg,
                     IFNULL(SUM(dh.qty_ng),0) AS total_ng,
                     MAX(dh.ng_category) AS ng_category,

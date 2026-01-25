@@ -30,7 +30,8 @@
 
 <thead>
 <tr>
-    <th rowspan="2" class="sticky-left col-part">Part</th>
+    <th rowspan="2" class="sticky-left col-part">Mesin</th>
+    <th rowspan="2" class="sticky-left col-machine">Part</th>
     <th rowspan="2" class="sticky-left-2 col-target-shift">Target<br>Shift</th>
 
     <?php foreach ($shift['slots'] as $slot): ?>
@@ -57,8 +58,12 @@
 <?php foreach ($shift['items'] as $item): ?>
 <tr>
 
+<td class="sticky-left fw-bold text-center">
+    <?= esc($item['machine_code']) ?>
+</td>
+
 <td class="sticky-left text-start fw-bold">
-    <?= esc($item['part_no'].' - '.$item['part_name']) ?>
+    <?= esc($item['part_name']) ?>
 </td>
 
 <td class="sticky-left-2 fw-bold text-center target-shift">
@@ -165,6 +170,30 @@ $exist = $shift['hourly_map']
 .sticky-left-2{position:sticky;left:260px;background:#fff;z-index:5}
 .slot-active{background:#dcfce7!important}
 .slot-header-active{background:#fde68a!important}
+
+.col-machine{width:110px}
+.col-part{width:260px}
+.col-target-shift{width:110px}
+
+.sticky-left{
+    position:sticky;
+    left:0;
+    background:#fff;
+    z-index:6
+}
+.sticky-left-2{
+    position:sticky;
+    left:110px;
+    background:#fff;
+    z-index:6
+}
+.sticky-left-3{
+    position:sticky;
+    left:370px;
+    background:#fff;
+    z-index:6
+}
+
 </style>
 
     <script>

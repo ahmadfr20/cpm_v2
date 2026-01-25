@@ -56,7 +56,7 @@ class DailyProductionController extends BaseController
                     m.machine_code,
                     dcp.product_id,
                     p.part_no,
-                    p.part_name,
+                    COALESCE(dcp.part_label, p.part_name) AS part_name,
                     dcp.qty_p
                 ')
                 ->join('machines m', 'm.id = dcp.machine_id')
@@ -65,7 +65,9 @@ class DailyProductionController extends BaseController
                 ->where('dcp.shift_id', $shift['id'])
                 ->where('dcp.qty_p >', 0)
                 ->orderBy('m.line_position')
-                ->get()->getResultArray();
+                ->get()
+                ->getResultArray();
+
 
             // ===== HOURLY MAP =====
             $hourly = $db->table('die_casting_hourly')

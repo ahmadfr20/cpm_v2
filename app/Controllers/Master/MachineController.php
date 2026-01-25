@@ -144,4 +144,33 @@ class MachineController extends BaseController
             ->with('success', 'Machine berhasil diperbarui');
     }
 
+    /* ===============================
+ * DELETE PRODUCT FROM MACHINE
+ * =============================== */
+/* ===============================
+ * DELETE MACHINE
+ * =============================== */
+public function deleteMachine($id)
+{
+    $machine = $this->machineModel->find($id);
+
+    if (!$machine) {
+        return redirect()->back()
+            ->with('error', 'Machine tidak ditemukan');
+    }
+
+    // Optional: hapus relasi product dulu (aman)
+    $this->machineProductModel
+        ->where('machine_id', $id)
+        ->delete();
+
+    // Hapus machine
+    $this->machineModel->delete($id);
+
+    return redirect()->to('/master/machine')
+        ->with('success', 'Machine berhasil dihapus');
+}
+
+
+
 }

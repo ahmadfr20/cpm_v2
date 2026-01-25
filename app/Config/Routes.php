@@ -21,6 +21,8 @@ $routes->group('dashboard', ['filter' => 'auth'], function ($routes) {
 });
 
 
+
+
 $routes->group('master', ['filter' => 'auth'], function ($routes) {
 
     // Shift
@@ -61,7 +63,15 @@ $routes->group('master', ['filter' => 'auth'], function ($routes) {
     $routes->post('machine/store', 'Master\MachineController::store');
     $routes->get('machine/edit/(:num)', 'Master\MachineController::edit/$1');
     $routes->post('machine/update/(:num)', 'Master\MachineController::update/$1');
-    $routes->get('machine/delete/(:num)', 'Master\MachineController::delete/$1');
+    $routes->post(
+    'machine/(:num)/delete',
+    'Master\MachineController::deleteMachine/$1');
+
+    $routes->get ('production-flow', 'Master\ProductProcessFlowController::index');
+    $routes->post('production-flow/save', 'Master\ProductProcessFlowController::save');
+
+
+
 
     $routes->get('machine/products/(:num)', 'Master\MachineController::manageProducts/$1');
     $routes->post('machine/save-products/(:num)', 'Master\MachineController::saveProducts/$1');

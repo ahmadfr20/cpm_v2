@@ -74,11 +74,19 @@
             </a>
 
             <!-- DELETE -->
-            <a href="/master/machine/delete/<?= $m['id'] ?>"
-               class="btn btn-sm btn-danger mb-1"
-               onclick="return confirm('Hapus machine?')">
-                Hapus
-            </a>
+            <form action="/master/machine/<?= $m['id'] ?>/delete"
+                method="post"
+                class="d-inline"
+                onsubmit="return confirm('Hapus machine?')">
+
+                <?= csrf_field() ?>
+
+                <button type="submit"
+                        class="btn btn-sm btn-danger mb-1">
+                    Hapus
+                </button>
+            </form>
+
         </td>
     </tr>
     <?php endforeach ?>

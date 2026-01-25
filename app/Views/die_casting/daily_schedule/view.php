@@ -107,7 +107,7 @@ $runnerKg = ($r['qty_a'] * ($r['weight_runner'] ?? 0)) / 1000;
 
 <tr>
     <td><?= esc($r['machine_code']) ?></td>
-    <td class="text-start"><?= esc($r['part_no'] ?? '-') ?></td>
+    <td class="text-start"><?= esc($r['part_name'] ?? '-') ?></td>
     <td class="text-end"><?= number_format($r['qty_p']) ?></td>
     <td class="text-end"><?= number_format($ascasKg,2) ?></td>
     <td class="text-end"><?= number_format($r['qty_a']) ?></td>
