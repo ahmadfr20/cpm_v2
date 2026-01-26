@@ -19,12 +19,12 @@ function isActive($path, $currentUrl)
     </a>
 </li>
 
-<li class="nav-item">
+<!-- <li class="nav-item mt-3">
     <a class="nav-link <?= $currentUrl === 'dashboard' ? 'active' : '' ?>"
        href="/production/daily-schedule/list">
         <i class="bi bi-alarm me-2"></i> All Daily Schedules
     </a>
-</li>
+</li> -->
 
 <!-- ================= MASTER DATA ================= -->
 <?php if (in_array($role, ['ADMIN','PPIC'])): ?>
@@ -190,6 +190,13 @@ function isActive($path, $currentUrl)
             <li><a class="nav-link" href="/shot-blasting/receiving">Receiving from Shot Blast</a></li>
             <li><a class="nav-link" href="/baritori/receiving">Receiving from Baritori</a></li>
 </div>
+</li>
+
+<li class="nav-item mt-3">
+    <a class="nav-link <?= $currentUrl === 'wip' ? 'active' : '' ?>"
+       href="/wip/from-schedule">
+        <i class="bi bi-alarm me-2"></i> WIP List
+    </a>
 </li>
 
 </ul>

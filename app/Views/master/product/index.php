@@ -48,10 +48,10 @@
 <thead>
 <tr>
     <th width="50">No</th>
-    <th>Part No</th>
-    <th>Part Name</th>
+    <th>Part</th>
+    <th>Product Name</th>
     <th>Customer</th>
-    <th>As-Cast (gr)</th>
+    <th>Ascas (gr)</th>
     <th>Runner (gr)</th>
     <th>Cycle Time (sec)</th>
     <th>Cavity</th>

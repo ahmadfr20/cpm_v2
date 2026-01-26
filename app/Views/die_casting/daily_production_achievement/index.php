@@ -16,162 +16,199 @@
     </div>
 </form>
 
-<form method="post" action="/die-casting/daily-production-achievement/store">
-<?= csrf_field() ?>
+<form method="post" action="/die-casting/daily-production-achievement/store" id="mainFormShift">
+    <?= csrf_field() ?>
 
-<?php foreach ($shifts as $shift): ?>
+    <?php foreach ($shifts as $shift): ?>
 
-<h5 class="mt-4 mb-2">
-    <?= esc($shift['shift_name']) ?>
-</h5>
+        <h5 class="mt-4 mb-2">
+            <?= esc($shift['shift_name']) ?>
+        </h5>
 
-<?php if (!$shift['isEditable']): ?>
-<div class="alert alert-warning py-2 small">
-    <i class="bi bi-lock-fill"></i>
-    Koreksi hanya dapat dilakukan <strong>setelah shift berakhir</strong>.
-</div>
-<?php endif; ?>
+        <?php if (!$shift['isEditable']): ?>
+            <div class="alert alert-warning py-2 small">
+                <i class="bi bi-lock-fill"></i>
+                Koreksi hanya dapat dilakukan <strong>maksimal 1 jam setelah shift berakhir</strong>.
+                <?php if (!empty($shift['editDeadline'])): ?>
+                    <div class="mt-1">
+                        Batas koreksi: <strong><?= esc($shift['editDeadline']) ?></strong>
+                    </div>
+                <?php endif; ?>
+            </div>
+        <?php else: ?>
+            <div class="alert alert-success py-2 small">
+                <i class="bi bi-unlock-fill"></i>
+                Koreksi aktif.
+                <?php if (!empty($shift['editDeadline'])): ?>
+                    Batas koreksi: <strong><?= esc($shift['editDeadline']) ?></strong>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
 
-<div class="table-responsive mb-4">
-<table class="table table-bordered table-sm align-middle">
+        <div class="table-responsive mb-4">
+            <table class="table table-bordered table-sm align-middle">
 
-<thead class="table-light">
-<tr class="text-center">
-    <th style="width:40px">No</th>
-    <th>Part</th>
-    <th style="width:90px">Target</th>
-    <th style="width:90px">FG</th>
-    <th style="width:90px">NG</th>
-    <th style="width:160px">NG Category</th>
-    <th style="width:120px">Downtime (min)</th>
-    <th>Keterangan</th>
-</tr>
-</thead>
+                <thead class="table-light">
+                <tr class="text-center">
+                    <th style="width:40px">No</th>
+                    <th>Part</th>
+                    <th style="width:90px">Target</th>
+                    <th style="width:90px">FG (Actual)</th>
+                    <th style="width:90px">NG</th>
+                    <th style="width:160px">Next Process</th>
+                    <th style="width:90px">WIP Qty</th>
+                    <th style="width:120px">WIP Status</th>
+                    <th style="width:160px">NG Category</th>
+                    <th style="width:120px">Downtime (min)</th>
+                </tr>
+                </thead>
 
-<tbody>
-<?php
-$no = 1;
-$totalTarget = 0;
-$totalFG = 0;
-$totalNG = 0;
-?>
+                <tbody>
+                <?php
+                $no = 1;
+                $totalTarget = 0;
+                $totalFG = 0;
+                $totalNG = 0;
+                ?>
 
-<?php if (empty($shift['items'])): ?>
-<tr>
-    <td colspan="8" class="text-center text-muted">
-        Tidak ada data schedule
-    </td>
-</tr>
-<?php endif; ?>
+                <?php if (empty($shift['items'])): ?>
+                    <tr>
+                        <td colspan="10" class="text-center text-muted">
+                            Tidak ada data schedule
+                        </td>
+                    </tr>
+                <?php endif; ?>
 
-<?php foreach ($shift['items'] as $row): ?>
-<?php
-    $totalTarget += $row['target'];
-    $totalFG += $row['total_fg'];
-    $totalNG += $row['total_ng'];
-?>
-<tr>
-    <td class="text-center"><?= $no++ ?></td>
+                <?php foreach ($shift['items'] as $row): ?>
+                    <?php
+                    $totalTarget += (int)$row['target'];
+                    $totalFG     += (int)$row['fg_display'];
+                    $totalNG     += (int)$row['ng_display'];
 
-    <td>
-        <strong><?= esc($row['part_no']) ?></strong><br>
-        <small class="text-muted"><?= esc($row['part_name']) ?></small>
-    </td>
+                    $wipStatus = $row['wip_status'] ?? 'WAITING';
+                    $badge = 'secondary';
+                    if ($wipStatus === 'WAITING') $badge = 'warning';
+                    if ($wipStatus === 'SCHEDULED') $badge = 'info';
+                    if ($wipStatus === 'DONE') $badge = 'success';
+                    ?>
 
-    <td class="text-end fw-bold">
-        <?= number_format($row['target']) ?>
-    </td>
+                    <tr>
+                        <td class="text-center"><?= $no++ ?></td>
 
-    <td>
-        <input type="number"
-               class="form-control form-control-sm text-end"
-               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][fg]"
-               value="<?= $row['total_fg'] ?>"
-               <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
-    </td>
+                        <td>
+                            <strong><?= esc($row['part_no']) ?></strong><br>
+                            <small class="text-muted"><?= esc($row['part_name']) ?></small>
+                            <div class="small text-muted mt-1">
+                                <span class="me-2">Mesin: <strong><?= esc($row['machine_code'] ?? '-') ?></strong></span>
+                            </div>
+                        </td>
 
-    <td>
-        <input type="number"
-               class="form-control form-control-sm text-end"
-               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][ng]"
-               value="<?= $row['total_ng'] ?>"
-               <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
-    </td>
+                        <td class="text-end fw-bold">
+                            <?= number_format((int)$row['target']) ?>
+                        </td>
 
-    <td>
-        <select class="form-select form-select-sm"
-                name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][ng_category]"
-                <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
-            <option value="">-</option>
-            <?php foreach (['Flow Line','Crack','Porosity','Short Shot','Others'] as $cat): ?>
-                <option value="<?= $cat ?>"
-                    <?= ($row['ng_category'] ?? '') === $cat ? 'selected' : '' ?>>
-                    <?= $cat ?>
-                </option>
-            <?php endforeach ?>
-        </select>
-    </td>
+                        <td>
+                            <input type="number"
+                                   class="form-control form-control-sm text-end"
+                                   name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][fg]"
+                                   value="<?= (int)$row['fg_display'] ?>"
+                                   <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
+                        </td>
 
-    <td>
-        <input type="number"
-               class="form-control form-control-sm text-end"
-               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][downtime]"
-               value="<?= $row['downtime'] ?>"
-               <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
-    </td>
+                        <td>
+                            <input type="number"
+                                   class="form-control form-control-sm text-end"
+                                   name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][ng]"
+                                   value="<?= (int)$row['ng_display'] ?>"
+                                   <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
+                        </td>
 
-    <td>
-        <input type="text"
-               class="form-control form-control-sm"
-               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][remark]"
-               <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
-    </td>
+                        <td class="text-center">
+                            <?= esc($row['next_process_name'] ?? '-') ?>
+                        </td>
 
-    <!-- HIDDEN -->
-    <input type="hidden"
-           name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][machine_id]"
-           value="<?= $row['machine_id'] ?>">
-    <input type="hidden"
-           name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][product_id]"
-           value="<?= $row['product_id'] ?>">
-    <input type="hidden"
-           name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][shift_id]"
-           value="<?= $shift['id'] ?>">
-    <input type="hidden"
-           name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][date]"
-           value="<?= $date ?>">
-</tr>
-<?php endforeach ?>
-</tbody>
+                        <td class="text-end">
+                            <?= number_format((int)($row['wip_qty'] ?? 0)) ?>
+                        </td>
 
-<tfoot class="table-secondary fw-bold">
-<tr>
-    <td colspan="2" class="text-end">TOTAL</td>
-    <td class="text-end"><?= number_format($totalTarget) ?></td>
-    <td class="text-end"><?= number_format($totalFG) ?></td>
-    <td class="text-end"><?= number_format($totalNG) ?></td>
-    <td colspan="3"></td>
-</tr>
+                        <td class="text-center">
+                            <span class="badge bg-<?= $badge ?>">
+                                <?= esc($wipStatus) ?>
+                            </span>
+                        </td>
 
-<tr>
-    <td colspan="2" class="text-end">EFFICIENCY</td>
-    <td colspan="6">
-        <?= $totalTarget > 0
-            ? round(($totalFG / $totalTarget) * 100, 1)
-            : 0 ?> %
-    </td>
-</tr>
-</tfoot>
+                        <td>
+                            <select class="form-select form-select-sm"
+                                    name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][ng_category_id]"
+                                    <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
+                                <option value="">-- NG --</option>
+                                <?php foreach ($ngCategories as $ng): ?>
+                                    <option value="<?= $ng['id'] ?>"
+                                        <?= ((string)($row['ng_category_id'] ?? '') === (string)$ng['id']) ? 'selected' : '' ?>>
+                                        <?= esc($ng['ng_code'].' - '.$ng['ng_name']) ?>
+                                    </option>
+                                <?php endforeach; ?>
+                            </select>
+                        </td>
 
-</table>
-</div>
+                        <td>
+                            <input type="number"
+                                   class="form-control form-control-sm text-end"
+                                   name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][downtime]"
+                                   value="<?= (int)($row['downtime'] ?? 0) ?>"
+                                   <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
+                        </td>
 
-<?php endforeach; ?>
+                        <!-- HIDDEN -->
+                        <input type="hidden"
+                               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][production_id]"
+                               value="<?= (int)$row['production_id'] ?>">
 
-<button class="btn btn-success">
-    <i class="bi bi-save"></i> Simpan Koreksi
-</button>
+                        <input type="hidden"
+                               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][machine_id]"
+                               value="<?= (int)$row['machine_id'] ?>">
 
+                        <input type="hidden"
+                               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][product_id]"
+                               value="<?= (int)$row['product_id'] ?>">
+
+                        <input type="hidden"
+                               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][shift_id]"
+                               value="<?= (int)$shift['id'] ?>">
+
+                        <input type="hidden"
+                               name="items[<?= $shift['id'].'_'.$row['machine_id'].'_'.$row['product_id'] ?>][date]"
+                               value="<?= esc($date) ?>">
+
+                    </tr>
+                <?php endforeach; ?>
+                </tbody>
+
+                <tfoot class="table-secondary fw-bold">
+                <tr>
+                    <td colspan="2" class="text-end">TOTAL</td>
+                    <td class="text-end"><?= number_format($totalTarget) ?></td>
+                    <td class="text-end"><?= number_format($totalFG) ?></td>
+                    <td class="text-end"><?= number_format($totalNG) ?></td>
+                    <td colspan="5"></td>
+                </tr>
+
+                <tr>
+                    <td colspan="2" class="text-end">EFFICIENCY</td>
+                    <td colspan="8">
+                        <?= $totalTarget > 0 ? round(($totalFG / $totalTarget) * 100, 1) : 0 ?> %
+                    </td>
+                </tr>
+                </tfoot>
+
+            </table>
+        </div>
+
+    <?php endforeach; ?>
+
+    <button class="btn btn-success">
+        <i class="bi bi-save"></i> Simpan Koreksi
+    </button>
 </form>
 
 <?= $this->endSection() ?>

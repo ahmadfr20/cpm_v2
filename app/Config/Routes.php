@@ -69,6 +69,10 @@ $routes->group('master', ['filter' => 'auth'], function ($routes) {
 
     $routes->get ('production-flow', 'Master\ProductProcessFlowController::index');
     $routes->post('production-flow/save', 'Master\ProductProcessFlowController::save');
+    $routes->post(
+    'production-flow/bulk-update',
+    'Master\ProductProcessFlowController::bulkUpdate'
+);
 
 
 
@@ -113,6 +117,10 @@ $routes->group('material', ['filter'=>'auth'], function ($routes) {
     $routes->post('transfer-dc/store', 'Material\TransferToDieCastingController::store');
 });
 
+$routes->group('wip', ['filter'=>'auth'], function ($routes) {
+    $routes->get('from-schedule', 'WIP\WipFromScheduleController::index');
+});
+
 $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
 
     // =====================================================
@@ -147,6 +155,8 @@ $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
         'daily-production/save-slot',
         'DieCasting\DailyProductionController::saveSlot'
     );
+
+    $routes->post('daily-production/finish-shift', 'DieCasting\DailyProductionController::finishShift');
 
 
     // =====================================================
