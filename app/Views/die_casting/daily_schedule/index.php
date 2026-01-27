@@ -12,11 +12,29 @@
 
 <form method="get" class="mb-3">
   <input type="date" name="date" value="<?= esc($date) ?>"
-         class="form-control w-25" onchange="this.form.submit()">
+         class="form-control" style="max-width:240px" onchange="this.form.submit()">
 </form>
 
 <form method="post" action="<?= site_url('/die-casting/daily-schedule/store') ?>">
 <?= csrf_field() ?>
+
+<!-- Select2 (searchable dropdown) -->
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
+<style>
+  .select2-container .select2-selection--single{
+    height: 31px;
+  }
+  .select2-container--default .select2-selection--single .select2-selection__rendered{
+    line-height: 31px;
+    font-size: 12px;
+  }
+  .select2-container--default .select2-selection--single .select2-selection__arrow{
+    height: 31px;
+  }
+</style>
 
 <?php foreach ($shifts as $shift): ?>
   <h5 class="mt-4 d-flex align-items-center justify-content-between">
@@ -31,98 +49,100 @@
     </span>
   </h5>
 
-  <table class="table table-bordered table-sm text-center align-middle">
-    <thead class="table-secondary">
-      <tr>
-        <th>Mesin</th>
-        <th>Total Menit</th>
-        <th>Part</th>
-        <th>Plan</th>
-        <th>Ascas (kg)</th>
-        <th>A (Actual)</th>
-        <th>Runner (kg)</th>
-        <th>NG</th>
-        <th>Status</th>
-      </tr>
-    </thead>
-    <tbody>
+  <div class="table-responsive">
+    <table class="table table-bordered table-sm text-center align-middle">
+      <thead class="table-secondary">
+        <tr>
+          <th>Mesin</th>
+          <th>Total Menit</th>
+          <th style="min-width:320px">Part</th>
+          <th>Plan</th>
+          <th>Ascas (kg)</th>
+          <th>A (Actual)</th>
+          <th>Runner (kg)</th>
+          <th>NG</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody>
 
-    <?php foreach ($machines as $m):
-      $p   = $map[$shift['id']][$m['id']] ?? null;
-      $key = $shift['id'].'_'.$m['id'];
-    ?>
-      <tr data-shift="<?= (int)$shift['id'] ?>">
-        <td><?= esc($m['machine_code']) ?></td>
-        <td class="fw-bold bg-light"><?= (int)$shift['total_minute'] ?></td>
+      <?php foreach ($machines as $m):
+        $p   = $map[$shift['id']][$m['id']] ?? null;
+        $key = $shift['id'].'_'.$m['id'];
+      ?>
+        <tr data-shift="<?= (int)$shift['id'] ?>">
+          <td><?= esc($m['machine_code']) ?></td>
+          <td class="fw-bold bg-light"><?= (int)$shift['total_minute'] ?></td>
 
-        <td>
-          <select class="form-select form-select-sm product"
-                  data-machine="<?= (int)$m['id'] ?>"
-                  data-shift="<?= (int)$shift['id'] ?>"
-                  data-selected="<?= $p['product_id'] ?? '' ?>"
-                  name="items[<?= esc($key) ?>][product_id]">
-            <option value="">-- pilih --</option>
-          </select>
-        </td>
+          <td class="text-start">
+            <select class="form-select form-select-sm product product-select"
+                    data-machine="<?= (int)$m['id'] ?>"
+                    data-shift="<?= (int)$shift['id'] ?>"
+                    data-selected="<?= $p['product_id'] ?? '' ?>"
+                    name="items[<?= esc($key) ?>][product_id]">
+              <option value="">-- pilih --</option>
+            </select>
 
-        <td>
-          <input type="number"
-                 class="form-control form-control-sm qty-p text-end"
-                 name="items[<?= esc($key) ?>][qty_p]"
-                 value="<?= (int)($p['qty_p'] ?? 0) ?>"
-                 min="0" max="1200">
-        </td>
+            <!-- ✅ Hidden fields WAJIB ada di dalam TD (biar valid HTML & terkirim) -->
+            <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$m['id'] ?>">
+            <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
+            <input type="hidden" name="items[<?= esc($key) ?>][date]" value="<?= esc($date) ?>">
 
-        <td class="ascas text-end">0.00</td>
+            <!-- weights -->
+            <input type="hidden" class="wa" name="items[<?= esc($key) ?>][weight_ascas]" value="<?= (float)($p['weight_ascas'] ?? 0) ?>">
+            <input type="hidden" class="wr" name="items[<?= esc($key) ?>][weight_runner]" value="<?= (float)($p['weight_runner'] ?? 0) ?>">
 
-        <td>
-          <input type="number"
-                 class="form-control form-control-sm text-end qty-a-display"
-                 value="<?= (int)($p['qty_a'] ?? 0) ?>"
-                 readonly>
-        </td>
+            <!-- actual/ng yg dikirim ke controller -->
+            <input type="hidden" class="qty-a" name="items[<?= esc($key) ?>][qty_a]" value="<?= (int)($p['qty_a'] ?? 0) ?>">
+            <input type="hidden" class="qty-ng" name="items[<?= esc($key) ?>][qty_ng]" value="<?= (int)($p['qty_ng'] ?? 0) ?>">
+          </td>
 
-        <td class="runner text-end">0.00</td>
+          <td>
+            <input type="number"
+                   class="form-control form-control-sm qty-p text-end"
+                   name="items[<?= esc($key) ?>][qty_p]"
+                   value="<?= (int)($p['qty_p'] ?? 0) ?>"
+                   min="0" max="1200">
+          </td>
 
-        <td>
-          <input type="number"
-                 class="form-control form-control-sm text-end"
-                 value="<?= (int)($p['qty_ng'] ?? 0) ?>"
-                 readonly>
-        </td>
+          <td class="ascas text-end">0.00</td>
 
-        <td>
-          <select class="form-select form-select-sm"
-                  name="items[<?= esc($key) ?>][status]">
-            <?php foreach (['Normal','Recovery','Trial','OFF'] as $s): ?>
-              <option value="<?= esc($s) ?>" <?= (($p['status'] ?? 'Normal') === $s) ? 'selected' : '' ?>>
-                <?= esc($s) ?>
-              </option>
-            <?php endforeach ?>
-          </select>
-        </td>
+          <td>
+            <input type="number"
+                   class="form-control form-control-sm text-end qty-a-display"
+                   value="<?= (int)($p['qty_a'] ?? 0) ?>"
+                   readonly>
+          </td>
 
-        <!-- hidden required -->
-        <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$m['id'] ?>">
-        <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
-        <input type="hidden" name="items[<?= esc($key) ?>][date]" value="<?= esc($date) ?>">
+          <td class="runner text-end">0.00</td>
 
-        <!-- weights from dropdown -->
-        <input type="hidden" class="wa" name="items[<?= esc($key) ?>][weight_ascas]" value="0">
-        <input type="hidden" class="wr" name="items[<?= esc($key) ?>][weight_runner]" value="0">
+          <td>
+            <input type="number"
+                   class="form-control form-control-sm text-end qty-ng-display"
+                   value="<?= (int)($p['qty_ng'] ?? 0) ?>"
+                   readonly>
+          </td>
 
-        <!-- actual stored for controller too -->
-        <input type="hidden" class="qty-a" name="items[<?= esc($key) ?>][qty_a]" value="<?= (int)($p['qty_a'] ?? 0) ?>">
-        <input type="hidden" name="items[<?= esc($key) ?>][qty_ng]" value="<?= (int)($p['qty_ng'] ?? 0) ?>">
-      </tr>
-    <?php endforeach ?>
+          <td>
+            <select class="form-select form-select-sm"
+                    name="items[<?= esc($key) ?>][status]">
+              <?php foreach (['Normal','Recovery','Trial','OFF'] as $s): ?>
+                <option value="<?= esc($s) ?>" <?= (($p['status'] ?? 'Normal') === $s) ? 'selected' : '' ?>>
+                  <?= esc($s) ?>
+                </option>
+              <?php endforeach ?>
+            </select>
+          </td>
+        </tr>
+      <?php endforeach ?>
 
-    </tbody>
-  </table>
+      </tbody>
+    </table>
+  </div>
 <?php endforeach ?>
 
 <div class="mt-3 d-flex gap-2">
-  <button class="btn btn-success">💾 Simpan</button>
+  <button class="btn btn-success" type="submit">💾 Simpan</button>
   <a href="<?= site_url('/die-casting/daily-schedule/view?date=' . esc($date)) ?>"
      class="btn btn-outline-primary">👁 View Result</a>
 </div>
@@ -147,15 +167,12 @@ function recalcShiftTotals(shiftId){
   if (r) r.innerText = totalRunner.toFixed(2);
 }
 
-/**
- * Ascas = PLAN(qty_p) * weight_ascas
- * Runner = ACTUAL(qty_a) * weight_runner
- */
+
 function calculate(tr){
   const shiftId = tr.dataset.shift;
 
   const qtyP = +tr.querySelector('.qty-p')?.value || 0;
-  const qtyA = +tr.querySelector('.qty-a')?.value || 0;
+  const qtyA = +tr.querySelector('.qty-a-display')?.value || 0;
 
   const wa   = +tr.querySelector('.wa')?.value || 0;
   const wr   = +tr.querySelector('.wr')?.value || 0;
@@ -166,15 +183,41 @@ function calculate(tr){
   tr.querySelector('.ascas').innerText  = ascasKg.toFixed(2);
   tr.querySelector('.runner').innerText = runnerKg.toFixed(2);
 
+  // pastikan hidden qty_a / qty_ng ikut konsisten (buat controller)
+  const hidA = tr.querySelector('.qty-a');
+  if (hidA) hidA.value = qtyA;
+
+  const hidNG = tr.querySelector('.qty-ng');
+  const ngDisplay = tr.querySelector('.qty-ng-display');
+  if (hidNG && ngDisplay) hidNG.value = (+ngDisplay.value || 0);
+
   recalcShiftTotals(shiftId);
 }
 
-// Load dropdown products
-document.querySelectorAll('.product').forEach(sel => {
+function applySelectedOptionToRow(sel){
   const tr = sel.closest('tr');
-  const selected = sel.dataset.selected;
+  const opt = sel.selectedOptions[0];
+  if (!opt || !tr) return;
 
-  fetch(`${productUrl}?machine_id=${sel.dataset.machine}&shift_id=${sel.dataset.shift}`)
+  tr.querySelector('.wa').value = opt.dataset.ascas || 0;
+  tr.querySelector('.wr').value = opt.dataset.runner || 0;
+
+  // auto-fill plan kalau masih 0
+  const qtyP = tr.querySelector('.qty-p');
+  if (qtyP && (!qtyP.value || qtyP.value == 0)) {
+    qtyP.value = opt.dataset.target || 0;
+  }
+
+  calculate(tr);
+}
+
+// Load dropdown products + init select2 searchable
+document.querySelectorAll('.product-select').forEach(sel => {
+  const selected = sel.dataset.selected || '';
+  const machineId = sel.dataset.machine;
+  const shiftId = sel.dataset.shift;
+
+  fetch(`${productUrl}?machine_id=${machineId}&shift_id=${shiftId}`)
     .then(r => r.json())
     .then(res => {
       sel.innerHTML = '<option value="">-- pilih --</option>';
@@ -183,7 +226,7 @@ document.querySelectorAll('.product').forEach(sel => {
         const opt = document.createElement('option');
         opt.value = p.id;
         opt.textContent = `${p.part_no} - ${p.part_name}`;
-        opt.dataset.ascas = p.weight_ascas || 0;
+        opt.dataset.ascas  = p.weight_ascas || 0;
         opt.dataset.runner = p.weight_runner || 0;
         opt.dataset.target = p.target || 0;
 
@@ -191,37 +234,29 @@ document.querySelectorAll('.product').forEach(sel => {
         sel.appendChild(opt);
       });
 
-      // kalau sudah ada selected dari DB, set weight lalu calculate
+      // ✅ init select2 (searchable)
+      $(sel).select2({
+        width: '100%',
+        placeholder: '-- pilih --',
+        allowClear: true
+      });
+
+      // kalau sudah ada selected, set weight & hitung
       if (selected) {
-        const opt = sel.selectedOptions[0];
-        if (opt) {
-          tr.querySelector('.wa').value = opt.dataset.ascas || 0;
-          tr.querySelector('.wr').value = opt.dataset.runner || 0;
-        }
-        calculate(tr);
+        applySelectedOptionToRow(sel);
       } else {
-        // reset tampilan
-        calculate(tr);
+        calculate(sel.closest('tr'));
       }
+    })
+    .catch(() => {
+      // kalau gagal fetch, tetap hitung biar total tidak kosong
+      calculate(sel.closest('tr'));
     });
 });
 
-// Saat ganti part
-document.addEventListener('change', e => {
-  if (!e.target.classList.contains('product')) return;
-
-  const tr = e.target.closest('tr');
-  const opt = e.target.selectedOptions[0];
-  if (!opt) return;
-
-  tr.querySelector('.wa').value = opt.dataset.ascas || 0;
-  tr.querySelector('.wr').value = opt.dataset.runner || 0;
-
-  // auto-fill plan kalau masih 0
-  const qtyP = tr.querySelector('.qty-p');
-  if (!qtyP.value || qtyP.value == 0) qtyP.value = opt.dataset.target || 0;
-
-  calculate(tr);
+// Event select2 berubah
+$(document).on('change', '.product-select', function() {
+  applySelectedOptionToRow(this);
 });
 
 // Saat plan berubah
@@ -229,6 +264,9 @@ document.addEventListener('input', e => {
   if (!e.target.classList.contains('qty-p')) return;
   calculate(e.target.closest('tr'));
 });
+
+// Hitung awal untuk semua shift (jaga-jaga)
+document.querySelectorAll('tr[data-shift]').forEach(tr => calculate(tr));
 </script>
 
 <?= $this->endSection() ?>

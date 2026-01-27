@@ -6,18 +6,24 @@ use App\Controllers\BaseController;
 
 class WipFromScheduleController extends BaseController
 {
+    private function detectWipDateColumn($db): string
+    {
+        if ($db->fieldExists('production_date', 'production_wip')) return 'production_date';
+        if ($db->fieldExists('schedule_date', 'production_wip')) return 'schedule_date';
+        if ($db->fieldExists('wip_date', 'production_wip')) return 'wip_date';
+
+        throw new \Exception('Tabel production_wip tidak punya kolom tanggal (production_date / schedule_date / wip_date).');
+    }
+
     public function index()
     {
         $db   = db_connect();
         $date = $this->request->getGet('date') ?? date('Y-m-d');
 
-        // filter section = nama process (contoh: Die Casting, Machining, dll)
+        // filter section = nama process (Die Casting, Machining, dll)
         $section = $this->request->getGet('section');
 
-        /**
-         * Ambil list section dari production_processes (lebih aman & universal)
-         * karena WIP selalu punya from_process_id
-         */
+        // list section dari master process
         $sections = $db->table('production_processes')
             ->select('process_name')
             ->orderBy('process_name', 'ASC')
@@ -26,14 +32,20 @@ class WipFromScheduleController extends BaseController
 
         $sectionList = array_map(fn($r) => $r['process_name'], $sections);
 
+        // ✅ deteksi kolom tanggal WIP yg benar
+        $wipDateCol = $this->detectWipDateColumn($db);
+
         /**
          * ==========================================================
-         * QUERY 1: WIP source = daily_schedule_items (kalau ada)
+         * QUERY 1: WIP source = daily_schedule_items
          * ==========================================================
+         * Catatan:
+         * - join daily_schedule_items & daily_schedules dipakai untuk ambil machine/shift/section
+         * - jika join gagal, artinya data schedule/source_id bermasalah
          */
         $q1 = $db->table('production_wip pw')
             ->select("
-                pw.production_date AS schedule_date,
+                pw.{$wipDateCol} AS schedule_date,
                 ds.section,
                 ds.shift_id,
                 s.shift_name,
@@ -62,7 +74,7 @@ class WipFromScheduleController extends BaseController
             ->join('production_processes pp_from', 'pp_from.id = pw.from_process_id', 'left')
             ->join('production_processes pp_to', 'pp_to.id = pw.to_process_id', 'left')
             ->where('pw.source_table', 'daily_schedule_items')
-            ->where('pw.production_date', $date);
+            ->where("pw.{$wipDateCol}", $date);
 
         if (!empty($section)) {
             // untuk source schedule, section ada di ds.section
@@ -73,12 +85,12 @@ class WipFromScheduleController extends BaseController
 
         /**
          * ==========================================================
-         * QUERY 2: WIP source = die_casting_production (yang kamu pakai sekarang)
+         * QUERY 2: WIP source = die_casting_production
          * ==========================================================
          */
         $q2 = $db->table('production_wip pw')
             ->select("
-                pw.production_date AS schedule_date,
+                pw.{$wipDateCol} AS schedule_date,
                 pp_from.process_name AS section,
                 dcp.shift_id,
                 s.shift_name,
@@ -106,7 +118,7 @@ class WipFromScheduleController extends BaseController
             ->join('production_processes pp_from', 'pp_from.id = pw.from_process_id', 'left')
             ->join('production_processes pp_to', 'pp_to.id = pw.to_process_id', 'left')
             ->where('pw.source_table', 'die_casting_production')
-            ->where('pw.production_date', $date);
+            ->where("pw.{$wipDateCol}", $date);
 
         if (!empty($section)) {
             // untuk source die_casting_production, section = from_process_name
@@ -127,9 +139,7 @@ class WipFromScheduleController extends BaseController
 
         $rows = $db->query($unionSql)->getResultArray();
 
-        /**
-         * Group per shift supaya tampil seperti hourly
-         */
+        // group per shift
         $grouped = [];
         foreach ($rows as $r) {
             $sid = (int)($r['shift_id'] ?? 0);

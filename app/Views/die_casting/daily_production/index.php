@@ -4,279 +4,348 @@
 <h4 class="mb-3">DIE CASTING – DAILY PRODUCTION PER HOUR</h4>
 
 <div class="mb-3">
-    <strong>Tanggal:</strong> <?= esc($date) ?><br>
-    <strong>Operator:</strong> <?= esc($operator) ?>
+  <strong>Tanggal:</strong> <?= esc($date) ?><br>
+  <strong>Operator:</strong> <?= esc($operator) ?>
 </div>
 
 <form method="get" class="mb-3">
-    <label class="fw-bold me-2">Tanggal Produksi:</label>
-    <input type="date"
-           name="date"
-           value="<?= esc($date) ?>"
-           class="form-control d-inline-block"
-           style="width:180px"
-           onchange="this.form.submit()">
+  <label class="fw-bold me-2">Tanggal Produksi:</label>
+  <input type="date"
+         name="date"
+         value="<?= esc($date) ?>"
+         class="form-control d-inline-block"
+         style="width:180px"
+         onchange="this.form.submit()">
 </form>
 
 <form method="post" action="/die-casting/daily-production/store" id="mainForm">
-    <?= csrf_field() ?>
+  <?= csrf_field() ?>
 
-    <?php foreach ($shifts as $shift): ?>
-        <?php
-            $shiftCode = (int)($shift['shift_code'] ?? 0);
-            $isShift3  = ($shiftCode === 3);
-            $isDC      = (stripos((string)($shift['shift_name'] ?? ''), 'DC') !== false);
+  <?php
+    // ambil shift 3 DC untuk tombol Finish Shift (hari ini) di bawah
+    $shift3Id = null;
+    $shift3Start = null;
+    $shift3End = null;
 
-            // untuk tombol shift 3 aktif berdasarkan window shift 3
-            $firstStart = '-';
-            $lastEnd    = '-';
-            if (!empty($shift['slots'])) {
-                $firstStart = $shift['slots'][0]['time_start'] ?? '-';
-                $lastSlot   = end($shift['slots']);
-                $lastEnd    = $lastSlot['time_end'] ?? '-';
-                reset($shift['slots']);
-            }
-        ?>
+    foreach ($shifts as $s) {
+      $shiftCode = (int)($s['shift_code'] ?? 0);
+      $isShift3  = ($shiftCode === 3);
+      $isDC      = (stripos((string)($s['shift_name'] ?? ''), 'DC') !== false);
 
-        <h5 class="mt-4 mb-2 d-flex align-items-center justify-content-between">
-            <span><?= esc($shift['shift_name']) ?></span>
+      if ($isShift3 && $isDC) {
+        $shift3Id = (int)($s['id'] ?? 0);
+        if (!empty($s['slots'])) {
+          $shift3Start = $s['slots'][0]['time_start'] ?? null;
+          $lastSlot = end($s['slots']);
+          $shift3End = $lastSlot['time_end'] ?? null;
+          reset($s['slots']);
+        }
+        break;
+      }
+    }
+  ?>
 
-            <!-- Button hanya tampil pada Shift 3 -->
-            <?php if ($isShift3 && $isDC): ?>
-                <div class="d-flex align-items-center gap-2">
-                    <small class="text-muted">
-                        Aktif saat Shift 3 berjalan (<?= esc(substr((string)$firstStart,0,5)) ?> - <?= esc(substr((string)$lastEnd,0,5)) ?>)
-                    </small>
-                    <button type="button"
-                            id="btn-finish-shift-<?= (int)$shift['id'] ?>"
-                            class="btn btn-secondary btn-sm"
-                            data-shift-code="<?= (int)$shiftCode ?>"
-                            data-start="<?= esc($firstStart) ?>"
-                            data-end="<?= esc($lastEnd) ?>"
-                            disabled
-                            onclick="finishShift3(<?= (int)$shift['id'] ?>)">
-                        <i class="bi bi-send"></i> Finish Shift 3
-                    </button>
-                </div>
-            <?php endif; ?>
-        </h5>
+  <?php foreach ($shifts as $shift): ?>
+    <h5 class="mt-4 mb-2 d-flex align-items-center justify-content-between">
+      <span><?= esc($shift['shift_name']) ?></span>
+    </h5>
 
-        <div class="table-scroll">
-            <table class="production-table table table-bordered table-sm">
+    <div class="table-scroll">
+      <table class="production-table table table-bordered table-sm align-middle">
+        <thead>
+          <tr class="thead-row-1">
+            <th rowspan="2" class="sticky-left col-machine th-sticky-left">
+              Mesin
+            </th>
+            <th rowspan="2" class="sticky-left-2 col-part th-sticky-left">
+              Part
+            </th>
+            <th rowspan="2" class="sticky-left-3 col-target-shift th-sticky-left">
+              Target<br>Shift
+            </th>
 
-                <thead>
-                <tr>
-                    <th rowspan="2" class="sticky-left col-machine">Mesin</th>
-                    <th rowspan="2" class="sticky-left-2 col-part">Part</th>
-                    <th rowspan="2" class="sticky-left-3 col-target-shift">Target<br>Shift</th>
+            <?php foreach ($shift['slots'] as $slot): ?>
+              <th colspan="4"
+                  class="slot-header"
+                  data-start="<?= esc($slot['time_start']) ?>"
+                  data-end="<?= esc($slot['time_end']) ?>">
+                <?= esc(substr((string)$slot['time_start'],0,5)) ?> - <?= esc(substr((string)$slot['time_end'],0,5)) ?>
+              </th>
+            <?php endforeach ?>
+          </tr>
 
-                    <?php foreach ($shift['slots'] as $slot): ?>
-                        <th colspan="4"
-                            class="slot-header"
-                            data-start="<?= $slot['time_start'] ?>"
-                            data-end="<?= $slot['time_end'] ?>">
-                            <?= substr($slot['time_start'],0,5) ?> - <?= substr($slot['time_end'],0,5) ?>
-                        </th>
+          <tr class="thead-row-2">
+            <?php foreach ($shift['slots'] as $slot): ?>
+              <th class="col-slot-target">Target</th>
+              <th class="col-slot-fg">FG</th>
+              <th class="col-slot-ng">NG</th>
+              <th class="col-slot-remark">NG Category</th>
+            <?php endforeach ?>
+          </tr>
+        </thead>
+
+        <tbody class="shift-body">
+          <?php foreach ($shift['items'] as $item): ?>
+            <tr>
+              <td class="sticky-left fw-bold text-center td-sticky-left">
+                <?= esc($item['machine_code']) ?>
+              </td>
+
+              <td class="sticky-left-2 text-start fw-bold td-sticky-left">
+                <?= esc($item['part_name']) ?>
+              </td>
+
+              <td class="sticky-left-3 fw-bold text-center target-shift td-sticky-left">
+                <?= (int)$item['qty_p'] ?>
+              </td>
+
+              <?php foreach ($shift['slots'] as $slot):
+
+                $targetSlot = $shift['total_minute'] > 0
+                  ? (int) round(((int)$item['qty_p'] / (float)$shift['total_minute']) * (float)$slot['minute'])
+                  : 0;
+
+                $exist = $shift['hourly_map']
+                  [(int)$item['machine_id']]
+                  [(int)$item['product_id']]
+                  [(int)$slot['id']] ?? null;
+
+                $key = $shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
+              ?>
+
+                <td class="slot-target fw-bold bg-light text-center">
+                  <?= (int)$targetSlot ?>
+                </td>
+
+                <td>
+                  <input type="number"
+                         class="form-control form-control-sm slot-input fg"
+                         data-start="<?= esc($slot['time_start']) ?>"
+                         data-end="<?= esc($slot['time_end']) ?>"
+                         data-date="<?= esc($date) ?>"
+                         data-shift-id="<?= (int)$shift['id'] ?>"
+                         data-machine-id="<?= (int)$item['machine_id'] ?>"
+                         data-product-id="<?= (int)$item['product_id'] ?>"
+                         data-time-slot-id="<?= (int)$slot['id'] ?>"
+                         value="<?= (int)($exist['qty_fg'] ?? 0) ?>"
+                         name="items[<?= esc($key) ?>][fg]">
+                </td>
+
+                <td>
+                  <input type="number"
+                         class="form-control form-control-sm slot-input ng"
+                         data-start="<?= esc($slot['time_start']) ?>"
+                         data-end="<?= esc($slot['time_end']) ?>"
+                         data-date="<?= esc($date) ?>"
+                         data-shift-id="<?= (int)$shift['id'] ?>"
+                         data-machine-id="<?= (int)$item['machine_id'] ?>"
+                         data-product-id="<?= (int)$item['product_id'] ?>"
+                         data-time-slot-id="<?= (int)$slot['id'] ?>"
+                         value="<?= (int)($exist['qty_ng'] ?? 0) ?>"
+                         name="items[<?= esc($key) ?>][ng]">
+                </td>
+
+                <td>
+                  <select class="form-select form-select-sm slot-input ngcat"
+                          data-start="<?= esc($slot['time_start']) ?>"
+                          data-end="<?= esc($slot['time_end']) ?>"
+                          data-date="<?= esc($date) ?>"
+                          data-shift-id="<?= (int)$shift['id'] ?>"
+                          data-machine-id="<?= (int)$item['machine_id'] ?>"
+                          data-product-id="<?= (int)$item['product_id'] ?>"
+                          data-time-slot-id="<?= (int)$slot['id'] ?>"
+                          name="items[<?= esc($key) ?>][ng_category_id]">
+                    <option value="">-- NG --</option>
+                    <?php foreach ($ngCategories as $ng): ?>
+                      <option value="<?= (int)$ng['id'] ?>"
+                        <?= ((string)($exist['ng_category_id'] ?? '') === (string)$ng['id']) ? 'selected' : '' ?>>
+                        <?= esc($ng['ng_code'].' - '.$ng['ng_name']) ?>
+                      </option>
                     <?php endforeach ?>
-                </tr>
+                  </select>
+                </td>
 
-                <tr>
-                    <?php foreach ($shift['slots'] as $slot): ?>
-                        <th class="col-slot-target">Target</th>
-                        <th class="col-slot-fg">FG</th>
-                        <th class="col-slot-ng">NG</th>
-                        <th class="col-slot-remark">NG Category</th>
-                    <?php endforeach ?>
-                </tr>
-                </thead>
+                <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
+                <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$item['machine_id'] ?>">
+                <input type="hidden" name="items[<?= esc($key) ?>][product_id]" value="<?= (int)$item['product_id'] ?>">
+                <input type="hidden" name="items[<?= esc($key) ?>][time_slot_id]" value="<?= (int)$slot['id'] ?>">
+                <input type="hidden" name="items[<?= esc($key) ?>][date]" value="<?= esc($date) ?>">
 
-                <tbody class="shift-body">
-                <?php foreach ($shift['items'] as $item): ?>
-                    <tr>
-                        <td class="sticky-left fw-bold text-center">
-                            <?= esc($item['machine_code']) ?>
-                        </td>
+              <?php endforeach ?>
+            </tr>
+          <?php endforeach ?>
+        </tbody>
 
-                        <td class="sticky-left-2 text-start fw-bold">
-                            <?= esc($item['part_name']) ?>
-                        </td>
+        <tfoot>
+          <tr class="total-slot-row fw-bold">
+            <td colspan="3" class="text-end td-sticky-left">
+              TOTAL / JAM
+            </td>
+            <?php foreach ($shift['slots'] as $slot): ?>
+              <td class="total-slot-target text-center">0</td>
+              <td class="total-slot-fg text-center">0</td>
+              <td class="total-slot-ng text-center">0</td>
+              <td class="total-slot-eff text-center"></td>
+            <?php endforeach ?>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
 
-                        <td class="sticky-left-3 fw-bold text-center target-shift">
-                            <?= esc($item['qty_p']) ?>
-                        </td>
+    <div class="shift-summary mt-2 mb-4 p-2 border rounded bg-light">
+      <strong>SUMMARY <?= esc($shift['shift_name']) ?> :</strong>
+      <span class="ms-3">FG: <span class="total-fg">0</span></span>
+      <span class="ms-3">NG: <span class="total-ng">0</span></span>
+      <span class="ms-3">Efficiency: <span class="eff">0%</span></span>
+    </div>
 
-                        <?php foreach ($shift['slots'] as $slot):
+  <?php endforeach ?>
 
-                            $targetSlot = $shift['total_minute'] > 0
-                                ? (int) round(($item['qty_p'] / $shift['total_minute']) * $slot['minute'])
-                                : 0;
-
-                            $exist = $shift['hourly_map']
-                                [$item['machine_id']]
-                                [$item['product_id']]
-                                [$slot['id']] ?? null;
-
-                            $key = $shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
-                        ?>
-
-                            <td class="slot-target fw-bold bg-light text-center">
-                                <?= $targetSlot ?>
-                            </td>
-
-                            <td>
-                                <input type="number"
-                                       class="form-control form-control-sm slot-input fg"
-                                       data-start="<?= $slot['time_start'] ?>"
-                                       data-end="<?= $slot['time_end'] ?>"
-                                       data-date="<?= esc($date) ?>"
-                                       data-shift-id="<?= (int)$shift['id'] ?>"
-                                       data-machine-id="<?= (int)$item['machine_id'] ?>"
-                                       data-product-id="<?= (int)$item['product_id'] ?>"
-                                       data-time-slot-id="<?= (int)$slot['id'] ?>"
-                                       value="<?= $exist['qty_fg'] ?? 0 ?>"
-                                       name="items[<?= $key ?>][fg]">
-                            </td>
-
-                            <td>
-                                <input type="number"
-                                       class="form-control form-control-sm slot-input ng"
-                                       data-start="<?= $slot['time_start'] ?>"
-                                       data-end="<?= $slot['time_end'] ?>"
-                                       data-date="<?= esc($date) ?>"
-                                       data-shift-id="<?= (int)$shift['id'] ?>"
-                                       data-machine-id="<?= (int)$item['machine_id'] ?>"
-                                       data-product-id="<?= (int)$item['product_id'] ?>"
-                                       data-time-slot-id="<?= (int)$slot['id'] ?>"
-                                       value="<?= $exist['qty_ng'] ?? 0 ?>"
-                                       name="items[<?= $key ?>][ng]">
-                            </td>
-
-                            <td>
-                                <select class="form-select form-select-sm slot-input ngcat"
-                                        data-start="<?= $slot['time_start'] ?>"
-                                        data-end="<?= $slot['time_end'] ?>"
-                                        data-date="<?= esc($date) ?>"
-                                        data-shift-id="<?= (int)$shift['id'] ?>"
-                                        data-machine-id="<?= (int)$item['machine_id'] ?>"
-                                        data-product-id="<?= (int)$item['product_id'] ?>"
-                                        data-time-slot-id="<?= (int)$slot['id'] ?>"
-                                        name="items[<?= $key ?>][ng_category_id]">
-                                    <option value="">-- NG --</option>
-                                    <?php foreach ($ngCategories as $ng): ?>
-                                        <option value="<?= $ng['id'] ?>"
-                                            <?= ($exist['ng_category_id'] ?? '') == $ng['id'] ? 'selected' : '' ?>>
-                                            <?= esc($ng['ng_code'].' - '.$ng['ng_name']) ?>
-                                        </option>
-                                    <?php endforeach ?>
-                                </select>
-                            </td>
-
-                            <input type="hidden" name="items[<?= $key ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
-                            <input type="hidden" name="items[<?= $key ?>][machine_id]" value="<?= (int)$item['machine_id'] ?>">
-                            <input type="hidden" name="items[<?= $key ?>][product_id]" value="<?= (int)$item['product_id'] ?>">
-                            <input type="hidden" name="items[<?= $key ?>][time_slot_id]" value="<?= (int)$slot['id'] ?>">
-                            <input type="hidden" name="items[<?= $key ?>][date]" value="<?= esc($date) ?>">
-
-                        <?php endforeach ?>
-                    </tr>
-                <?php endforeach ?>
-                </tbody>
-
-                <tfoot>
-                <tr class="total-slot-row fw-bold">
-                    <td colspan="3" class="text-end">TOTAL / JAM</td>
-                    <?php foreach ($shift['slots'] as $slot): ?>
-                        <td class="total-slot-target text-center">0</td>
-                        <td class="total-slot-fg text-center">0</td>
-                        <td class="total-slot-ng text-center">0</td>
-                        <td class="total-slot-eff text-center"></td>
-                    <?php endforeach ?>
-                </tr>
-                </tfoot>
-
-            </table>
-        </div>
-
-        <div class="shift-summary mt-2 mb-4 p-2 border rounded bg-light">
-            <strong>SUMMARY <?= esc($shift['shift_name']) ?> :</strong>
-            <span class="ms-3">FG: <span class="total-fg">0</span></span>
-            <span class="ms-3">NG: <span class="total-ng">0</span></span>
-            <span class="ms-3">Efficiency: <span class="eff">0%</span></span>
-        </div>
-
-    <?php endforeach ?>
-
-    <button class="btn btn-success mt-3" id="btnSave">
-        <i class="bi bi-save"></i> Simpan
+  <!-- BUTTON BAR -->
+  <div class="d-flex gap-2 align-items-center mt-3">
+    <button class="btn btn-success" id="btnSave" type="submit">
+      <i class="bi bi-save"></i> Simpan
     </button>
+
+    <?php if ($shift3Id): ?>
+      <button type="button"
+              id="btnFinishShiftToday"
+              class="btn btn-secondary"
+              data-shift-id="<?= (int)$shift3Id ?>"
+              data-start="<?= esc((string)($shift3Start ?? '')) ?>"
+              data-end="<?= esc((string)($shift3End ?? '')) ?>"
+              disabled
+              onclick="finishShiftToday()">
+        <i class="bi bi-send"></i> Finish Shift (Hari Ini)
+      </button>
+
+      <small class="text-muted">
+        Aktif saat Shift 3 berjalan
+        (<?= esc(substr((string)($shift3Start ?? '-'),0,5)) ?> - <?= esc(substr((string)($shift3End ?? '-'),0,5)) ?>)
+      </small>
+    <?php endif; ?>
+  </div>
 
 </form>
 
-<!-- ================= CSS ================= -->
 <style>
-.table-scroll{overflow-x:auto}
-.production-table{min-width:2600px}
-.production-table th,td{font-size:13px;padding:4px;white-space:nowrap;text-align:center}
-
-.col-machine{width:110px}
-.col-part{width:260px}
-.col-target-shift{width:110px}
-
-.sticky-left{
-    position:sticky;
-    left:0;
-    background:#fff;
-    z-index:6
-}
-.sticky-left-2{
-    position:sticky;
-    left:110px;
-    background:#fff;
-    z-index:6
-}
-.sticky-left-3{
-    position:sticky;
-    left:370px; /* 110 + 260 */
-    background:#fff;
-    z-index:6
+/* ====== FIX STICKY + SCROLL RAPi ====== */
+.table-scroll{
+  overflow:auto;
+  position:relative;
+  max-width:100%;
+  border:1px solid #e5e7eb;
+  border-radius:8px;
 }
 
-.slot-active{background:#dcfce7!important}
-.slot-header-active{background:#fde68a!important}
+/* gunakan separate agar sticky tidak geser karena border-collapse */
+.production-table{
+  width:max-content;
+  min-width:2600px;
+  border-collapse:separate !important;
+  border-spacing:0 !important;
+  table-layout:fixed;
+}
+
+.production-table th,
+.production-table td{
+  font-size:13px;
+  padding:6px;
+  white-space:nowrap;
+  text-align:center;
+  vertical-align:middle;
+  box-sizing:border-box;
+}
+
+/* tinggi header biar baris 1/2 konsisten */
+.production-table thead tr.thead-row-1 th{
+  height:38px;
+}
+.production-table thead tr.thead-row-2 th{
+  height:38px;
+}
+
+/* sticky header atas (2 baris) */
+.production-table thead tr.thead-row-1 th{
+  position:sticky;
+  top:0;
+  z-index:30;
+  background:#f8fafc;
+}
+.production-table thead tr.thead-row-2 th{
+  position:sticky;
+  top:38px;            /* sama dengan height row 1 */
+  z-index:29;
+  background:#f8fafc;
+}
+
+/* lebar kolom kiri */
+.col-machine{ width:110px; min-width:110px; max-width:110px; }
+.col-part{ width:260px; min-width:260px; max-width:260px; }
+.col-target-shift{ width:120px; min-width:120px; max-width:120px; }
+
+.col-slot-target{ width:80px; min-width:80px; }
+.col-slot-fg{ width:80px; min-width:80px; }
+.col-slot-ng{ width:80px; min-width:80px; }
+.col-slot-remark{ width:160px; min-width:160px; }
+
+/* sticky kolom kiri: TD */
+.sticky-left{ position:sticky; left:0; z-index:20; background:#fff; }
+.sticky-left-2{ position:sticky; left:110px; z-index:20; background:#fff; }
+.sticky-left-3{ position:sticky; left:370px; z-index:20; background:#fff; } /* 110 + 260 */
+
+/* sticky kolom kiri: TH (di THEAD harus lebih tinggi z-index) */
+.th-sticky-left{
+  z-index:40 !important;
+  background:#f8fafc !important;
+}
+
+/* biar garis border rapi saat sticky */
+.production-table th, .production-table td{
+  border-right:1px solid #e5e7eb;
+  border-bottom:1px solid #e5e7eb;
+}
+.production-table tr > *:first-child{
+  border-left:1px solid #e5e7eb;
+}
+.production-table thead tr:first-child > *{
+  border-top:1px solid #e5e7eb;
+}
+
+/* highlight slot aktif */
+.slot-active{ background:#dcfce7 !important; }
+.slot-header-active{ background:#fde68a !important; }
+
+/* input biar tidak “menyempit” */
+.production-table input.form-control,
+.production-table select.form-select{
+  min-width:70px;
+}
 </style>
 
-<!-- ================= JS ================= -->
 <script>
 let __isSubmitting = false;
 
 const mainForm = document.getElementById('mainForm');
-if (mainForm) {
-  mainForm.addEventListener('submit', () => {
-    __isSubmitting = true;
-  });
-}
+if (mainForm) mainForm.addEventListener('submit', () => { __isSubmitting = true; });
 
-// Ambil CSRF name+value dari hidden input (CI4)
 function getCsrfPair() {
   const input = document.querySelector('#mainForm input[type="hidden"][name]');
   if (!input) return null;
   return { name: input.name, value: input.value, el: input };
 }
 
-// tanggal lokal ISO (bukan UTC)
 function localDateISO(d = new Date()){
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2,'0');
   const day = String(d.getDate()).padStart(2,'0');
   return `${y}-${m}-${day}`;
 }
-
 function timeToDate(baseISO, timeStr){
   const hhmm = String(timeStr || '').slice(0,5);
   return new Date(`${baseISO}T${hhmm}:00`);
 }
 
-// SLOT aktif pakai tanggal lokal hari ini
 function isSlotActive(start,end){
   const now = new Date();
   const base = localDateISO(now);
@@ -284,24 +353,18 @@ function isSlotActive(start,end){
   let s = timeToDate(base, start);
   let e = timeToDate(base, end);
 
-  // lewat tengah malam
   if (e <= s) {
-    if (now <= e) s.setDate(s.getDate() - 1); // start kemarin
-    else e.setDate(e.getDate() + 1);          // end besok
+    if (now <= e) s.setDate(s.getDate() - 1);
+    else e.setDate(e.getDate() + 1);
   }
   return now >= s && now <= e;
 }
 
-// Shift 3 window aktif pakai TANGGAL PRODUKSI (base) agar tidak bug UTC
-function shift3WindowActiveByProductionDate(prodDateISO, start, end){
+function shiftWindowActiveByProductionDate(prodDateISO, start, end){
   const now = new Date();
-
   let s = timeToDate(prodDateISO, start);
   let e = timeToDate(prodDateISO, end);
-
-  // jika lewat midnight, end = besok
   if (e <= s) e.setDate(e.getDate() + 1);
-
   return now >= s && now <= e;
 }
 
@@ -318,38 +381,27 @@ function updateActiveSlots(){
   });
 }
 
-// Button Finish Shift 3 aktif hanya saat jam Shift 3 berjalan (mis 23:30-07:00)
-function updateFinishShift3Buttons(){
+function updateFinishButton(){
+  const btn = document.getElementById('btnFinishShiftToday');
+  if (!btn) return;
+
   const prodDate = '<?= esc($date) ?>';
+  const start = btn.dataset.start || '';
+  const end   = btn.dataset.end || '';
 
-  document.querySelectorAll('button[id^="btn-finish-shift-"]').forEach(btn=>{
-    const shiftCode = parseInt(btn.dataset.shiftCode || '0', 10);
-    if (shiftCode !== 3) return;
+  const ok = start && end && start !== '-' && end !== '-'
+    ? shiftWindowActiveByProductionDate(prodDate, start, end)
+    : false;
 
-    const start = btn.dataset.start || '';
-    const end   = btn.dataset.end || '';
-
-    const active = start && end && start !== '-' && end !== '-'
-      ? shift3WindowActiveByProductionDate(prodDate, start, end)
-      : false;
-
-    btn.disabled = !active;
-    btn.classList.toggle('btn-warning', active);
-    btn.classList.toggle('btn-secondary', !active);
-
-    btn.title = active
-      ? 'Shift 3 sedang berjalan. Tombol aktif.'
-      : 'Tombol hanya aktif saat jam Shift 3 berjalan.';
-  });
+  btn.disabled = !ok;
+  btn.classList.toggle('btn-warning', ok);
+  btn.classList.toggle('btn-secondary', !ok);
 }
 
-/* ===============================
- * TOTAL PER SHIFT
- * =============================== */
+/* totals */
 function calcTotals(){
   document.querySelectorAll('.production-table').forEach(table=>{
     let fg = 0, ng = 0, target = 0;
-
     table.querySelectorAll('.fg').forEach(i=> fg += +i.value || 0);
     table.querySelectorAll('.ng').forEach(i=> ng += +i.value || 0);
     table.querySelectorAll('.target-shift').forEach(td=> target += +td.innerText || 0);
@@ -359,14 +411,10 @@ function calcTotals(){
 
     summary.querySelector('.total-fg').innerText = fg;
     summary.querySelector('.total-ng').innerText = ng;
-    summary.querySelector('.eff').innerText =
-      target ? ((fg/target)*100).toFixed(1)+'%' : '0%';
+    summary.querySelector('.eff').innerText = target ? ((fg/target)*100).toFixed(1)+'%' : '0%';
   });
 }
 
-/* ===============================
- * TOTAL PER SLOT (setelah 3 kolom sticky)
- * =============================== */
 function calcSlotTotals(){
   document.querySelectorAll('.production-table').forEach(t=>{
     const rows = t.querySelectorAll('tbody tr');
@@ -378,8 +426,6 @@ function calcSlotTotals(){
 
     rows.forEach(r=>{
       const cells = r.querySelectorAll('td');
-
-      // setelah 3 kolom sticky: Mesin, Part, TargetShift
       for(let i=3;i<cells.length;i+=4){
         const idx = (i-3)/4;
         tg[idx] += +cells[i].innerText || 0;
@@ -394,101 +440,27 @@ function calcSlotTotals(){
   });
 }
 
-function recalcAll(){
-  calcTotals();
-  calcSlotTotals();
-}
+function recalcAll(){ calcTotals(); calcSlotTotals(); }
 
 updateActiveSlots();
-updateFinishShift3Buttons();
+updateFinishButton();
 recalcAll();
 
 setInterval(() => {
   updateActiveSlots();
-  updateFinishShift3Buttons();
+  updateFinishButton();
 }, 30000);
 
-document.addEventListener('input',recalcAll);
+document.addEventListener('input', recalcAll);
 
-/* ===============================
- * AUTO SAVE PER SLOT (no alert saat submit / abort)
- * =============================== */
-async function postSaveSlot(payload){
-  const csrf = getCsrfPair();
-  if (csrf) payload[csrf.name] = csrf.value;
+function finishShiftToday(){
+  const btn = document.getElementById('btnFinishShiftToday');
+  if (!btn) return;
 
-  const res = await fetch('/die-casting/daily-production/save-slot', {
-    method: 'POST',
-    headers: { 'X-Requested-With': 'XMLHttpRequest' },
-    body: new URLSearchParams(payload),
-    keepalive: true
-  });
+  const shiftId = parseInt(btn.dataset.shiftId || '0', 10);
+  if (!shiftId) return;
 
-  const ct = res.headers.get('content-type') || '';
-  if (!ct.includes('application/json')) {
-    throw new Error('Non-JSON response');
-  }
-
-  const json = await res.json();
-
-  // kalau backend mengembalikan csrf baru, update hidden input
-  if (json.csrf && csrf?.el) csrf.el.value = json.csrf;
-
-  return json;
-}
-
-function getRowSlotPayload(changedEl){
-  const tr = changedEl.closest('tr');
-  const time_slot_id = changedEl.dataset.timeSlotId;
-
-  const fgEl  = tr.querySelector(`.fg[data-time-slot-id="${time_slot_id}"]`);
-  const ngEl  = tr.querySelector(`.ng[data-time-slot-id="${time_slot_id}"]`);
-  const ngcEl = tr.querySelector(`select.ngcat[data-time-slot-id="${time_slot_id}"]`);
-
-  return {
-    date: changedEl.dataset.date,
-    shift_id: changedEl.dataset.shiftId,
-    machine_id: changedEl.dataset.machineId,
-    product_id: changedEl.dataset.productId,
-    time_slot_id,
-    fg: fgEl?.value || 0,
-    ng: ngEl?.value || 0,
-    ng_category_id: ngcEl?.value || ''
-  };
-}
-
-document.querySelectorAll('.slot-input').forEach(el => {
-  el.addEventListener('change', async () => {
-    if (__isSubmitting) return;
-
-    const td = el.closest('td');
-    const payload = getRowSlotPayload(el);
-
-    try {
-      const res = await postSaveSlot(payload);
-      if(res.status){
-        td.classList.add('bg-success-subtle');
-        setTimeout(()=>td.classList.remove('bg-success-subtle'),800);
-      } else {
-        if (!__isSubmitting) alert(res.message || 'Gagal simpan slot');
-      }
-    } catch (e) {
-      // saat klik Simpan, navigasi halaman bisa abort fetch -> jangan alert
-      if (__isSubmitting) return;
-      if (e?.name === 'AbortError') return;
-
-      td.classList.add('bg-danger-subtle');
-      setTimeout(()=>td.classList.remove('bg-danger-subtle'),1200);
-      alert('Network error');
-    }
-  });
-});
-
-/* ===============================
- * FINISH SHIFT 3
- * =============================== */
-function finishShift3(shiftId){
-  if(!confirm('Kirim ke proses berikutnya?')) return;
+  if(!confirm('Kirim FG Shift 3 ke proses berikutnya?')) return;
 
   const csrf = getCsrfPair();
   const payload = { date: '<?= esc($date) ?>', shift_id: shiftId };

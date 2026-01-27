@@ -74,6 +74,9 @@ $routes->group('master', ['filter' => 'auth'], function ($routes) {
     'Master\ProductProcessFlowController::bulkUpdate'
 );
 
+    $routes->post('production-flow/save-individual', 'Master\ProductProcessFlowController::saveIndividual');
+
+
 
 
 
@@ -316,6 +319,8 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
         'hourly/store',
         'Machining\HourlyController::store'
     );
+    $routes->post('hourly/finish-shift', 'Machining\HourlyController::finishShift');
+
 
     $routes->get(
     'leak-test',

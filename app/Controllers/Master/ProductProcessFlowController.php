@@ -28,14 +28,10 @@ class ProductProcessFlowController extends BaseController
         $direction = strtoupper($this->request->getGet('dir') ?? 'ASC');
 
         $allowedSort = ['part_no', 'part_name'];
-        if (!in_array($sort, $allowedSort, true)) {
-            $sort = 'part_no';
-        }
+        if (!in_array($sort, $allowedSort, true)) $sort = 'part_no';
         $direction = $direction === 'DESC' ? 'DESC' : 'ASC';
 
-        // Products (aktif)
         $query = $this->productModel->where('is_active', 1);
-
         if ($keyword) {
             $query->groupStart()
                 ->like('part_no', $keyword)
@@ -43,26 +39,31 @@ class ProductProcessFlowController extends BaseController
                 ->groupEnd();
         }
 
-        $products = $query->orderBy($sort, $direction)
-            ->paginate($perPage, 'products');
+        $products = $query->orderBy($sort, $direction)->paginate($perPage, 'products');
+        $pager    = $this->productModel->pager;
 
-        $pager = $this->productModel->pager;
-
-        // Master processes
         $processes = $this->processModel->orderBy('id', 'ASC')->findAll();
 
-        // Active flow map
-        $flows = $this->flowModel->where('is_active', 1)->findAll();
+        // Ambil flow aktif dengan urutan sequence
+        $flows = $this->flowModel
+            ->where('is_active', 1)
+            ->orderBy('sequence', 'ASC')
+            ->findAll();
 
-        $flowMap = [];
+        $flowMap   = [];
+        $flowOrder = [];
         foreach ($flows as $f) {
-            $flowMap[$f['product_id']][$f['process_id']] = true;
+            $pid = (int)$f['product_id'];
+            $prc = (int)$f['process_id'];
+            $flowMap[$pid][$prc] = true;
+            $flowOrder[$pid][]   = $prc;
         }
 
-        return view('master/production_flow/index', compact(
+        return view('master/production_flow/index_side_chip', compact(
             'products',
             'processes',
             'flowMap',
+            'flowOrder',
             'pager',
             'perPage',
             'keyword',
@@ -71,16 +72,11 @@ class ProductProcessFlowController extends BaseController
         ));
     }
 
-    /**
-     * BULK SAVE FLOW (AMAN + TIDAK HILANG)
-     * - Tidak insert kalau kombinasi product-process sudah pernah ada (karena UNIQUE)
-     * - Akan re-activate row yang sebelumnya is_active=0
-     * - Bisa clear semua flow dengan uncheck semua
-     */
     public function bulkUpdate()
     {
-        $productIds = $this->request->getPost('product_ids') ?? [];
-        $flowsPost  = $this->request->getPost('flows') ?? [];
+        $productIds   = $this->request->getPost('product_ids') ?? [];
+        $selectedPost = $this->request->getPost('flows_selected') ?? [];
+        $orderPost    = $this->request->getPost('flows_order') ?? [];
 
         if (!is_array($productIds) || count($productIds) === 0) {
             return redirect()->back()->with('error', 'Tidak ada data produk yang dikirim.');
@@ -90,77 +86,128 @@ class ProductProcessFlowController extends BaseController
         $db->transBegin();
 
         try {
-            foreach ($productIds as $productIdRaw) {
+            foreach ($productIds as $raw) {
+                $productId = (int)$raw;
+                if ($productId <= 0) continue;
 
-                $productId = (int) $productIdRaw;
-                if ($productId <= 0) {
-                    continue;
-                }
+                // selected[] dari checkbox chip
+                $selected = $selectedPost[$productId] ?? [];
+                if (!is_array($selected)) $selected = [];
 
-                // Ambil processIds dari POST, kalau tidak ada berarti kosong
-                $processIds = $flowsPost[$productId] ?? [];
-
-                // Pastikan array
-                if (!is_array($processIds)) {
-                    $processIds = [];
-                }
-
-                // Bersihkan nilai kosong dari hidden input, pastikan integer unik
-                $processIds = array_values(array_unique(array_filter($processIds, function ($v) {
-                    return ctype_digit((string) $v) && (int)$v > 0;
+                $selected = array_values(array_unique(array_filter($selected, function ($v) {
+                    return ctype_digit((string)$v) && (int)$v > 0;
                 })));
-                $processIds = array_map('intval', $processIds);
+                $selected = array_map('intval', $selected);
 
-                // ===== Ambil semua flow existing (aktif & nonaktif) untuk produk ini =====
-                $existingRows = $this->flowModel
-                    ->where('product_id', $productId)
-                    ->findAll();
-
-                // Map process_id -> row (id, is_active)
-                $existingMap = [];
-                foreach ($existingRows as $row) {
-                    $existingMap[(int)$row['process_id']] = [
-                        'id'        => (int)$row['id'],
-                        'is_active' => (int)$row['is_active'],
-                    ];
-                }
-
-                // ===== 1) Deactivate yang tidak dipilih =====
-                // (kalau sebelumnya aktif dan sekarang tidak ada di processIds)
-                foreach ($existingMap as $procId => $rowInfo) {
-                    if (!in_array($procId, $processIds, true) && $rowInfo['is_active'] === 1) {
-                        $this->flowModel->update($rowInfo['id'], ['is_active' => 0]);
+                // order string dari hidden (hasil drag)
+                $orderStr = (string)($orderPost[$productId] ?? '');
+                $orderIds = [];
+                if ($orderStr !== '') {
+                    foreach (array_filter(array_map('trim', explode(',', $orderStr))) as $v) {
+                        if (ctype_digit($v) && (int)$v > 0) $orderIds[] = (int)$v;
                     }
                 }
 
-                // ===== 2) Activate + update sequence yang dipilih =====
-                $seq = 1;
-                foreach ($processIds as $procId) {
-                    if (isset($existingMap[$procId])) {
-                        // UPDATE row yang sudah ada (aktif/nonaktif) -> re-activate
-                        $this->flowModel->update($existingMap[$procId]['id'], [
-                            'sequence'  => $seq,
-                            'is_active' => 1,
-                        ]);
-                    } else {
-                        // INSERT hanya jika benar-benar belum pernah ada
-                        $this->flowModel->insert([
-                            'product_id' => $productId,
-                            'process_id' => $procId,
-                            'sequence'   => $seq,
-                            'is_active'  => 1,
-                        ]);
-                    }
-                    $seq++;
+                // final order = orderIds yang tercentang + sisa selected yang belum masuk
+                $final = [];
+                foreach ($orderIds as $oid) {
+                    if (in_array($oid, $selected, true)) $final[] = $oid;
                 }
+                foreach ($selected as $sid) {
+                    if (!in_array($sid, $final, true)) $final[] = $sid;
+                }
+
+                $this->saveOneProductFlow($productId, $final);
             }
 
             $db->transCommit();
             return redirect()->back()->with('success', 'Production flow berhasil diperbarui (Bulk Save).');
-
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', 'Gagal update: ' . $e->getMessage());
+        }
+    }
+
+    public function saveIndividual()
+    {
+        $productId = (int)$this->request->getPost('product_id');
+        $selected  = $this->request->getPost('selected') ?? [];
+        $orderStr  = (string)($this->request->getPost('order') ?? '');
+
+        if ($productId <= 0) {
+            return $this->response->setJSON(['ok' => false, 'message' => 'Product tidak valid']);
+        }
+
+        if (!is_array($selected)) $selected = [];
+        $selected = array_values(array_unique(array_filter($selected, function ($v) {
+            return ctype_digit((string)$v) && (int)$v > 0;
+        })));
+        $selected = array_map('intval', $selected);
+
+        $orderIds = [];
+        if ($orderStr !== '') {
+            foreach (array_filter(array_map('trim', explode(',', $orderStr))) as $v) {
+                if (ctype_digit($v) && (int)$v > 0) $orderIds[] = (int)$v;
+            }
+        }
+
+        $final = [];
+        foreach ($orderIds as $oid) {
+            if (in_array($oid, $selected, true)) $final[] = $oid;
+        }
+        foreach ($selected as $sid) {
+            if (!in_array($sid, $final, true)) $final[] = $sid;
+        }
+
+        $db = db_connect();
+        $db->transBegin();
+
+        try {
+            $this->saveOneProductFlow($productId, $final);
+            $db->transCommit();
+            return $this->response->setJSON(['ok' => true, 'message' => 'Flow disimpan']);
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            return $this->response->setJSON(['ok' => false, 'message' => $e->getMessage()]);
+        }
+    }
+
+    private function saveOneProductFlow(int $productId, array $finalOrder): void
+    {
+        $existingRows = $this->flowModel->where('product_id', $productId)->findAll();
+
+        $existingMap = [];
+        foreach ($existingRows as $row) {
+            $existingMap[(int)$row['process_id']] = [
+                'id'        => (int)$row['id'],
+                'is_active' => (int)$row['is_active'],
+            ];
+        }
+
+        // deactivate yang tidak dipilih
+        foreach ($existingMap as $procId => $info) {
+            if (!in_array($procId, $finalOrder, true) && $info['is_active'] === 1) {
+                $this->flowModel->update($info['id'], ['is_active' => 0]);
+            }
+        }
+
+        // activate + update sequence
+        $seq = 1;
+        foreach ($finalOrder as $procId) {
+            if (isset($existingMap[$procId])) {
+                $this->flowModel->update($existingMap[$procId]['id'], [
+                    'sequence'  => $seq,
+                    'is_active' => 1,
+                ]);
+            } else {
+                $this->flowModel->insert([
+                    'product_id' => $productId,
+                    'process_id' => $procId,
+                    'sequence'   => $seq,
+                    'is_active'  => 1,
+                ]);
+            }
+            $seq++;
         }
     }
 }

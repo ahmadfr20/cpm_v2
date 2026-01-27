@@ -18,13 +18,21 @@
            onchange="this.form.submit()">
 </form>
 
-
-<form method="post" action="/machining/hourly/store">
+<form method="post" action="/machining/hourly/store" id="hourlyForm">
 <?= csrf_field() ?>
 
 <?php foreach ($shifts as $shift): ?>
 
-<h5 class="mt-4 mb-2"><?= esc($shift['shift_name']) ?></h5>
+<?php
+  // deteksi shift 3
+  $isShift3 = ((int)($shift['shift_code'] ?? 0) === 3) || preg_match('/\b3\b/', (string)($shift['shift_name'] ?? ''));
+?>
+
+<h5 class="mt-4 mb-2 d-flex align-items-center justify-content-between">
+  <span><?= esc($shift['shift_name']) ?></span>
+
+
+</h5>
 
 <div class="table-scroll">
 <table class="production-table table table-bordered table-sm">
@@ -131,8 +139,6 @@ $exist = $shift['hourly_map']
 </tbody>
 
 <tfoot>
-
-<!-- TOTAL PER JAM -->
 <tr class="total-slot-row fw-bold">
     <td colspan="4" class="text-end">TOTAL / JAM</td>
     <?php foreach ($shift['slots'] as $slot): ?>
@@ -142,16 +148,11 @@ $exist = $shift['hourly_map']
         <td class="total-slot-eff text-center">0%</td>
     <?php endforeach ?>
 </tr>
-
-
 </tfoot>
-
-</table>
 
 </table>
 </div>
 
-<!-- ===== SHIFT SUMMARY ===== -->
 <div class="shift-summary mt-2 mb-4 p-2 border rounded bg-light">
     <strong>SUMMARY <?= esc($shift['shift_name']) ?> :</strong>
     <span class="ms-3">
@@ -165,17 +166,33 @@ $exist = $shift['hourly_map']
     </span>
 </div>
 
-</div>
-
 <?php endforeach ?>
 
-<button class="btn btn-success mt-3">
-<i class="bi bi-save"></i> Simpan
+<!-- tombol simpan biasa -->
+<button class="btn btn-success mt-3" type="submit" formaction="/machining/hourly/store">
+  <i class="bi bi-save"></i> Simpan
 </button>
+
+<?php if (!empty($canFinish)): ?>
+  <button class="btn btn-warning mt-3 ms-2" type="submit" formaction="/machining/hourly/finish-shift"
+          onclick="return confirm('Finish Shift? Total FG Machining akan dikirim ke proses berikutnya sesuai flow.')">
+    <i class="bi bi-send-check"></i> Finish Shift (Kirim FG)
+  </button>
+<?php else: ?>
+  <button class="btn btn-warning mt-3 ms-2" type="button" disabled
+          title="<?= esc($finishError ?? 'Belum bisa Finish Shift') ?>">
+    <i class="bi bi-send-check"></i> Finish Shift (Kirim FG)
+  </button>
+  <?php if (!empty($shift3EndAt)): ?>
+    <div class="text-muted mt-2" style="font-size:13px">
+      Finish Shift aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?> WIB)
+    </div>
+  <?php endif; ?>
+<?php endif; ?>
+
 
 </form>
 
-<!-- ================= CSS ================= -->
 <style>
 .table-scroll{overflow-x:auto}
 .production-table{min-width:3000px}
@@ -188,16 +205,6 @@ $exist = $shift['hourly_map']
 .slot-active{background:#dcfce7!important}
 .slot-header-active{background:#fde68a!important}
 </style>
-
-<!-- ================= JS ================= -->
-
-<script>
-const productionDate = "<?= esc($date) ?>";
-const todayDate = new Date().toISOString().slice(0, 10);
-
-// apakah tanggal yang dibuka = hari ini?
-const isToday = productionDate === todayDate;
-</script>
 
 <script>
 function isSlotActive(start, end) {
@@ -221,54 +228,55 @@ function updateActiveSlots() {
     });
 
     document.querySelectorAll('.slot-header').forEach(th => {
-        th.classList.toggle(
-            'slot-header-active',
-            isSlotActive(th.dataset.start, th.dataset.end)
-        );
+        th.classList.toggle('slot-header-active', isSlotActive(th.dataset.start, th.dataset.end));
     });
 }
 
 function calcTotals(){
  document.querySelectorAll('.production-table').forEach(t=>{
-  let fg=0,ng=0,target=0
-  t.querySelectorAll('.fg').forEach(i=>fg+=+i.value||0)
-  t.querySelectorAll('.ng').forEach(i=>ng+=+i.value||0)
-  t.querySelectorAll('.target-shift').forEach(td=>target+=+td.innerText||0)
-  t.querySelector('.total-fg').innerText=fg
-  t.querySelector('.total-ng').innerText=ng
-  t.querySelector('.eff').innerText=target?((fg/target)*100).toFixed(1)+'%':'0%'
+  let fg=0,ng=0,target=0;
+  t.querySelectorAll('.fg').forEach(i=>fg+=+i.value||0);
+  t.querySelectorAll('.ng').forEach(i=>ng+=+i.value||0);
+  t.querySelectorAll('.target-shift').forEach(td=>target+=+td.innerText||0);
+
+  const summary = t.closest('div')?.nextElementSibling; // shift-summary
+  if (summary) {
+    summary.querySelector('.total-fg').innerText = fg;
+    summary.querySelector('.total-ng').innerText = ng;
+    summary.querySelector('.eff').innerText = target ? ((fg/target)*100).toFixed(1)+'%' : '0%';
+  }
  })
 }
 
 function calcSlotTotals(){
  document.querySelectorAll('.production-table').forEach(t=>{
-  const rows=t.querySelectorAll('tbody tr')
-  const slots=t.querySelectorAll('.total-slot-target').length
-  let tg=Array(slots).fill(0),fg=Array(slots).fill(0),ng=Array(slots).fill(0)
+  const rows=t.querySelectorAll('tbody tr');
+  const slots=t.querySelectorAll('.total-slot-target').length;
+  let tg=Array(slots).fill(0),fg=Array(slots).fill(0),ng=Array(slots).fill(0);
 
   rows.forEach(r=>{
-   const cells=r.querySelectorAll('td')
+   const cells=r.querySelectorAll('td');
    for(let i=4;i<cells.length;i+=4){
-    const idx=(i-4)/4
-    tg[idx]+=+cells[i].innerText||0
-    fg[idx]+=+(cells[i+1].querySelector('.fg')?.value||0)
-    ng[idx]+=+(cells[i+2].querySelector('.ng')?.value||0)
+    const idx=(i-4)/4;
+    tg[idx]+=+cells[i].innerText||0;
+    fg[idx]+=+(cells[i+1].querySelector('.fg')?.value||0);
+    ng[idx]+=+(cells[i+2].querySelector('.ng')?.value||0);
    }
-  })
+  });
 
-  t.querySelectorAll('.total-slot-target').forEach((c,i)=>c.innerText=tg[i])
-  t.querySelectorAll('.total-slot-fg').forEach((c,i)=>c.innerText=fg[i])
-  t.querySelectorAll('.total-slot-ng').forEach((c,i)=>c.innerText=ng[i])
+  t.querySelectorAll('.total-slot-target').forEach((c,i)=>c.innerText=tg[i]);
+  t.querySelectorAll('.total-slot-fg').forEach((c,i)=>c.innerText=fg[i]);
+  t.querySelectorAll('.total-slot-ng').forEach((c,i)=>c.innerText=ng[i]);
   t.querySelectorAll('.total-slot-eff').forEach((c,i)=>{
-   c.innerText=tg[i]?((fg[i]/tg[i])*100).toFixed(1)+'%':'0%'
-  })
+   c.innerText=tg[i]?((fg[i]/tg[i])*100).toFixed(1)+'%':'0%';
+  });
  })
 }
 
-function recalcAll(){calcTotals();calcSlotTotals()}
-updateActiveSlots();recalcAll()
-setInterval(updateActiveSlots,30000)
-document.addEventListener('input',recalcAll)
+function recalcAll(){calcTotals();calcSlotTotals();}
+updateActiveSlots();recalcAll();
+setInterval(updateActiveSlots,30000);
+document.addEventListener('input',recalcAll);
 </script>
 
 <?= $this->endSection() ?>

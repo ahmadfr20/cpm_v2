@@ -1,6 +1,26 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
+<!-- Select2 CSS -->
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet" />
+
+<style>
+  /* biar Select2 tinggi sama dengan form-select-sm bootstrap */
+  .select2-container .select2-selection--single {
+    height: 31px;
+    padding: 2px 6px;
+    border: 1px solid #ced4da;
+    border-radius: .2rem;
+  }
+  .select2-container--default .select2-selection--single .select2-selection__rendered {
+    line-height: 26px;
+    padding-left: 2px;
+  }
+  .select2-container--default .select2-selection--single .select2-selection__arrow {
+    height: 29px;
+  }
+</style>
+
 <h4 class="mb-3">DAILY PRODUCTION SCHEDULE – MACHINING</h4>
 
 <?php if (session()->getFlashdata('success')): ?>
@@ -40,7 +60,7 @@
           <th style="width:60px">Line</th>
           <th style="width:120px">Alamat Mesin</th>
           <th>Tipe Mesin</th>
-          <th style="width:320px">Part</th>
+          <th style="width:360px">Part</th>
           <th style="width:80px">CT</th>
           <th style="width:120px">Planning</th>
           <th style="width:80px">Actual</th>
@@ -67,8 +87,8 @@
             <?= esc($machine['machine_name']) ?>
           </td>
 
-          <td>
-            <select class="form-select form-select-sm product-select"
+          <td class="text-start">
+            <select class="form-select form-select-sm product-select js-product-select w-100"
                     data-machine="<?= (int)$machine['id'] ?>"
                     data-shift="<?= (int)$shift['id'] ?>"
                     data-selected="<?= esc($plan['product_id'] ?? '') ?>"
@@ -99,7 +119,6 @@
                    readonly>
           </td>
 
-          <!-- hidden wajib -->
           <input type="hidden" name="items[<?= $idx ?>][machine_id]" value="<?= (int)$machine['id'] ?>">
           <input type="hidden" name="items[<?= $idx ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
         </tr>
@@ -113,9 +132,27 @@
   </form>
 <?php endforeach ?>
 
+<!-- jQuery + Select2 JS -->
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+
 <script>
 const productUrl = "/machining/daily-schedule/product-target";
 
+/** init select2 untuk satu select */
+function initSelect2(selectEl) {
+  const $el = $(selectEl);
+  if ($el.data('select2')) return; // sudah init
+
+  $el.select2({
+    width: '100%',
+    placeholder: '-- pilih part --',
+    allowClear: true,
+    dropdownAutoWidth: true
+  });
+}
+
+/** load options dari server, lalu set selected dan trigger change */
 async function loadProducts(selectEl) {
   const machineId  = selectEl.dataset.machine;
   const shiftId    = selectEl.dataset.shift;
@@ -125,7 +162,8 @@ async function loadProducts(selectEl) {
     const res  = await fetch(`${productUrl}?machine_id=${machineId}&shift_id=${shiftId}`);
     const data = await res.json();
 
-    selectEl.innerHTML = '<option value="">-- pilih part --</option>';
+    // reset option
+    selectEl.innerHTML = '<option value=""></option>'; // untuk allowClear & placeholder select2
 
     data.forEach(p => {
       const opt = document.createElement('option');
@@ -133,39 +171,53 @@ async function loadProducts(selectEl) {
       opt.textContent = `${p.part_no} - ${p.part_name}`;
       opt.dataset.ct = p.cycle_time || '';
       opt.dataset.targetShift = p.target_per_shift || 0;
-
-      if (String(selectedId) === String(p.id)) opt.selected = true;
       selectEl.appendChild(opt);
     });
 
-    // trigger change jika ada selected existing
+    // init select2 setelah options ada
+    initSelect2(selectEl);
+
+    // set selected dari DB (kalau ada)
     if (selectedId) {
-      selectEl.dispatchEvent(new Event('change'));
+      $(selectEl).val(String(selectedId)).trigger('change');
+    } else {
+      // trigger change supaya CT/plan bisa reset
+      $(selectEl).trigger('change');
     }
 
   } catch (e) {
     console.error("Gagal load product machining", e);
+    initSelect2(selectEl);
   }
 }
 
+// event change (select2 tetap menembakkan 'change')
+$(document).on('change', '.product-select', function() {
+  const selectEl = this;
+  const opt = selectEl.selectedOptions[0];
+  const row = selectEl.closest('tr');
+
+  // kalau kosong (clear)
+  if (!opt || !selectEl.value) {
+    row.querySelector('.cycle-time').value = '';
+    // plan tidak dipaksa kosong supaya user tidak kehilangan input manual
+    return;
+  }
+
+  // set CT
+  row.querySelector('.cycle-time').value = opt.dataset.ct || '';
+
+  // set Plan default (kalau kosong/0)
+  const planEl = row.querySelector('.plan-input');
+  if (!planEl.value || planEl.value == 0) {
+    planEl.value = opt.dataset.targetShift || 0;
+  }
+});
+
+// init semua select + load data
 document.querySelectorAll('.product-select').forEach(selectEl => {
-  loadProducts(selectEl);
-
-  selectEl.addEventListener('change', () => {
-    const opt = selectEl.selectedOptions[0];
-    if (!opt) return;
-
-    const row = selectEl.closest('tr');
-
-    // set CT
-    row.querySelector('.cycle-time').value = opt.dataset.ct || '';
-
-    // set Plan default (kalau kosong)
-    const planEl = row.querySelector('.plan-input');
-    if (!planEl.value || planEl.value == 0) {
-      planEl.value = opt.dataset.targetShift || 0;
-    }
-  });
+  initSelect2(selectEl);     // biar langsung bisa search (meskipun option masih loading)
+  loadProducts(selectEl);    // load options dari server
 });
 </script>
 

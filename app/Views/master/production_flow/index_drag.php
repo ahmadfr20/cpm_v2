@@ -1,7 +1,7 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-3">Production Flow Product (Drag & Drop + Checkbox di Chip)</h4>
+<h4 class="mb-3">Production Flow Product (Sideways + Drag & Drop)</h4>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
@@ -10,6 +10,7 @@
   <div class="alert alert-danger"><?= esc(session()->getFlashdata('error')) ?></div>
 <?php endif ?>
 
+<!-- ================= FILTER ================= -->
 <form method="get" class="row g-2 mb-3">
   <div class="col-md-4">
     <input type="text" name="keyword" class="form-control"
@@ -39,31 +40,59 @@
 .table-sideways { white-space: nowrap; }
 .table-sideways th, .table-sideways td { vertical-align: middle; }
 
-.sticky-col-1 { position: sticky; left: 0; background: #fff; z-index: 3; }
-.sticky-col-2 { position: sticky; left: 260px; background: #fff; z-index: 3; }
-
-thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
+.sticky-col-1 {
+  position: sticky; left: 0; background: #fff; z-index: 3;
+}
+.sticky-col-2 {
+  position: sticky; left: 260px; background: #fff; z-index: 3;
+}
+thead .sticky-col-1, thead .sticky-col-2 {
+  background: #e9ecef; z-index: 5;
+}
 
 .product-cell { min-width: 260px; }
-.flow-chip-wrap { min-width: 760px; }
+.flow-chip-wrap { min-width: 760px; } /* biar panjang ke kanan, enak scroll */
 
-.flow-chips{
-  display:flex; gap:6px; flex-wrap:wrap;
-  padding:8px; min-height:52px;
-  border:1px dashed #ced4da; border-radius:10px;
-  background:#fff;
+.flow-chips {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px;
+  min-height: 52px;
+  border: 1px dashed #ced4da;
+  border-radius: 10px;
+  background: #fff;
 }
-.flow-chip{
-  display:inline-flex; align-items:center; gap:8px;
-  padding:6px 10px; border:1px solid #dee2e6; border-radius:999px;
-  background:#f8f9fa; font-size:12px; user-select:none;
+
+.flow-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid #dee2e6;
+  border-radius: 999px;
+  background: #f8f9fa;
+  font-size: 12px;
+  cursor: grab;
+  user-select: none;
 }
-.flow-chip .handle{ font-weight:800; cursor:grab; }
-.flow-chip.off{ opacity:.45; text-decoration:line-through; }
+.flow-chip .handle {
+  font-weight: 800;
+  cursor: grab;
+}
+.flow-chip.off {
+  opacity: .45;
+  text-decoration: line-through;
+}
+.flow-chip input[type="checkbox"]{
+  transform: scale(1.05);
+}
 .flow-chip .name{
-  max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
+  max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.flow-chip input[type="checkbox"]{ transform:scale(1.05); cursor:pointer; }
 </style>
 
 <div class="table-responsive">
@@ -71,7 +100,7 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
     <thead class="table-secondary text-center">
       <tr>
         <th class="text-start sticky-col-1 product-cell">Product</th>
-        <th class="sticky-col-2 flow-chip-wrap">Flow (drag + centang)</th>
+        <th class="sticky-col-2 flow-chip-wrap">Flow (drag urutan + centang aktif)</th>
         <th style="width:90px">Edit</th>
       </tr>
     </thead>
@@ -79,11 +108,15 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
     <tbody>
     <?php foreach ($products as $p):
       $pid = (int)$p['id'];
-      $selectedOrder = $flowOrder[$pid] ?? [];
+      $selectedOrder = $flowOrder[$pid] ?? []; // urutan existing
     ?>
       <tr>
         <input type="hidden" name="product_ids[]" value="<?= $pid ?>">
+
+        <!-- hidden order untuk bulk save -->
         <input type="hidden" name="flows_order[<?= $pid ?>]" id="order_<?= $pid ?>" value="<?= esc(implode(',', $selectedOrder)) ?>">
+
+        <!-- hidden agar flows_selected[pid][] tetap terkirim walau semua off -->
         <input type="hidden" name="flows_selected[<?= $pid ?>][]" value="">
 
         <td class="text-start sticky-col-1 product-cell">
@@ -94,9 +127,9 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
         <td class="sticky-col-2 flow-chip-wrap">
           <div class="flow-chips" id="chips_<?= $pid ?>" data-product="<?= $pid ?>">
             <?php
+              // render chip mengikuti urutan existing dulu
               $rendered = [];
 
-              // render sesuai urutan existing
               foreach ($selectedOrder as $procId) {
                 foreach ($processes as $pr) {
                   if ((int)$pr['id'] === (int)$procId) {
@@ -106,6 +139,7 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
                     <span class="flow-chip <?= $isChecked ? '' : 'off' ?>" data-id="<?= (int)$pr['id'] ?>">
                       <span class="handle">☰</span>
                       <span class="name"><?= esc($pr['process_name']) ?></span>
+
                       <input type="checkbox"
                              class="form-check-input chip-check"
                              name="flows_selected[<?= $pid ?>][]"
@@ -117,7 +151,7 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
                 }
               }
 
-              // render sisanya
+              // render proses lain (belum masuk urutan)
               foreach ($processes as $pr) {
                 $procId = (int)$pr['id'];
                 if (in_array($procId, $rendered, true)) continue;
@@ -127,6 +161,7 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
                 <span class="flow-chip <?= $isChecked ? '' : 'off' ?>" data-id="<?= $procId ?>">
                   <span class="handle">☰</span>
                   <span class="name"><?= esc($pr['process_name']) ?></span>
+
                   <input type="checkbox"
                          class="form-check-input chip-check"
                          name="flows_selected[<?= $pid ?>][]"
@@ -139,7 +174,7 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
           </div>
 
           <small class="text-muted">
-            Urutan yang disimpan hanya chip yang dicentang.
+            Drag chip untuk urutan. Centang untuk aktif. Urutan yang disimpan hanya yang aktif.
           </small>
         </td>
 
@@ -167,7 +202,7 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
 
 </form>
 
-<!-- MODAL -->
+<!-- ================= MODAL EDIT INDIVIDUAL ================= -->
 <div class="modal fade" id="flowModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg modal-dialog-scrollable">
     <div class="modal-content">
@@ -194,186 +229,164 @@ thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
 
       <div class="modal-footer">
         <button class="btn btn-outline-secondary" data-bs-dismiss="modal">Close</button>
-        <button class="btn btn-primary" id="btnSaveOne" type="button">Save This Product</button>
+        <button class="btn btn-primary" id="btnSaveOne">Save This Product</button>
       </div>
     </div>
   </div>
 </div>
 
-<!-- SortableJS -->
+<!-- SortableJS CDN -->
 <script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 
 <script>
-(function(){
-  // Guard: bootstrap modal wajib ada
-  function ensureBootstrap() {
-    if (typeof bootstrap === 'undefined' || !bootstrap.Modal) {
-      console.error('Bootstrap JS tidak ditemukan. Pastikan layout include bootstrap.bundle.min.js');
-      alert('Bootstrap JS belum ter-load. Modal tidak bisa dibuka. Cek layout kamu.');
-      return false;
-    }
-    return true;
-  }
+function updateHiddenOrder(productId) {
+  const chips = document.getElementById('chips_' + productId);
+  const ids = [];
 
-  // helper: update hidden order (checked only) berdasarkan posisi chip saat ini
-  function updateHiddenOrder(productId) {
-    const chips = document.getElementById('chips_' + productId);
-    if (!chips) return;
-
-    const ids = [];
-    chips.querySelectorAll('.flow-chip').forEach(chip => {
-      const cb = chip.querySelector('.chip-check');
-      if (cb && cb.checked) ids.push(String(chip.dataset.id));
-    });
-
-    const hidden = document.getElementById('order_' + productId);
-    if (hidden) hidden.value = ids.join(',');
-  }
-
-  function syncChipStyle(chipEl) {
-    const cb = chipEl.querySelector('.chip-check');
-    if (!cb) return;
-    chipEl.classList.toggle('off', !cb.checked);
-  }
-
-  // init sortable untuk semua row chips
-  const sortables = new Map(); // productId -> Sortable instance
-
-  function initRowSortable(productId) {
-    const box = document.getElementById('chips_' + productId);
-    if (!box) return;
-
-    // destroy jika ada
-    if (sortables.has(productId)) {
-      sortables.get(productId).destroy();
-      sortables.delete(productId);
-    }
-
-    const inst = new Sortable(box, {
-      animation: 150,
-      handle: '.handle',
-      onEnd: () => updateHiddenOrder(productId),
-    });
-
-    sortables.set(productId, inst);
-
-    // sync style awal & hidden awal
-    box.querySelectorAll('.flow-chip').forEach(chip => syncChipStyle(chip));
-    updateHiddenOrder(productId);
-  }
-
-  document.querySelectorAll('.flow-chips[id^="chips_"]').forEach(box => {
-    initRowSortable(box.dataset.product);
+  chips.querySelectorAll('.flow-chip').forEach(chip => {
+    const cb = chip.querySelector('.chip-check');
+    if (cb && cb.checked) ids.push(String(chip.dataset.id));
   });
 
-  // EVENT DELEGATION: checkbox change di chip (untuk row & modal)
-  document.addEventListener('change', (e) => {
-    const cb = e.target;
-    if (!cb.classList.contains('chip-check')) return;
+  const hidden = document.getElementById('order_' + productId);
+  if (hidden) hidden.value = ids.join(',');
+}
 
-    const chip = cb.closest('.flow-chip');
-    if (chip) syncChipStyle(chip);
+function syncChipStyleFromItsCheckbox(chipEl) {
+  const cb = chipEl.querySelector('.chip-check');
+  if (!cb) return;
+  chipEl.classList.toggle('off', !cb.checked);
+}
 
-    // jika ini checkbox di row (bukan modal), update order hidden
-    const rowBox = cb.closest('.flow-chips[id^="chips_"]');
-    if (rowBox) {
-      const productId = rowBox.dataset.product;
-      updateHiddenOrder(productId);
+document.querySelectorAll('.flow-chips[id^="chips_"]').forEach(box => {
+  const productId = box.dataset.product;
+
+  new Sortable(box, {
+    animation: 150,
+    handle: '.handle',
+    onSort: () => updateHiddenOrder(productId),
+  });
+
+  box.querySelectorAll('.flow-chip').forEach(chip => {
+    const cb = chip.querySelector('.chip-check');
+    if (cb) {
+      cb.addEventListener('change', () => {
+        syncChipStyleFromItsCheckbox(chip);
+        updateHiddenOrder(productId);
+      });
+      syncChipStyleFromItsCheckbox(chip);
     }
   });
 
-  // ===== MODAL =====
-  const modalEl = document.getElementById('flowModal');
-  const modal = ensureBootstrap() ? new bootstrap.Modal(modalEl) : null;
-  let modalSortable = null;
+  updateHiddenOrder(productId);
+});
 
-  function openModalForProduct(productId, partno, partname) {
-    if (!modal) return;
+// ===== Modal Edit Individual =====
+const modalEl = document.getElementById('flowModal');
+const modal   = new bootstrap.Modal(modalEl);
+let modalSortable = null;
+
+document.querySelectorAll('.btn-edit').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const productId = btn.dataset.product;
 
     document.getElementById('m_product_id').value = productId;
-    document.getElementById('m_partno').textContent = partno;
-    document.getElementById('m_partname').textContent = partname;
+    document.getElementById('m_partno').textContent = btn.dataset.partno;
+    document.getElementById('m_partname').textContent = btn.dataset.partname;
     document.getElementById('m_msg').innerHTML = '';
 
+    // clone chips dari row
     const rowChips = document.getElementById('chips_' + productId);
     const mChips = document.getElementById('m_chips');
-    mChips.innerHTML = rowChips ? rowChips.innerHTML : '';
+    mChips.innerHTML = rowChips.innerHTML;
 
+    // sortable modal
     if (modalSortable) modalSortable.destroy();
     modalSortable = new Sortable(mChips, { animation: 150, handle: '.handle' });
 
-    // sync style di modal
-    mChips.querySelectorAll('.flow-chip').forEach(chip => syncChipStyle(chip));
-
-    modal.show();
-  }
-
-  // tombol edit (pakai delegation juga biar aman)
-  document.addEventListener('click', (e) => {
-    const btn = e.target.closest('.btn-edit');
-    if (!btn) return;
-
-    openModalForProduct(btn.dataset.product, btn.dataset.partno, btn.dataset.partname);
-  });
-
-  function getModalPayload() {
-    const productId = document.getElementById('m_product_id').value;
-    const mChips = document.getElementById('m_chips');
-
-    const selected = [];
-    const order = [];
-
+    // bind modal checkbox change
     mChips.querySelectorAll('.flow-chip').forEach(chip => {
-      const id = String(chip.dataset.id);
       const cb = chip.querySelector('.chip-check');
-      if (cb && cb.checked) {
-        selected.push(id);
-        order.push(id);
+      if (cb) {
+        cb.addEventListener('change', () => syncChipStyleFromItsCheckbox(chip));
+        syncChipStyleFromItsCheckbox(chip);
       }
     });
 
-    return { productId, selected, order: order.join(',') };
-  }
+    modal.show();
+  });
+});
 
-  document.getElementById('btnSaveOne').addEventListener('click', async () => {
-    const payload = getModalPayload();
-    const msgEl = document.getElementById('m_msg');
-    msgEl.innerHTML = '';
+function getModalPayload() {
+  const productId = document.getElementById('m_product_id').value;
+  const mChips = document.getElementById('m_chips');
 
-    const formData = new FormData();
-    formData.append('<?= csrf_token() ?>', '<?= csrf_hash() ?>');
-    formData.append('product_id', payload.productId);
-    payload.selected.forEach(v => formData.append('selected[]', v));
-    formData.append('order', payload.order);
+  const selected = [];
+  const order = [];
 
-    try {
-      const res = await fetch("<?= site_url('master/production-flow/save-individual') ?>", {
-        method: 'POST',
-        body: formData
-      });
-      const json = await res.json();
-
-      if (!json.ok) {
-        msgEl.innerHTML = `<div class="alert alert-danger">${json.message}</div>`;
-        return;
-      }
-
-      msgEl.innerHTML = `<div class="alert alert-success">${json.message}</div>`;
-
-      // sync modal -> row
-      const productId = payload.productId;
-      const rowChips = document.getElementById('chips_' + productId);
-      rowChips.innerHTML = document.getElementById('m_chips').innerHTML;
-
-      // re-init sortable row + update hidden
-      initRowSortable(productId);
-
-    } catch (err) {
-      msgEl.innerHTML = `<div class="alert alert-danger">Gagal simpan: ${err}</div>`;
+  mChips.querySelectorAll('.flow-chip').forEach(chip => {
+    const id = String(chip.dataset.id);
+    const cb = chip.querySelector('.chip-check');
+    if (cb && cb.checked) {
+      selected.push(id);
+      order.push(id);
     }
   });
 
-})();
+  return { productId, selected, order: order.join(',') };
+}
+
+document.getElementById('btnSaveOne').addEventListener('click', async () => {
+  const payload = getModalPayload();
+  const msgEl = document.getElementById('m_msg');
+  msgEl.innerHTML = '';
+
+  const formData = new FormData();
+  formData.append('<?= csrf_token() ?>', '<?= csrf_hash() ?>');
+  formData.append('product_id', payload.productId);
+  payload.selected.forEach(v => formData.append('selected[]', v));
+  formData.append('order', payload.order);
+
+  try {
+    const res = await fetch("<?= site_url('master/production-flow/save-individual') ?>", {
+      method: 'POST',
+      body: formData
+    });
+    const json = await res.json();
+
+    if (!json.ok) {
+      msgEl.innerHTML = `<div class="alert alert-danger">${json.message}</div>`;
+      return;
+    }
+
+    msgEl.innerHTML = `<div class="alert alert-success">${json.message}</div>`;
+
+    // sync balik ke row
+    const productId = payload.productId;
+    const rowChips = document.getElementById('chips_' + productId);
+    rowChips.innerHTML = document.getElementById('m_chips').innerHTML;
+
+    // reinit sortable row
+    new Sortable(rowChips, { animation: 150, handle: '.handle' });
+
+    // bind row checkbox
+    rowChips.querySelectorAll('.flow-chip').forEach(chip => {
+      const cb = chip.querySelector('.chip-check');
+      if (cb) {
+        cb.addEventListener('change', () => {
+          syncChipStyleFromItsCheckbox(chip);
+          updateHiddenOrder(productId);
+        });
+        syncChipStyleFromItsCheckbox(chip);
+      }
+    });
+
+    updateHiddenOrder(productId);
+
+  } catch (e) {
+    msgEl.innerHTML = `<div class="alert alert-danger">Gagal simpan: ${e}</div>`;
+  }
+});
 </script>
 
 <?= $this->endSection() ?>
