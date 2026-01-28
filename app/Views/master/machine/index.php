@@ -46,7 +46,7 @@
     <th>Tipe Mesin</th>
     <th>Process</th>
     <th>Line Position</th>
-    <th>Produk</th>
+    <!-- <th>Produk</th> -->
     <th width="220">Aksi</th>
 </tr>
 </thead>
@@ -59,13 +59,13 @@
         <td><?= esc($m['machine_name']) ?></td>
         <td><?= esc($m['process_name'] ?? '-') ?></td>
         <td>Line <?= esc($m['line_position']) ?></td>
-        <td><?= esc($m['products'] ?: '-') ?></td>
+        <!-- <td><?= esc($m['products'] ?: '-') ?></td> -->
         <td>
             <!-- MANAGE PRODUCT -->
-            <a href="/master/machine/products/<?= $m['id'] ?>"
+            <!-- <a href="/master/machine/products/<?= $m['id'] ?>"
                class="btn btn-sm btn-info mb-1">
                 Produk
-            </a>
+            </a> -->
 
             <!-- EDIT -->
             <a href="/master/machine/edit/<?= $m['id'] ?>"

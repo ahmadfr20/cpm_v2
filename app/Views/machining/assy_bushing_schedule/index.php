@@ -66,8 +66,10 @@
 </td>
 
 <td>
+<!-- ✅ penting: diberi name agar masuk ke controller -->
 <input type="number"
        class="form-control form-control-sm text-center plan-input"
+       name="items[<?= $idx ?>][target_per_shift]"
        max="1200"
        value="<?= esc($plan['target_per_shift'] ?? '') ?>">
 </td>
@@ -100,26 +102,31 @@ async function loadProducts(selectEl) {
     const shiftId    = selectEl.dataset.shift;
     const selectedId = selectEl.dataset.selected;
 
-    const res = await fetch(
-        `/machining/assy-bushing/schedule/product-target?machine_id=${machineId}&shift_id=${shiftId}`
-    );
-    const data = await res.json();
+    try {
+        const res = await fetch(
+            `/machining/assy-bushing/schedule/product-target?machine_id=${machineId}&shift_id=${shiftId}`
+        );
+        const data = await res.json();
 
-    selectEl.innerHTML = '<option value="">-- pilih part --</option>';
+        selectEl.innerHTML = '<option value="">-- pilih part --</option>';
 
-    data.forEach(p => {
-        const selected = (p.id == selectedId) ? 'selected' : '';
-        selectEl.insertAdjacentHTML('beforeend', `
-            <option value="${p.id}"
-                    data-ct="${p.cycle_time}"
-                    data-target="${p.target}"
-                    ${selected}>
-                ${p.part_no} - ${p.part_name}
-            </option>
-        `);
-    });
+        data.forEach(p => {
+            const selected = (p.id == selectedId) ? 'selected' : '';
+            selectEl.insertAdjacentHTML('beforeend', `
+                <option value="${p.id}"
+                        data-ct="${p.cycle_time}"
+                        data-target="${p.target}"
+                        ${selected}>
+                    ${p.part_no} - ${p.part_name}
+                </option>
+            `);
+        });
 
-    if (selectedId) selectEl.dispatchEvent(new Event('change'));
+        if (selectedId) selectEl.dispatchEvent(new Event('change'));
+
+    } catch (e) {
+        console.error('Gagal load product Assy Bushing', e);
+    }
 }
 
 document.querySelectorAll('.product-select').forEach(selectEl => {

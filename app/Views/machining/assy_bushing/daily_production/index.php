@@ -159,10 +159,32 @@ $exist = $shift['hourly_map']
     </span>
 </div>
 
-<button class="btn btn-success mb-4">
-    <i class="bi bi-save"></i>
-    Simpan <?= esc($shift['shift_name']) ?>
-</button>
+<div class="d-flex gap-2 mb-4">
+  <button class="btn btn-success">
+      <i class="bi bi-save"></i>
+      Simpan <?= esc($shift['shift_name']) ?>
+  </button>
+
+  <?php if (!empty($shift['is_shift3'])): ?>
+    <button
+      type="submit"
+      class="btn btn-warning"
+      formaction="/machining/assy-bushing/hourly/finish-shift"
+      <?= (!$canFinish) ? 'disabled' : '' ?>
+      title="<?= !$canFinish ? esc($finishError ?? 'Belum bisa finish') : 'Finish Shift' ?>"
+    >
+      <i class="bi bi-check2-circle"></i>
+      Finish Shift
+    </button>
+
+    <?php if (!$canFinish && !empty($shift3EndAt)): ?>
+      <div class="small text-muted align-self-center">
+        Finish aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?>)
+      </div>
+    <?php endif; ?>
+  <?php endif; ?>
+</div>
+
 
 </form>
 <?php endforeach ?>

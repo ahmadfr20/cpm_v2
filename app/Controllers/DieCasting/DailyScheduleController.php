@@ -616,36 +616,129 @@ class DailyScheduleController extends BaseController
     /* =========================
      * VIEW RESULT
      * ========================= */
-    public function view()
-    {
-        $db   = db_connect();
-        $date = $this->request->getGet('date') ?? date('Y-m-d');
+public function view()
+{
+    $db   = db_connect();
+    $date = $this->request->getGet('date') ?? date('Y-m-d');
 
-        $rows = $db->table('die_casting_production dcp')
-            ->select('
-                s.shift_name,
-                m.machine_code,
-                m.line_position,
-                p.part_no,
-                COALESCE(dcp.part_label, p.part_name) AS part_name,
-                p.weight_ascas,
-                p.weight_runner,
-                dcp.qty_p,
-                dcp.qty_a,
-                dcp.qty_ng,
-                dcp.status
-            ')
-            ->join('shifts s', 's.id = dcp.shift_id')
-            ->join('machines m', 'm.id = dcp.machine_id')
-            ->join('products p', 'p.id = dcp.product_id')
-            ->where('dcp.production_date', $date)
-            ->orderBy('m.line_position')
-            ->get()
-            ->getResultArray();
+    // Process Die Casting
+    $processDC = $db->table('production_processes')
+        ->select('id, process_name')
+        ->where('process_name', 'Die Casting')
+        ->get()->getRowArray();
 
-        return view('die_casting/daily_schedule/view', [
-            'date' => $date,
-            'rows' => $rows
-        ]);
+    $processIdDC = (int)($processDC['id'] ?? 0);
+
+    // Map process_name (buat next process)
+    $processNameMap = [];
+    $processes = $db->table('production_processes')->select('id, process_name')->get()->getResultArray();
+    foreach ($processes as $pp) {
+        $processNameMap[(int)$pp['id']] = $pp['process_name'];
     }
+
+    // Helper: next process by flow (sequence + 1)
+    $getNextProcessIdByFlow = function($productId, $currentProcessId) use ($db) {
+        if (!$currentProcessId) return null;
+
+        $cur = $db->table('product_process_flows')
+            ->select('sequence')
+            ->where([
+                'product_id' => (int)$productId,
+                'process_id' => (int)$currentProcessId,
+                'is_active'  => 1
+            ])->get()->getRowArray();
+
+        if (!$cur) return null;
+
+        $seq = (int)$cur['sequence'];
+
+        $next = $db->table('product_process_flows')
+            ->select('process_id')
+            ->where([
+                'product_id' => (int)$productId,
+                'sequence'   => $seq + 1,
+                'is_active'  => 1
+            ])->get()->getRowArray();
+
+        return $next ? (int)$next['process_id'] : null;
+    };
+
+    /**
+     * INVENTORY DC:
+     * ambil dari die_casting_production (plan/actual) + wip DC->next
+     * key wip: source_table='die_casting_production' & source_id=dcp.id
+     */
+    $rows = $db->table('die_casting_production dcp')
+        ->select('
+            dcp.id AS dcp_id,
+            dcp.production_date,
+            dcp.shift_id,
+            s.shift_name,
+
+            dcp.machine_id,
+            m.machine_code,
+            m.line_position,
+
+            dcp.product_id,
+            p.part_no,
+            COALESCE(dcp.part_label, p.part_name) AS part_name,
+
+            dcp.qty_p,
+            dcp.qty_a,
+            dcp.qty_ng,
+
+            pw.status AS wip_status,
+            pw.qty AS wip_qty_legacy,
+            pw.qty_in,
+            pw.qty_out,
+            pw.stock,
+            pw.to_process_id
+        ')
+        ->join('shifts s', 's.id = dcp.shift_id', 'left')
+        ->join('machines m', 'm.id = dcp.machine_id', 'left')
+        ->join('products p', 'p.id = dcp.product_id', 'left')
+        ->join(
+            'production_wip pw',
+            "pw.source_table = 'die_casting_production'
+             AND pw.source_id = dcp.id
+             AND pw.production_date = dcp.production_date",
+            'left'
+        )
+        ->where('dcp.production_date', $date)
+        ->orderBy('s.shift_name', 'ASC')
+        ->orderBy('m.line_position', 'ASC')
+        ->get()->getResultArray();
+
+    // Tambahkan next process name (dari flow, fallback dari pw.to_process_id)
+    foreach ($rows as &$r) {
+        $productId = (int)($r['product_id'] ?? 0);
+
+        $nextId = null;
+        if ($processIdDC > 0 && $productId > 0) {
+            $nextId = $getNextProcessIdByFlow($productId, $processIdDC);
+        }
+        // fallback kalau flow tidak ketemu, pakai to_process_id dari WIP
+        if (!$nextId) {
+            $nextId = (int)($r['to_process_id'] ?? 0);
+        }
+
+        $r['next_process_name'] = $nextId ? ($processNameMap[$nextId] ?? '-') : '-';
+
+        // normalisasi angka inventory
+        $r['qty_in']  = (int)($r['qty_in'] ?? 0);
+        $r['qty_out'] = (int)($r['qty_out'] ?? 0);
+        $r['stock']   = (int)($r['stock'] ?? 0);
+
+        // status wip default
+        $r['wip_status'] = $r['wip_status'] ?? '-';
+    }
+    unset($r);
+
+    return view('die_casting/daily_schedule/inventory', [
+        'date' => $date,
+        'rows' => $rows,
+    ]);
+}
+
+
 }

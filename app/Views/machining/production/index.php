@@ -3,7 +3,7 @@
 
 <h4 class="mb-3">
     <i class="bi bi-cpu me-2"></i>
-    MACHINING – DAILY PRODUCTION ACHIEVEMENT
+    MACHINING – DAILY PRODUCTION PER SHIGT
 </h4>
 
 <form method="get" class="row g-2 mb-3 align-items-end">

@@ -309,6 +309,10 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
         'Machining\DailyScheduleResultController::index'
     );
 
+    $routes->get('daily-production-achievement', 'Machining\DailyProductionAchievementController::index');
+    $routes->post('daily-production-achievement/store', 'Machining\DailyProductionAchievementController::store');
+
+
     /* ================= HOURLY INPUT ================= */
     $routes->get(
         'hourly',
@@ -350,12 +354,11 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
         'assy-bushing/hourly/store',
         'Machining\AssyBushingDailyProductionController::store'
     );
+    $routes->post('leak-test/hourly/finish-shift', 'Machining\LeakTestDailyProductionController::finishShift');
 
+    $routes->get('assy-bushing/achievement', 'Machining\AssyBushingDailyProductionAchievementController::index');
+    $routes->post('assy-bushing/achievement/store', 'Machining\AssyBushingDailyProductionAchievementController::store');
 
-    $routes->get(
-    'assy-bushing/production-shift',
-    'Machining\AssyBushingProductionShiftController::index'
-    );
 
     $routes->get('assy-bushing/schedule', 'Machining\AssyBushingDailyScheduleController::index');
     $routes->get('assy-bushing/schedule/product-target', 'Machining\AssyBushingDailyScheduleController::getProductAndTarget');

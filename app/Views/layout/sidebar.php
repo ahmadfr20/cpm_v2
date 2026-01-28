@@ -128,43 +128,12 @@ function isActive($path, $currentUrl)
 </div>
 </li>
 
-<!-- ================= MACHINING ================= -->
-<li class="nav-item mt-3">
-<a class="nav-link text-white d-flex justify-content-between align-items-center"
-   data-bs-toggle="collapse"
-   href="#menuMachining">
-    <span><i class="bi bi-gear me-2"></i> Machining</span>
-    <i class="bi bi-chevron-down"></i>
-</a>
-
-        <div class="collapse <?= isActive('machining',$currentUrl)?'show':'' ?>" id="menuMachining">
-            <ul class="nav flex-column ms-3">
-            <li><a class="nav-link" href="/machining/hourly">Production Result per Jam</a></li>
-            <li><a class="nav-link" href="/machining/production">Production Result per Shift</a></li>
-            <li><a class="nav-link text-danger" href="#">Scrap</a></li>
-
-            <li class="text-secondary small mt-2">Leak Test</li>
-            <li><a class="nav-link" href="/machining/leak-test">Production Result per Jam</a></li>
-            <li><a class="nav-link" href="/machining/leak-test/production-shift">Production Result per Shift</a></li>
-
-            <li class="text-secondary small mt-2">Assy Bushing</li>
-            <li><a class="nav-link" href="/machining/assy-bushing/hourly">Production Result per Jam</a></li>
-            <li><a class="nav-link" href="/machining/assy-bushing/production-shift">Production Result per Shift</a></li>
-
-            <li class="text-secondary small mt-2">Assy Shaft</li>
-            <li><a class="nav-link" href="/machining/assy-shaft/hourly">Production Result per Jam</a></li>
-            <li><a class="nav-link" href="/machining/assy-shaft/production/shift">Production Result per Shift</a></li>
-    </ul>
-</div>
-</li>
-
-
 <!-- Delivery -->
 <li class="nav-item mt-3">
 <a class="nav-link text-white d-flex justify-content-between align-items-center"
    data-bs-toggle="collapse"
    href="#menuDelivery">
-    <span><i class="bi bi-gear me-2"></i> Delivery</span>
+    <span><i class="bi bi-truck me-2"></i> Delivery</span>
     <i class="bi bi-chevron-down"></i>
 </a>
 
@@ -181,7 +150,7 @@ function isActive($path, $currentUrl)
 <a class="nav-link text-white d-flex justify-content-between align-items-center"
    data-bs-toggle="collapse"
    href="#menuReceiving">
-    <span><i class="bi bi-gear me-2"></i> Receiving</span>
+    <span><i class="bi bi-truck-flatbed me-2"></i> Receiving</span>
     <i class="bi bi-chevron-down"></i>
 </a>
 
@@ -192,10 +161,52 @@ function isActive($path, $currentUrl)
 </div>
 </li>
 
+
+
+<!-- ================= MACHINING ================= -->
+<li class="nav-item mt-3">
+<a class="nav-link text-white d-flex justify-content-between align-items-center"
+   data-bs-toggle="collapse"
+   href="#menuMachining">
+    <span><i class="bi bi-gear me-2"></i> Machining</span>
+    <i class="bi bi-chevron-down"></i>
+</a>
+
+        <div class="collapse <?= isActive('machining',$currentUrl)?'show':'' ?>" id="menuMachining">
+            <ul class="nav flex-column ms-3">
+            <li><a class="nav-link" href="/machining/hourly">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/daily-production-achievement">Production Result per Shift</a></li>
+            <li><a class="nav-link text-danger" href="#">Scrap</a></li>
+
+            <li class="text-secondary small mt-2">Leak Test</li>
+            <li><a class="nav-link" href="/machining/leak-test">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/leak-test/production-shift">Production Result per Shift</a></li>
+
+            <li class="text-secondary small mt-2">Assy Bushing</li>
+            <li><a class="nav-link" href="/machining/assy-bushing/hourly">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/assy-bushing/achievement">Production Result per Shift</a></li>
+
+            <li class="text-secondary small mt-2">Assy Shaft</li>
+            <li><a class="nav-link" href="/machining/assy-shaft/hourly">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/assy-shaft/production/shift">Production Result per Shift</a></li>
+    </ul>
+</div>
+</li>
+
+
+
+
 <li class="nav-item mt-3">
     <a class="nav-link <?= $currentUrl === 'wip' ? 'active' : '' ?>"
        href="/wip/from-schedule">
         <i class="bi bi-alarm me-2"></i> WIP List
+    </a>
+</li>
+
+<li class="nav-item mt-3">
+    <a class="nav-link <?= $currentUrl === 'qc' ? 'active' : '' ?>"
+       href="#">
+        <i class="bi bi-hand-thumbs-up me-2"></i> QC
     </a>
 </li>
 

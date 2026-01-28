@@ -3,7 +3,6 @@
 
 <h4 class="mb-3">DAILY PRODUCTION SCHEDULE – LEAK TEST</h4>
 
-<!-- ================= FILTER TANGGAL ================= -->
 <form method="get" class="mb-3" style="max-width:220px">
     <label class="form-label fw-bold">Tanggal</label>
     <input type="date"
@@ -42,8 +41,11 @@
     $keyPlan = $shift['id'].'_'.$machine['id'];
     $plan    = $planMap[$keyPlan] ?? null;
 
-    $actKey  = $shift['id'].'_'.$machine['id'].'_'.($plan['product_id'] ?? 0);
-    $actual  = $actualMap[$actKey]['act'] ?? 0;
+    $actual  = 0;
+    if (!empty($plan['product_id'])) {
+        $actKey  = $shift['id'].'_'.$machine['id'].'_'.$plan['product_id'];
+        $actual  = $actualMap[$actKey]['act'] ?? 0;
+    }
 ?>
 <tr>
 
@@ -61,7 +63,7 @@
         data-shift="<?= $shift['id'] ?>"
         data-selected="<?= $plan['product_id'] ?? '' ?>"
         name="items[<?= $idx ?>][product_id]">
-    <option value="">-- pilih part --</option>
+    <option value="">Loading...</option>
 </select>
 </td>
 
@@ -87,14 +89,8 @@
        readonly>
 </td>
 
-<!-- ===== HIDDEN ===== -->
-<input type="hidden"
-       name="items[<?= $idx ?>][machine_id]"
-       value="<?= $machine['id'] ?>">
-
-<input type="hidden"
-       name="items[<?= $idx ?>][shift_id]"
-       value="<?= $shift['id'] ?>">
+<input type="hidden" name="items[<?= $idx ?>][machine_id]" value="<?= $machine['id'] ?>">
+<input type="hidden" name="items[<?= $idx ?>][shift_id]" value="<?= $shift['id'] ?>">
 
 </tr>
 <?php endforeach ?>
@@ -109,51 +105,63 @@
 </form>
 <?php endforeach ?>
 
-<!-- ================= JAVASCRIPT ================= -->
 <script>
-/**
- * Load product & target per machine + shift (LEAK TEST)
- */
 async function loadProducts(selectEl) {
     const machineId  = selectEl.dataset.machine;
     const shiftId    = selectEl.dataset.shift;
     const selectedId = selectEl.dataset.selected;
 
+    const url =
+        `/machining/leak-test/schedule/product-target` +
+        `?machine_id=${encodeURIComponent(machineId)}` +
+        `&shift_id=${encodeURIComponent(shiftId)}`;
+
+    selectEl.innerHTML = '<option value="">Loading...</option>';
+
     try {
-        const res  = await fetch(
-            `/machining/leak-test/schedule/product-target?machine_id=${machineId}&shift_id=${shiftId}`
-        );
-        const data = await res.json();
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+
+        // kalau bukan 200 OK, stop
+        if (!res.ok) {
+            selectEl.innerHTML = `<option value="">Gagal load (${res.status})</option>`;
+            console.error('Leak Test load product HTTP error', res.status);
+            return;
+        }
+
+        const json = await res.json();
+        const data = json.items || [];
 
         selectEl.innerHTML = '<option value="">-- pilih part --</option>';
 
+        if (!json.ok || data.length === 0) {
+            selectEl.innerHTML = `<option value="">(Tidak ada part untuk Leak Test)</option>`;
+            if (json.message) console.warn('Leak Test:', json.message);
+            return;
+        }
+
         data.forEach(p => {
-            const selected = (p.id == selectedId) ? 'selected' : '';
+            const selected = (String(p.id) === String(selectedId)) ? 'selected' : '';
             selectEl.insertAdjacentHTML('beforeend', `
                 <option value="${p.id}"
-                        data-ct="${p.cycle_time}"
-                        data-target="${p.target}"
+                        data-ct="${p.cycle_time ?? ''}"
+                        data-target="${p.target ?? 0}"
                         ${selected}>
                     ${p.part_no} - ${p.part_name}
                 </option>
             `);
         });
 
-        // Trigger change jika ada data lama
         if (selectedId) {
             selectEl.dispatchEvent(new Event('change'));
         }
 
     } catch (e) {
-        console.error('Gagal load product Leak Test', e);
+        console.error('Gagal load product Leak Test (exception)', e);
+        selectEl.innerHTML = '<option value="">Error load part</option>';
     }
 }
 
-/**
- * Init product selector
- */
 document.querySelectorAll('.product-select').forEach(selectEl => {
-
     loadProducts(selectEl);
 
     selectEl.addEventListener('change', () => {
@@ -161,12 +169,8 @@ document.querySelectorAll('.product-select').forEach(selectEl => {
         if (!opt) return;
 
         const row = selectEl.closest('tr');
-
-        row.querySelector('.cycle-time').value =
-            opt.dataset.ct || '';
-
-        row.querySelector('.plan-input').value =
-            opt.dataset.target || 0;
+        row.querySelector('.cycle-time').value = opt.dataset.ct || '';
+        row.querySelector('.plan-input').value = opt.dataset.target || 0;
     });
 });
 </script>

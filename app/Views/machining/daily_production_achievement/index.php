@@ -1,7 +1,7 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-3">MACHINING – LEAK TEST DAILY PRODUCTION PER SHIFT</h4>
+<h4 class="mb-3">MACHINING – DAILY PRODUCTION PER SHIFT</h4>
 
 <form method="get" class="mb-3 d-flex gap-2 align-items-end">
     <div>
@@ -16,17 +16,17 @@
     </div>
 </form>
 
-<div class="alert alert-warning fw-bold">
+<div class="alert alert-success fw-bold">
     DAILY SUMMARY<br>
     Target : <?= number_format((int)$dailyTarget) ?> |
-    OK : <?= number_format((int)$dailyFG) ?> |
+    FG : <?= number_format((int)$dailyFG) ?> |
     NG : <?= number_format((int)$dailyNG) ?> |
     Downtime : <?= number_format((int)$dailyDT) ?> |
     Efficiency :
     <span class="badge bg-dark"><?= esc($dailyEfficiency) ?> %</span>
 </div>
 
-<form method="post" action="/machining/leak-test/production-shift/store" id="mainFormShift">
+<form method="post" action="/machining/daily-production-achievement/store" id="mainFormShift">
     <?= csrf_field() ?>
 
     <?php foreach ($shifts as $shift): ?>
@@ -46,7 +46,7 @@
                 <?php endif; ?>
             </div>
         <?php else: ?>
-            <div class="alert alert-warning py-2 small">
+            <div class="alert alert-success py-2 small">
                 <i class="bi bi-unlock-fill"></i>
                 Koreksi aktif.
                 <?php if (!empty($shift['editDeadline'])): ?>
@@ -63,7 +63,7 @@
                     <th style="width:40px">No</th>
                     <th>Part</th>
                     <th style="width:90px">Target</th>
-                    <th style="width:90px">OK (Actual)</th>
+                    <th style="width:90px">FG (Actual)</th>
                     <th style="width:90px">NG</th>
                     <th style="width:160px">Next Process</th>
                     <th style="width:90px">WIP Qty</th>
@@ -77,7 +77,7 @@
                 <?php
                 $no = 1;
                 $totalTarget = 0;
-                $totalOK = 0;
+                $totalFG = 0;
                 $totalNG = 0;
                 $totalDT = 0;
                 ?>
@@ -93,7 +93,7 @@
                 <?php foreach ($shift['items'] as $row): ?>
                     <?php
                     $totalTarget += (int)$row['target'];
-                    $totalOK     += (int)$row['fg_display'];
+                    $totalFG     += (int)$row['fg_display'];
                     $totalNG     += (int)$row['ng_display'];
                     $totalDT     += (int)($row['downtime'] ?? 0);
 
@@ -125,7 +125,7 @@
                         <td>
                             <input type="number"
                                    class="form-control form-control-sm text-end"
-                                   name="items[<?= $key ?>][ok]"
+                                   name="items[<?= $key ?>][fg]"
                                    value="<?= (int)$row['fg_display'] ?>"
                                    <?= !$shift['isEditable'] ? 'disabled' : '' ?>>
                         </td>
@@ -152,6 +152,7 @@
                             </span>
                         </td>
 
+                        <!-- NG Category: dropdown -> simpan string ke machining_hourly.ng_category -->
                         <td>
                             <select class="form-select form-select-sm"
                                     name="items[<?= $key ?>][ng_category]"
@@ -189,7 +190,7 @@
                 <tr>
                     <td colspan="2" class="text-end">TOTAL</td>
                     <td class="text-end"><?= number_format($totalTarget) ?></td>
-                    <td class="text-end"><?= number_format($totalOK) ?></td>
+                    <td class="text-end"><?= number_format($totalFG) ?></td>
                     <td class="text-end"><?= number_format($totalNG) ?></td>
                     <td colspan="5"></td>
                 </tr>
@@ -197,7 +198,7 @@
                 <tr>
                     <td colspan="2" class="text-end">EFFICIENCY</td>
                     <td colspan="8">
-                        <?= $totalTarget > 0 ? round(($totalOK / $totalTarget) * 100, 1) : 0 ?> %
+                        <?= $totalTarget > 0 ? round(($totalFG / $totalTarget) * 100, 1) : 0 ?> %
                         <span class="ms-3 text-muted">(DT: <?= number_format((int)$totalDT) ?> min)</span>
                     </td>
                 </tr>
