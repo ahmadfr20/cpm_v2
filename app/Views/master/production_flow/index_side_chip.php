@@ -1,7 +1,7 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-3">Production Flow Product (Drag & Drop + Checkbox di Chip)</h4>
+<h4 class="mb-3">Production Flow Product (Table Excel Style)</h4>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
@@ -36,129 +36,142 @@
 <?= csrf_field() ?>
 
 <style>
-.table-sideways { white-space: nowrap; }
-.table-sideways th, .table-sideways td { vertical-align: middle; }
+/* ====== Excel-like table ====== */
+.table-excel {
+  white-space: nowrap;
+  font-size: 12px;
+}
+.table-excel th, .table-excel td {
+  vertical-align: middle;
+  padding: 6px 8px;
+}
 
-.sticky-col-1 { position: sticky; left: 0; background: #fff; z-index: 3; }
-.sticky-col-2 { position: sticky; left: 260px; background: #fff; z-index: 3; }
-thead .sticky-col-1, thead .sticky-col-2 { background: #e9ecef; z-index: 5; }
+thead.excel-head th{
+  background: #fff200; /* kuning excel */
+  color: #000;
+  text-transform: uppercase;
+  font-weight: 800;
+  border: 1px solid #333 !important;
+  text-align: center;
+}
 
-.sticky-right {
-  position: sticky;
-  right: 0;
+.table-excel td{
+  border: 1px solid #333 !important;
+}
+
+/* sticky product columns */
+.sticky-col-no   { position: sticky; left: 0;   background: #fff; z-index: 4; min-width: 60px; }
+.sticky-col-prod { position: sticky; left: 60px; background: #fff; z-index: 4; min-width: 320px; }
+thead .sticky-col-no, thead .sticky-col-prod { z-index: 10; }
+
+/* sticky action column */
+.sticky-col-action { position: sticky; right: 0; background: #fff; z-index: 5; min-width: 140px; }
+thead .sticky-col-action { z-index: 11; }
+
+/* dot checkbox style */
+.flow-cell { text-align: center; min-width: 110px; }
+.flow-dot-wrap { display:inline-flex; align-items:center; justify-content:center; }
+
+.flow-check {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.flow-dot {
+  width: 22px;
+  height: 22px;
+  border-radius: 999px;
+  border: 2px solid #0f5132;
   background: #fff;
-  z-index: 4;
-  min-width: 110px;
+  display: inline-block;
+  cursor: pointer;
+  box-shadow: inset 0 0 0 2px #fff;
 }
-thead .sticky-right { background:#e9ecef; z-index: 6; }
 
-.product-cell { min-width: 260px; }
-.flow-chip-wrap { min-width: 760px; }
+.flow-check:checked + .flow-dot {
+  background: #16a34a; /* hijau */
+  border-color: #0f5132;
+}
 
-.flow-chips{
-  display:flex; gap:6px; flex-wrap:wrap;
-  padding:8px; min-height:52px;
-  border:1px dashed #ced4da; border-radius:10px;
-  background:#fff;
+.flow-check:not(:checked) + .flow-dot {
+  background: #f8f9fa;
+  border-color: #6c757d;
 }
-.flow-chip{
-  display:inline-flex; align-items:center; gap:8px;
-  padding:6px 10px; border:1px solid #dee2e6; border-radius:999px;
-  background:#f8f9fa; font-size:12px; user-select:none;
-}
-.flow-chip .handle{ font-weight:800; cursor:grab; }
-.flow-chip.off{ opacity:.45; text-decoration:line-through; }
-.flow-chip .name{
-  max-width:240px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;
-}
-.flow-chip input[type="checkbox"]{ transform:scale(1.05); cursor:pointer; }
 
-@media (max-width: 576px) {
-  .product-cell { min-width: 220px; }
-  .flow-chip-wrap { min-width: 520px; }
-  .flow-chip .name { max-width: 160px; }
+.small-muted { font-size: 11px; color: #6c757d; }
+
+@media (max-width: 768px){
+  .sticky-col-prod { min-width: 260px; }
+  .flow-cell { min-width: 95px; }
 }
 </style>
 
 <div class="table-responsive">
-  <table class="table table-bordered table-sm align-middle table-sideways">
-    <thead class="table-secondary text-center">
+  <table class="table table-sm table-excel mb-0">
+    <thead class="excel-head">
       <tr>
-        <th class="text-start sticky-col-1 product-cell">Product</th>
-        <th class="sticky-col-2 flow-chip-wrap">Flow (drag + centang)</th>
-        <th class="sticky-right" style="width:110px">Save</th>
+        <th class="sticky-col-no">NO.</th>
+        <th class="sticky-col-prod text-start">PRODUCT</th>
+
+        <?php foreach (($processes ?? []) as $pr): ?>
+          <th class="flow-cell">
+            <?= esc($pr['process_name']) ?>
+          </th>
+        <?php endforeach; ?>
+
+        <th class="sticky-col-action">SAVE</th>
       </tr>
     </thead>
 
     <tbody>
-    <?php foreach ($products as $p):
-      $pid = (int)$p['id'];
-      $selectedOrder = $flowOrder[$pid] ?? [];
-    ?>
-      <tr id="row_<?= $pid ?>">
-        <input type="hidden" name="product_ids[]" value="<?= $pid ?>">
-        <input type="hidden" name="flows_order[<?= $pid ?>]" id="order_<?= $pid ?>" value="<?= esc(implode(',', $selectedOrder)) ?>">
-        <input type="hidden" name="flows_selected[<?= $pid ?>][]" value="">
+      <?php $no=1; foreach (($products ?? []) as $p): ?>
+        <?php
+          $pid = (int)$p['id'];
+          $selectedOrder = $flowOrder[$pid] ?? []; // hanya untuk display info awal (tidak ada input nomor)
+        ?>
+        <tr id="row_<?= $pid ?>">
+          <!-- hidden fields untuk bulk save -->
+          <input type="hidden" name="product_ids[]" value="<?= $pid ?>">
+          <input type="hidden" name="flows_order[<?= $pid ?>]" id="order_<?= $pid ?>" value="<?= esc(implode(',', $selectedOrder)) ?>">
+          <input type="hidden" name="flows_selected[<?= $pid ?>][]" value="">
 
-        <td class="text-start sticky-col-1 product-cell">
-          <strong><?= esc($p['part_no']) ?></strong><br>
-          <small class="text-muted"><?= esc($p['part_name']) ?></small>
+          <td class="sticky-col-no text-center fw-bold"><?= $no++ ?></td>
 
-          <div class="small mt-1" id="status_<?= $pid ?>"></div>
-        </td>
+          <td class="sticky-col-prod text-start">
+            <div class="fw-bold"><?= esc($p['part_no']) ?></div>
+            <div class="small text-muted"><?= esc($p['part_name']) ?></div>
+            <div class="small mt-1" id="status_<?= $pid ?>"></div>
+          </td>
 
-        <td class="sticky-col-2 flow-chip-wrap">
-          <div class="flow-chips" id="chips_<?= $pid ?>" data-product="<?= $pid ?>">
+          <?php foreach (($processes ?? []) as $pr): ?>
             <?php
-              $rendered = [];
-
-              foreach ($selectedOrder as $procId) {
-                foreach ($processes as $pr) {
-                  if ((int)$pr['id'] === (int)$procId) {
-                    $rendered[] = (int)$pr['id'];
-                    $isChecked = isset($flowMap[$pid][(int)$pr['id']]);
+              $procId = (int)$pr['id'];
+              $isChecked = isset($flowMap[$pid][$procId]);
+              $cbId = "cb_{$pid}_{$procId}";
             ?>
-                    <span class="flow-chip <?= $isChecked ? '' : 'off' ?>" data-id="<?= (int)$pr['id'] ?>">
-                      <span class="handle">☰</span>
-                      <span class="name"><?= esc($pr['process_name']) ?></span>
-                      <input type="checkbox"
-                             class="form-check-input chip-check"
-                             value="<?= (int)$pr['id'] ?>"
-                             <?= $isChecked ? 'checked' : '' ?>>
-                    </span>
-            <?php
-                  }
-                }
-              }
+            <td class="flow-cell">
+              <span class="flow-dot-wrap">
+                <input
+                  type="checkbox"
+                  class="form-check-input flow-check flow-check-<?= $pid ?>"
+                  id="<?= $cbId ?>"
+                  name="flows_selected[<?= $pid ?>][]"
+                  value="<?= $procId ?>"
+                  <?= $isChecked ? 'checked' : '' ?>
+                >
+                <label class="flow-dot" for="<?= $cbId ?>" title="<?= esc($pr['process_name']) ?>"></label>
+              </span>
+            </td>
+          <?php endforeach; ?>
 
-              foreach ($processes as $pr) {
-                $procId = (int)$pr['id'];
-                if (in_array($procId, $rendered, true)) continue;
-                $isChecked = isset($flowMap[$pid][$procId]);
-            ?>
-                <span class="flow-chip <?= $isChecked ? '' : 'off' ?>" data-id="<?= $procId ?>">
-                  <span class="handle">☰</span>
-                  <span class="name"><?= esc($pr['process_name']) ?></span>
-                  <input type="checkbox"
-                         class="form-check-input chip-check"
-                         value="<?= $procId ?>"
-                         <?= $isChecked ? 'checked' : '' ?>>
-                </span>
-            <?php } ?>
-          </div>
-
-          <small class="text-muted">Yang disimpan hanya chip yang dicentang.</small>
-        </td>
-
-        <td class="text-center sticky-right">
-          <button type="button"
-                  class="btn btn-success btn-sm btn-save-row"
-                  data-product="<?= $pid ?>">
-            <i class="bi bi-save"></i> Save
-          </button>
-        </td>
-      </tr>
-    <?php endforeach ?>
+          <td class="sticky-col-action text-center">
+            <button type="button" class="btn btn-success btn-sm btn-save-row" data-product="<?= $pid ?>">
+              <i class="bi bi-save"></i> Save
+            </button>
+          </td>
+        </tr>
+      <?php endforeach; ?>
     </tbody>
   </table>
 </div>
@@ -166,13 +179,13 @@ thead .sticky-right { background:#e9ecef; z-index: 6; }
 <div class="d-flex justify-content-between mt-3 align-items-center">
   <div><?= $pager->links('products', 'bootstrap_pagination') ?></div>
   <div class="d-flex gap-2">
-    <button class="btn btn-outline-primary" type="submit">💾 Bulk Save</button>
+    <button class="btn btn-outline-primary" type="submit">
+      💾 Bulk Save
+    </button>
   </div>
 </div>
 
 </form>
-
-<script src="https://cdn.jsdelivr.net/npm/sortablejs@1.15.2/Sortable.min.js"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
@@ -182,75 +195,41 @@ document.addEventListener('DOMContentLoaded', () => {
     if (el) el.innerHTML = html;
   }
 
-  function updateHiddenOrder(productId) {
-    const box = document.getElementById('chips_' + productId);
-    if (!box) return;
-
+  // ambil order sesuai urutan kolom (kiri->kanan)
+  function getRowOrder(productId){
+    const checks = document.querySelectorAll('.flow-check-' + productId);
     const ids = [];
-    box.querySelectorAll('.flow-chip').forEach(chip => {
-      const cb = chip.querySelector('.chip-check');
-      if (cb && cb.checked) ids.push(String(chip.dataset.id));
+    checks.forEach(cb => {
+      if (cb.checked) ids.push(String(cb.value));
     });
+    return ids;
+  }
 
+  function updateHiddenOrder(productId){
+    const ids = getRowOrder(productId);
     const hidden = document.getElementById('order_' + productId);
     if (hidden) hidden.value = ids.join(',');
   }
 
-  function syncChipStyle(chipEl) {
-    const cb = chipEl.querySelector('.chip-check');
-    if (!cb) return;
-    chipEl.classList.toggle('off', !cb.checked);
-  }
-
-  // init sortable rows
-  const sortableMap = new Map();
-  function initRow(productId) {
-    const box = document.getElementById('chips_' + productId);
-    if (!box) return;
-
-    if (sortableMap.has(productId)) {
-      sortableMap.get(productId).destroy();
-      sortableMap.delete(productId);
-    }
-
-    const inst = new Sortable(box, {
-      animation: 150,
-      handle: '.handle',
-      onEnd: () => {
-        updateHiddenOrder(productId);
-        setStatus(productId, '<span class="text-warning">● Changed (not saved)</span>');
-      },
-    });
-    sortableMap.set(productId, inst);
-
-    box.querySelectorAll('.flow-chip').forEach(chip => syncChipStyle(chip));
-    updateHiddenOrder(productId);
-  }
-
-  document.querySelectorAll('.flow-chips[id^="chips_"]').forEach(box => {
-    initRow(box.dataset.product);
-  });
-
-  // checkbox change (delegation)
+  // tanda changed saat checkbox diubah
   document.addEventListener('change', (e) => {
     const cb = e.target;
-    if (!cb.classList.contains('chip-check')) return;
+    if (!cb.classList.contains('flow-check')) return;
 
-    const chip = cb.closest('.flow-chip');
-    if (chip) syncChipStyle(chip);
+    // ambil productId dari class flow-check-{pid}
+    const cls = Array.from(cb.classList).find(c => c.startsWith('flow-check-'));
+    if (!cls) return;
+    const pid = cls.replace('flow-check-','');
 
-    const rowBox = cb.closest('.flow-chips[id^="chips_"]');
-    if (rowBox) {
-      const pid = rowBox.dataset.product;
-      updateHiddenOrder(pid);
-      setStatus(pid, '<span class="text-warning">● Changed (not saved)</span>');
-    }
+    updateHiddenOrder(pid);
+    setStatus(pid, '<span class="text-warning">● Changed (not saved)</span>');
   });
 
-  // bulk submit: update hidden for all
+  // bulk submit: update hidden order untuk semua row
   document.getElementById('bulkForm').addEventListener('submit', () => {
-    document.querySelectorAll('.flow-chips[id^="chips_"]').forEach(box => {
-      updateHiddenOrder(box.dataset.product);
+    document.querySelectorAll('input[id^="order_"]').forEach(h => {
+      const pid = h.id.replace('order_','');
+      updateHiddenOrder(pid);
     });
   });
 
@@ -260,20 +239,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if (!btn) return;
 
     const productId = btn.dataset.product;
-    const box = document.getElementById('chips_' + productId);
-    if (!box) return;
-
-    // kumpulkan selected & order (yang checked)
-    const selected = [];
-    const order = [];
-    box.querySelectorAll('.flow-chip').forEach(chip => {
-      const id = String(chip.dataset.id);
-      const cb = chip.querySelector('.chip-check');
-      if (cb && cb.checked) {
-        selected.push(id);
-        order.push(id);
-      }
-    });
+    const order = getRowOrder(productId);
 
     btn.disabled = true;
     btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span>Saving';
@@ -282,7 +248,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const formData = new FormData();
     formData.append('<?= csrf_token() ?>', '<?= csrf_hash() ?>');
     formData.append('product_id', productId);
-    selected.forEach(v => formData.append('selected[]', v));
+
+    // selected[] dan order string sama (urut sesuai kolom)
+    order.forEach(v => formData.append('selected[]', v));
     formData.append('order', order.join(','));
 
     try {
@@ -295,7 +263,6 @@ document.addEventListener('DOMContentLoaded', () => {
       if (!json.ok) {
         setStatus(productId, `<span class="text-danger">✖ ${json.message}</span>`);
       } else {
-        // update hidden juga biar konsisten
         updateHiddenOrder(productId);
         setStatus(productId, '<span class="text-success">✔ Saved</span>');
       }
@@ -305,6 +272,12 @@ document.addEventListener('DOMContentLoaded', () => {
       btn.disabled = false;
       btn.innerHTML = '<i class="bi bi-save"></i> Save';
     }
+  });
+
+  // init: set hidden order awal agar konsisten
+  document.querySelectorAll('input[id^="order_"]').forEach(h => {
+    const pid = h.id.replace('order_','');
+    updateHiddenOrder(pid);
   });
 
 });

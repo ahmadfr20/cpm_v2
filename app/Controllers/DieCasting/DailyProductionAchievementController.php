@@ -6,6 +6,57 @@ use App\Controllers\BaseController;
 
 class DailyProductionAchievementController extends BaseController
 {
+    /* =========================
+     * Helper: get process id DC
+     * ========================= */
+    private function getDcProcessId($db): int
+    {
+        // prioritas: process_code = DC
+        if ($db->fieldExists('process_code', 'production_processes')) {
+            $row = $db->table('production_processes')
+                ->select('id')
+                ->where('process_code', 'DC')
+                ->get()->getRowArray();
+            if ($row) return (int)$row['id'];
+        }
+
+        // fallback: process_name = Die Casting
+        $row = $db->table('production_processes')
+            ->select('id')
+            ->where('process_name', 'Die Casting')
+            ->get()->getRowArray();
+
+        return (int)($row['id'] ?? 0);
+    }
+
+    /* =========================
+     * Helper: resolve next process by flow
+     * ========================= */
+    private function resolveNextProcessByFlow($db, int $productId, int $fromProcessId): ?int
+    {
+        if (!$db->tableExists('product_process_flows')) return null;
+
+        $flows = $db->table('product_process_flows')
+            ->select('process_id, sequence')
+            ->where('product_id', $productId)
+            ->where('is_active', 1)
+            ->orderBy('sequence', 'ASC')
+            ->get()->getResultArray();
+
+        if (!$flows) return null;
+
+        $idx = null;
+        foreach ($flows as $i => $f) {
+            if ((int)$f['process_id'] === (int)$fromProcessId) {
+                $idx = $i;
+                break;
+            }
+        }
+        if ($idx === null) return null;
+
+        return isset($flows[$idx + 1]) ? (int)$flows[$idx + 1]['process_id'] : null;
+    }
+
     public function index()
     {
         $db   = db_connect();
@@ -14,11 +65,8 @@ class DailyProductionAchievementController extends BaseController
         $tz  = new \DateTimeZone('Asia/Jakarta');
         $now = new \DateTime('now', $tz);
 
-        // process DC
-        $dcProcess = $db->table('production_processes')
-            ->where('process_code', 'DC')
-            ->get()->getRowArray();
-        $dcProcessId = (int)($dcProcess['id'] ?? 1);
+        $dcProcessId = $this->getDcProcessId($db);
+        if ($dcProcessId <= 0) $dcProcessId = 1;
 
         // ng categories DC
         $ngCategories = $db->table('ng_categories')
@@ -114,7 +162,7 @@ class DailyProductionAchievementController extends BaseController
             foreach ($items as &$it) {
                 // tampilkan actual: pakai header kalau sudah ada, fallback sum hourly
                 $it['fg_display'] = ((int)$it['qty_a'] > 0) ? (int)$it['qty_a'] : (int)$it['sum_hourly_fg'];
-                $it['ng_display'] = ((int)$it['qty_ng'] > 0) ? (int)$it['qty_ng'] : (int)$it['sum_hourly_ng']; // ✅ FIX SYNTAX
+                $it['ng_display'] = ((int)$it['qty_ng'] > 0) ? (int)$it['qty_ng'] : (int)$it['sum_hourly_ng'];
 
                 $allProductIds[] = (int)$it['product_id'];
                 $allDcpIds[]     = (int)$it['production_id'];
@@ -218,7 +266,7 @@ class DailyProductionAchievementController extends BaseController
 
     public function store()
     {
-        $db = db_connect();
+        $db    = db_connect();
         $items = $this->request->getPost('items');
 
         if (!$items || !is_array($items)) {
@@ -227,6 +275,15 @@ class DailyProductionAchievementController extends BaseController
 
         $tz  = new \DateTimeZone('Asia/Jakarta');
         $now = new \DateTime('now', $tz);
+
+        $dcProcessId = $this->getDcProcessId($db);
+        if ($dcProcessId <= 0) $dcProcessId = 1;
+
+        // optional columns on production_wip
+        $hasQtyIn    = $db->fieldExists('qty_in', 'production_wip');
+        $hasQtyOut   = $db->fieldExists('qty_out', 'production_wip');
+        $hasStock    = $db->fieldExists('stock', 'production_wip');
+        $hasUpdated  = $db->fieldExists('updated_at', 'production_wip');
 
         // validasi window koreksi 1 jam (berdasarkan shift_id dari item pertama)
         $first   = reset($items);
@@ -283,7 +340,7 @@ class DailyProductionAchievementController extends BaseController
                 $fg = (int)($row['fg'] ?? 0);
                 $ng = (int)($row['ng'] ?? 0);
 
-                // Update header
+                // 1) Update header DC production
                 $db->table('die_casting_production')
                     ->where('id', $productionId)
                     ->update([
@@ -291,16 +348,109 @@ class DailyProductionAchievementController extends BaseController
                         'qty_ng' => $ng
                     ]);
 
-                // Sync wip qty jika masih waiting
-                $db->table('production_wip')
-                    ->where([
-                        'source_table' => 'die_casting_production',
-                        'source_id'    => $productionId,
-                        'status'       => 'WAITING'
-                    ])
-                    ->update(['qty' => $fg]);
+                // 2) Update WIP: DC -> next (stock harus ikut qtyA koreksi)
+                //    Cari to_process_id dari flow, fallback dari wip existing.
+                $toProcessId = $this->resolveNextProcessByFlow($db, $productId, $dcProcessId);
 
-                // simpan ng category & downtime ke last slot saja
+                // fallback: kalau flow gak ketemu, ambil dari wip row yg sudah ada
+                if (!$toProcessId) {
+                    $tmp = $db->table('production_wip')
+                        ->select('to_process_id')
+                        ->where('source_table', 'die_casting_production')
+                        ->where('source_id', $productionId)
+                        ->where('production_date', $date)
+                        ->where('from_process_id', $dcProcessId)
+                        ->get()->getRowArray();
+                    $toProcessId = (int)($tmp['to_process_id'] ?? 0);
+                }
+
+                if ($toProcessId > 0 && $db->tableExists('production_wip')) {
+                    $wipRow = $db->table('production_wip')
+                        ->where([
+                            'source_table'    => 'die_casting_production',
+                            'source_id'       => $productionId,
+                            'production_date' => $date,
+                            'from_process_id' => $dcProcessId,
+                            'to_process_id'   => $toProcessId,
+                        ])
+                        ->get()->getRowArray();
+
+                    if ($wipRow) {
+                        $status = (string)($wipRow['status'] ?? 'WAITING');
+
+                        $upd = [
+                            // qty legacy mengikuti koreksi FG agar inventory sinkron
+                            'qty' => $fg,
+                        ];
+
+                        // jika belum DONE: stock = FG (koreksi)
+                        // jika DONE: stock harus 0 (sudah dipindah), tapi qty_out perlu ikut koreksi
+                        if ($hasStock) {
+                            $upd['stock'] = ($status === 'DONE') ? 0 : $fg;
+                        }
+
+                        if ($hasQtyOut && $status === 'DONE') {
+                            $upd['qty_out'] = $fg;
+                        }
+
+                        if ($hasUpdated) {
+                            $upd['updated_at'] = $now->format('Y-m-d H:i:s');
+                        }
+
+                        $db->table('production_wip')->where('id', (int)$wipRow['id'])->update($upd);
+                    } else {
+                        // Jika belum ada row WIP-nya, kita buat minimal agar stock tercatat.
+                        // Status default WAITING (belum finish shift).
+                        $ins = [
+                            'production_date' => $date,
+                            'product_id'      => $productId,
+                            'from_process_id' => $dcProcessId,
+                            'to_process_id'   => $toProcessId,
+                            'source_table'    => 'die_casting_production',
+                            'source_id'       => $productionId,
+                            'qty'             => $fg,
+                            'status'          => 'WAITING',
+                        ];
+                        if ($hasStock)  $ins['stock'] = $fg;
+                        if ($hasUpdated) $ins['updated_at'] = $now->format('Y-m-d H:i:s');
+                        if ($db->fieldExists('created_at', 'production_wip')) $ins['created_at'] = $now->format('Y-m-d H:i:s');
+
+                        $db->table('production_wip')->insert($ins);
+                    }
+
+                    // 3) Jika sudah pernah pindah ke proses berikutnya (finish shift sudah jalan),
+                    //    biasanya ada WIP row: (toProcessId -> nextNext) dengan source yg sama.
+                    //    Update qty_in & stock pada row tersebut agar ikut koreksi.
+                    $nextNextId = $this->resolveNextProcessByFlow($db, $productId, (int)$toProcessId);
+
+                    if ($nextNextId) {
+                        $wipNext = $db->table('production_wip')
+                            ->where([
+                                'source_table'    => 'die_casting_production',
+                                'source_id'       => $productionId,
+                                'production_date' => $date,
+                                'from_process_id' => (int)$toProcessId,
+                                'to_process_id'   => (int)$nextNextId,
+                            ])
+                            ->get()->getRowArray();
+
+                        if ($wipNext) {
+                            $upd2 = [
+                                'qty' => $fg,
+                            ];
+                            if ($hasQtyIn)  $upd2['qty_in'] = $fg;
+                            if ($hasStock)  $upd2['stock']  = $fg; // stock yang tersedia di proses berikutnya ikut koreksi
+                            if ($hasUpdated) $upd2['updated_at'] = $now->format('Y-m-d H:i:s');
+
+                            // jangan ganggu jika row itu sudah DONE
+                            if ((string)($wipNext['status'] ?? '') !== 'DONE') {
+                                $db->table('production_wip')->where('id', (int)$wipNext['id'])->update($upd2);
+                            }
+                        }
+                    }
+                }
+
+                // 4) simpan ng category & downtime ke last slot saja
                 $ngCategoryId = $row['ng_category_id'] ?? null;
                 $downtime     = (int)($row['downtime'] ?? 0);
 
@@ -344,7 +494,7 @@ class DailyProductionAchievementController extends BaseController
             if ($db->transStatus() === false) throw new \Exception('DB error');
 
             $db->transCommit();
-            return redirect()->back()->with('success', 'Daily Production per Shift berhasil disimpan');
+            return redirect()->back()->with('success', 'Daily Production per Shift berhasil disimpan + stock WIP ikut update sesuai koreksi qty A.');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());

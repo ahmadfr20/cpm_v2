@@ -15,7 +15,7 @@ $routes->group('dashboard', ['filter' => 'auth'], function ($routes) {
     $routes->get('/', 'Dashboard\HomeController::index');
 
     $routes->get('asakai', 'Dashboard\AsakaiController::index');
-    $routes->get('wip', 'Dashboard\WipController::index');
+    $routes->get('wip/inventory', 'WIP\WipInventoryController::index');
     $routes->get('inventory', 'Dashboard\InventoryController::index');
 
 });
@@ -121,7 +121,7 @@ $routes->group('material', ['filter'=>'auth'], function ($routes) {
 });
 
 $routes->group('wip', ['filter'=>'auth'], function ($routes) {
-    $routes->get('from-schedule', 'WIP\WipFromScheduleController::index');
+    $routes->get('inventory', 'WIP\WipInventoryController::index');
 });
 
 $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {

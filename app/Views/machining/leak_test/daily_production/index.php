@@ -18,35 +18,30 @@
            onchange="this.form.submit()">
 </form>
 
-<form method="post" action="/machining/leak-test/hourly/store" id="formSaveHourly">
-<?= csrf_field() ?>
-
 <?php
 // shift terakhir MC (array sudah urut ASC)
 $lastShift = end($shifts);
 reset($shifts);
 ?>
 
+<!-- ===================== FORM SIMPAN HOURLY (TANPA NESTED FORM) ===================== -->
+<form method="post" action="/machining/leak-test/hourly/store" id="formSaveHourly">
+<?= csrf_field() ?>
+
 <?php foreach ($shifts as $shift): ?>
 
 <h5 class="mt-4 mb-2"><?= esc($shift['shift_name']) ?></h5>
 
-<div class="table-scroll">
+<div class="table-scroll mb-3">
 <table class="production-table">
 
-<?php
-  $slotCount = count($shift['slots']);
-?>
+<?php $slotCount = count($shift['slots']); ?>
 
-<!-- ✅ KUNCI RAPINYA: colgroup -->
 <colgroup>
-  <!-- sticky cols -->
   <col class="col-line">
   <col class="col-machine">
   <col class="col-part">
   <col class="col-target-shift">
-
-  <!-- per slot: Target, OK, NG, NG Cat -->
   <?php for($i=0;$i<$slotCount;$i++): ?>
     <col class="col-slot-target">
     <col class="col-slot-ok">
@@ -64,9 +59,9 @@ reset($shifts);
 
   <?php foreach ($shift['slots'] as $slot): ?>
     <th colspan="4" class="slot-header"
-        data-start="<?= $slot['time_start'] ?>"
-        data-end="<?= $slot['time_end'] ?>">
-      <?= substr($slot['time_start'],0,5) ?> - <?= substr($slot['time_end'],0,5) ?>
+        data-start="<?= esc($slot['time_start']) ?>"
+        data-end="<?= esc($slot['time_end']) ?>">
+      <?= esc(substr($slot['time_start'],0,5)) ?> - <?= esc(substr($slot['time_end'],0,5)) ?>
     </th>
   <?php endforeach ?>
 </tr>
@@ -101,35 +96,40 @@ reset($shifts);
     $key = $shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
   ?>
 
-    <td class="slot-target"><?= $targetSlot ?></td>
+    <td class="slot-target"><?= (int)$targetSlot ?></td>
 
     <td>
       <input type="number"
              class="cell-input slot-input ok"
-             data-start="<?= $slot['time_start'] ?>"
-             data-end="<?= $slot['time_end'] ?>"
-             value="<?= $exist['qty_ok'] ?? 0 ?>"
-             name="items[<?= $key ?>][ok]">
+             data-start="<?= esc($slot['time_start']) ?>"
+             data-end="<?= esc($slot['time_end']) ?>"
+             value="<?= (int)($exist['qty_ok'] ?? 0) ?>"
+             name="items[<?= esc($key) ?>][ok]">
+
+      <!-- ✅ Hidden inputs DIPINDAH ke dalam TD (biar struktur table valid & tidak “nyasar”) -->
+      <input type="hidden" name="items[<?= esc($key) ?>][date]" value="<?= esc($date) ?>">
+      <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
+      <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$item['machine_id'] ?>">
+      <input type="hidden" name="items[<?= esc($key) ?>][product_id]" value="<?= (int)$item['product_id'] ?>">
+      <input type="hidden" name="items[<?= esc($key) ?>][time_slot_id]" value="<?= (int)$slot['id'] ?>">
     </td>
 
     <td>
       <input type="number"
              class="cell-input slot-input ng"
-             data-start="<?= $slot['time_start'] ?>"
-             data-end="<?= $slot['time_end'] ?>"
-             value="<?= $exist['qty_ng'] ?? 0 ?>"
-             name="items[<?= $key ?>][ng]">
+             data-start="<?= esc($slot['time_start']) ?>"
+             data-end="<?= esc($slot['time_end']) ?>"
+             value="<?= (int)($exist['qty_ng'] ?? 0) ?>"
+             name="items[<?= esc($key) ?>][ng]">
     </td>
 
-    <!-- ✅ NG Category dropdown -->
     <td>
       <select class="cell-select slot-input ngcat"
-              data-start="<?= $slot['time_start'] ?>"
-              data-end="<?= $slot['time_end'] ?>"
-              name="items[<?= $key ?>][ng_category]">
+              data-start="<?= esc($slot['time_start']) ?>"
+              data-end="<?= esc($slot['time_end']) ?>"
+              name="items[<?= esc($key) ?>][ng_category]">
         <option value="">- pilih -</option>
         <?php
-          // daftar kategori bisa kamu ubah sesuai kebutuhan
           $cats = ['BOCOR', 'CRACK', 'SCRATCH', 'POROS', 'DIMENSI', 'LAINNYA'];
           $selected = (string)($exist['ng_category'] ?? '');
         ?>
@@ -140,13 +140,6 @@ reset($shifts);
         <?php endforeach ?>
       </select>
     </td>
-
-    <!-- hidden -->
-    <input type="hidden" name="items[<?= $key ?>][date]" value="<?= esc($date) ?>">
-    <input type="hidden" name="items[<?= $key ?>][shift_id]" value="<?= $shift['id'] ?>">
-    <input type="hidden" name="items[<?= $key ?>][machine_id]" value="<?= $item['machine_id'] ?>">
-    <input type="hidden" name="items[<?= $key ?>][product_id]" value="<?= $item['product_id'] ?>">
-    <input type="hidden" name="items[<?= $key ?>][time_slot_id]" value="<?= $slot['id'] ?>">
 
   <?php endforeach ?>
 </tr>
@@ -168,38 +161,37 @@ reset($shifts);
 </table>
 </div>
 
-
 <?php endforeach ?>
 
-<!-- ✅ tombol sejajar -->
 <div class="d-flex gap-2 mt-3">
-    <button class="btn btn-success">
+    <button type="submit" class="btn btn-success">
         <i class="bi bi-save"></i> Simpan Leak Test
     </button>
-
-    <form method="post"
-          action="/machining/leak-test/hourly/finish-shift"
-          id="formFinishShift"
-          onsubmit="return confirm('Finish Shift Leak Test? Ini akan transfer WIP ke proses berikutnya.');">
-        <?= csrf_field() ?>
-        <input type="hidden" name="date" value="<?= esc($date) ?>">
-        <input type="hidden" name="shift_id" value="<?= esc($lastShift['id'] ?? '') ?>">
-
-        <!-- default disabled, akan di-enable otomatis oleh JS -->
-        <button class="btn btn-warning" id="btnFinishShift" disabled>
-            <i class="bi bi-check2-circle"></i>
-            Finish Shift (<?= esc($lastShift['shift_name'] ?? 'Shift 3') ?>)
-        </button>
-
-        <div class="small text-muted mt-1" id="finishHint">
-            Finish Shift aktif setelah slot terakhir shift berakhir.
-        </div>
-    </form>
 </div>
 
 </form>
 
-<!-- ================= CSS (rapi + sticky benar) ================= -->
+<!-- ===================== FORM FINISH SHIFT (FORM TERPISAH, TANPA NESTED) ===================== -->
+<form method="post"
+      action="/machining/leak-test/hourly/finish-shift"
+      id="formFinishShift"
+      class="mt-2"
+      onsubmit="return confirm('Finish Shift Leak Test? Ini akan transfer WIP ke proses berikutnya.');">
+    <?= csrf_field() ?>
+    <input type="hidden" name="date" value="<?= esc($date) ?>">
+    <input type="hidden" name="shift_id" value="<?= esc($lastShift['id'] ?? '') ?>">
+
+    <button type="submit" class="btn btn-warning" id="btnFinishShift" disabled>
+        <i class="bi bi-check2-circle"></i>
+        Finish Shift (<?= esc($lastShift['shift_name'] ?? 'Shift 3') ?>)
+    </button>
+
+    <div class="small text-muted mt-1" id="finishHint">
+        Finish Shift aktif setelah slot terakhir shift berakhir.
+    </div>
+</form>
+
+<!-- ================= CSS ================= -->
 <style>
 .table-scroll{
   overflow-x:auto;
@@ -211,9 +203,9 @@ reset($shifts);
 .production-table{
   width: max-content;
   min-width: 1200px;
-  table-layout: fixed;             /* ✅ kunci */
-  border-collapse: separate;       /* ✅ kunci */
-  border-spacing: 0;               /* ✅ kunci */
+  table-layout: fixed;
+  border-collapse: separate;
+  border-spacing: 0;
   font-size: 13px;
 }
 
@@ -237,7 +229,6 @@ reset($shifts);
   font-weight: 600;
 }
 
-/* ✅ width harus match dengan sticky left offset */
 .col-line{ width: 90px; }
 .col-machine{ width: 120px; }
 .col-part{ width: 320px; }
@@ -248,29 +239,11 @@ reset($shifts);
 .col-slot-ng{ width: 85px; }
 .col-slot-ngcat{ width: 180px; }
 
-/* ✅ sticky columns */
-.sticky-left{
-  position: sticky; left: 0;
-  background: #fff;
-  z-index: 60;
-}
-.sticky-left-2{
-  position: sticky; left: 90px;
-  background: #fff;
-  z-index: 60;
-}
-.sticky-left-3{
-  position: sticky; left: 210px; /* 90 + 120 */
-  background: #fff;
-  z-index: 60;
-}
-.sticky-left-4{
-  position: sticky; left: 530px; /* 90+120+320 */
-  background: #fff;
-  z-index: 60;
-}
+.sticky-left{ position: sticky; left: 0; background: #fff; z-index: 60; }
+.sticky-left-2{ position: sticky; left: 90px; background: #fff; z-index: 60; }
+.sticky-left-3{ position: sticky; left: 210px; background: #fff; z-index: 60; }
+.sticky-left-4{ position: sticky; left: 530px; background: #fff; z-index: 60; }
 
-/* header sticky columns must be higher */
 .production-table thead .sticky-left,
 .production-table thead .sticky-left-2,
 .production-table thead .sticky-left-3,
@@ -279,7 +252,6 @@ reset($shifts);
   z-index: 80;
 }
 
-/* input/select full width of cell */
 .cell-input, .cell-select{
   width: 100%;
   height: 30px;
@@ -288,30 +260,24 @@ reset($shifts);
   box-sizing: border-box;
 }
 
-/* number spinner bikin lebar berubah di beberapa browser -> matikan */
 .cell-input[type=number]::-webkit-outer-spin-button,
 .cell-input[type=number]::-webkit-inner-spin-button{
   -webkit-appearance: none;
   margin: 0;
 }
-.cell-input[type=number]{
-  -moz-appearance: textfield;
-}
+.cell-input[type=number]{ -moz-appearance: textfield; }
 
 .slot-target{
   background:#f9fafb;
   font-weight:700;
   text-align:center;
 }
-
 .slot-active{ background:#dcfce7 !important; }
 </style>
 
-<!-- ================= JS (enable finish shift + total) ================= -->
+<!-- ================= JS ================= -->
 <script>
 function parseSlotEnd(dateStr, start, end){
-  // dateStr: YYYY-MM-DD
-  // handle slot melewati midnight
   const s = new Date(`${dateStr}T${start}`);
   let e = new Date(`${dateStr}T${end}`);
   if (e <= s) e.setDate(e.getDate() + 1);
@@ -323,33 +289,27 @@ function isSlotActive(dateStr, start, end){
   const s = new Date(`${dateStr}T${start}`);
   let e = new Date(`${dateStr}T${end}`);
   if (e <= s) {
-    // slot melewati midnight
     if (now >= s) e.setDate(e.getDate() + 1);
-    else s.setDate(s.getDate() - 1);
   }
   return now >= s && now <= e;
 }
 
 function updateActiveSlots(dateStr){
-  document.querySelectorAll('.slot-input').forEach(i=>{
-    const a = isSlotActive(dateStr, i.dataset.start, i.dataset.end);
-    i.readOnly = !a;
-    i.closest('td').classList.toggle('slot-active', a);
-  });
-}
+  document.querySelectorAll('.slot-input').forEach(el=>{
+    const active = isSlotActive(dateStr, el.dataset.start, el.dataset.end);
 
-function calcTotals(){
-  document.querySelectorAll('.production-table').forEach(t=>{
-    let ok=0,ng=0,target=0;
-    t.querySelectorAll('.ok').forEach(i=>ok += (+i.value||0));
-    t.querySelectorAll('.ng').forEach(i=>ng += (+i.value||0));
-    t.querySelectorAll('.target-shift').forEach(td=>target += (+td.innerText||0));
+    // input number: readonly
+    if (el.tagName === 'INPUT') {
+      el.readOnly = !active;
+    }
 
-    const summary = t.closest('.table-scroll').nextElementSibling;
-    if(!summary) return;
-    summary.querySelector('.total-ok').innerText = ok;
-    summary.querySelector('.total-ng').innerText = ng;
-    summary.querySelector('.eff').innerText = target ? ((ok/target)*100).toFixed(1)+'%' : '0%';
+    // select: disabled
+    if (el.tagName === 'SELECT') {
+      el.disabled = !active;
+    }
+
+    const td = el.closest('td');
+    if (td) td.classList.toggle('slot-active', active);
   });
 }
 
@@ -364,12 +324,11 @@ function calcSlotTotals(){
 
     rows.forEach(r=>{
       const c = r.querySelectorAll('td');
-      // setelah 4 sticky kolom, tiap slot = 4 kolom
       for(let i=4;i<c.length;i+=4){
         const idx = (i-4)/4;
-        tg[idx] += (+c[i].innerText||0);
-        ok[idx] += (+(c[i+1].querySelector('.ok')?.value||0));
-        ng[idx] += (+(c[i+2].querySelector('.ng')?.value||0));
+        tg[idx] += (+c[i].innerText || 0);
+        ok[idx] += (+(c[i+1].querySelector('.ok')?.value || 0));
+        ng[idx] += (+(c[i+2].querySelector('.ng')?.value || 0));
       }
     });
 
@@ -379,23 +338,15 @@ function calcSlotTotals(){
   });
 }
 
-function recalcAll(){ calcTotals(); calcSlotTotals(); }
-
-/**
- * ✅ Enable Finish Shift ketika slot terakhir shift terakhir sudah berakhir
- * Kita ambil slot terakhir dari header shift terakhir (MC terakhir) yang ada di halaman.
- */
 function updateFinishShiftButton() {
   const btn = document.getElementById('btnFinishShift');
   const hint = document.getElementById('finishHint');
   if (!btn) return;
 
-  // cari table terakhir (shift terakhir)
   const tables = document.querySelectorAll('.production-table');
   if (!tables.length) return;
   const lastTable = tables[tables.length - 1];
 
-  // ambil header slot terakhir dari shift terakhir
   const headers = lastTable.querySelectorAll('thead .slot-header');
   if (!headers.length) return;
 
@@ -410,20 +361,22 @@ function updateFinishShiftButton() {
   const canFinish = now >= endTime;
   btn.disabled = !canFinish;
 
-  if (canFinish) {
-    hint.innerText = 'Finish Shift sudah aktif (slot terakhir sudah berakhir).';
-    hint.classList.remove('text-muted');
-    hint.classList.add('text-success');
-  } else {
-    hint.innerText = `Finish Shift aktif setelah slot terakhir berakhir (${end.slice(0,5)}).`;
-    hint.classList.remove('text-success');
-    hint.classList.add('text-muted');
+  if (hint) {
+    if (canFinish) {
+      hint.innerText = 'Finish Shift sudah aktif (slot terakhir sudah berakhir).';
+      hint.classList.remove('text-muted');
+      hint.classList.add('text-success');
+    } else {
+      hint.innerText = `Finish Shift aktif setelah slot terakhir berakhir (${end.slice(0,5)}).`;
+      hint.classList.remove('text-success');
+      hint.classList.add('text-muted');
+    }
   }
 }
 
 const dateStr = "<?= esc($date) ?>";
 updateActiveSlots(dateStr);
-recalcAll();
+calcSlotTotals();
 updateFinishShiftButton();
 
 setInterval(() => {
@@ -431,7 +384,7 @@ setInterval(() => {
   updateFinishShiftButton();
 }, 30000);
 
-document.addEventListener('input', recalcAll);
+document.addEventListener('input', calcSlotTotals);
 </script>
 
 <?= $this->endSection() ?>

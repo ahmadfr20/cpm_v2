@@ -197,8 +197,8 @@ function isActive($path, $currentUrl)
 
 
 <li class="nav-item mt-3">
-    <a class="nav-link <?= $currentUrl === 'wip' ? 'active' : '' ?>"
-       href="/wip/from-schedule">
+    <a class="nav-link <?= $currentUrl === 'wip/inventory' ? 'active' : '' ?>"
+       href="/wip/inventory">
         <i class="bi bi-alarm me-2"></i> WIP List
     </a>
 </li>
