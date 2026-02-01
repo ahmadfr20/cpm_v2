@@ -363,7 +363,7 @@ class DailyScheduleController extends BaseController
             if ($db->transStatus() === false) throw new \Exception('DB error');
 
             $db->transCommit();
-            return redirect()->back()->with('success', 'Schedule DC tersimpan. WIP hanya masuk ke DIE CASTING (tidak ke proses berikutnya).');
+            return redirect()->back()->with('success', 'Schedule DC tersimpan.');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());

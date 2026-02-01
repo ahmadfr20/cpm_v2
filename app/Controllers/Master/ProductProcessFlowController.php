@@ -32,6 +32,7 @@ class ProductProcessFlowController extends BaseController
         $direction = $direction === 'DESC' ? 'DESC' : 'ASC';
 
         $query = $this->productModel->where('is_active', 1);
+
         if ($keyword) {
             $query->groupStart()
                 ->like('part_no', $keyword)
@@ -90,7 +91,7 @@ class ProductProcessFlowController extends BaseController
                 $productId = (int)$raw;
                 if ($productId <= 0) continue;
 
-                // selected[] dari checkbox chip
+                // selected[] dari checkbox
                 $selected = $selectedPost[$productId] ?? [];
                 if (!is_array($selected)) $selected = [];
 
@@ -99,7 +100,7 @@ class ProductProcessFlowController extends BaseController
                 })));
                 $selected = array_map('intval', $selected);
 
-                // order string dari hidden (hasil drag)
+                // order string dari hidden (JS)
                 $orderStr = (string)($orderPost[$productId] ?? '');
                 $orderIds = [];
                 if ($orderStr !== '') {
@@ -135,7 +136,11 @@ class ProductProcessFlowController extends BaseController
         $orderStr  = (string)($this->request->getPost('order') ?? '');
 
         if ($productId <= 0) {
-            return $this->response->setJSON(['ok' => false, 'message' => 'Product tidak valid']);
+            return $this->response->setJSON([
+                'ok' => false,
+                'message' => 'Product tidak valid',
+                'csrfHash' => csrf_hash(),
+            ]);
         }
 
         if (!is_array($selected)) $selected = [];
@@ -165,10 +170,20 @@ class ProductProcessFlowController extends BaseController
         try {
             $this->saveOneProductFlow($productId, $final);
             $db->transCommit();
-            return $this->response->setJSON(['ok' => true, 'message' => 'Flow disimpan']);
+
+            // ✅ kirim balik csrfHash terbaru supaya AJAX berikutnya tidak 403
+            return $this->response->setJSON([
+                'ok'       => true,
+                'message'  => 'Flow disimpan',
+                'csrfHash' => csrf_hash(),
+            ]);
         } catch (\Throwable $e) {
             $db->transRollback();
-            return $this->response->setJSON(['ok' => false, 'message' => $e->getMessage()]);
+            return $this->response->setJSON([
+                'ok'       => false,
+                'message'  => $e->getMessage(),
+                'csrfHash' => csrf_hash(),
+            ]);
         }
     }
 

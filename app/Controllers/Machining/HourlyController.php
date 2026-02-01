@@ -7,6 +7,15 @@ use App\Controllers\BaseController;
 class HourlyController extends BaseController
 {
     /* =========================
+     * ADMIN CHECK
+     * ========================= */
+    private function isAdminSession(): bool
+    {
+        $role = strtoupper((string)(session()->get('role') ?? ''));
+        return $role === 'ADMIN';
+    }
+
+    /* =========================
      * PROCESS ID
      * ========================= */
     private function getProcessIdByName($db, string $processName): int
@@ -87,7 +96,8 @@ class HourlyController extends BaseController
         foreach ($shifts as &$s) {
             $code = (int)($s['shift_code'] ?? 0);
             $name = (string)($s['shift_name'] ?? '');
-            $s['is_shift3'] = ($code === 3) || (stripos($name, '3') !== false);
+            // shift 3 bisa dari code=3 atau nama mengandung 3
+            $s['is_shift3'] = ($code === 3) || (preg_match('/\b3\b/', $name) === 1) || (stripos($name, 'shift 3') !== false);
         }
         unset($s);
 
@@ -118,16 +128,27 @@ class HourlyController extends BaseController
         return $endDT;
     }
 
+    /**
+     * ✅ FIX: Admin boleh finish kapan saja.
+     * Return: [bool $canFinish, ?DateTime $shift3EndDT, ?string $error]
+     */
     private function canFinishShift($db, string $date): array
     {
+        // ✅ ADMIN BYPASS
+        if ($this->isAdminSession()) {
+            return [true, null, null];
+        }
+
         $tz  = new \DateTimeZone('Asia/Jakarta');
         $now = new \DateTime('now', $tz);
 
         $shifts = $this->getMachiningShifts($db);
         $shift3 = null;
+
         foreach ($shifts as $s) {
             if (!empty($s['is_shift3'])) { $shift3 = $s; break; }
         }
+
         if (!$shift3) return [false, null, 'Shift 3 Machining tidak ditemukan di master shifts'];
 
         $endDT = $this->getShiftEndDateTime($db, (int)$shift3['id'], $date, $tz);
@@ -184,25 +205,24 @@ class HourlyController extends BaseController
     }
 
     /* =========================================================
-     * 1) UPDATE STOCK MACHINING saat hourly disimpan
-     *    - stock Machining diambil dari SUM(qty_fg) (qty A) per schedule item (dsi)
-     *    - yang di-update adalah row WIP inbound (prev -> Machining) yang source-nya daily_schedule_items (dsi)
+     * UPDATE STOCK MACHINING saat hourly disimpan
+     * stock = SUM(qty_fg) per (machine,product) satu hari
+     * update row inbound prev->MC (source dsi)
      * ========================================================= */
     private function syncMachiningWipStockFromHourly($db, string $date): void
     {
         if (!$db->tableExists('production_wip')) return;
         if (!$db->tableExists('machining_hourly')) return;
 
-        $wipDateCol = $this->detectWipDateColumn($db);
+        $wipDateCol  = $this->detectWipDateColumn($db);
         $mcProcessId = $this->getProcessIdMachining($db);
 
         $hasQtyIn  = $db->fieldExists('qty_in', 'production_wip');
         $hasQtyOut = $db->fieldExists('qty_out', 'production_wip');
         $hasStock  = $db->fieldExists('stock', 'production_wip');
 
-        if (!$hasStock) return; // kalau tidak ada kolom stock, tidak ada yang bisa diisi
+        if (!$hasStock) return;
 
-        // Ambil semua schedule item Machining pada tanggal itu
         $items = $db->table('daily_schedule_items dsi')
             ->select('dsi.id AS dsi_id, dsi.machine_id, dsi.product_id')
             ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
@@ -214,7 +234,6 @@ class HourlyController extends BaseController
 
         if (!$items) return;
 
-        // SUM FG aktual per (machine_id, product_id) dari semua shift MC (satu hari)
         $actualRows = $db->table('machining_hourly')
             ->select('machine_id, product_id, SUM(qty_fg) AS fg_total')
             ->where('production_date', $date)
@@ -240,11 +259,9 @@ class HourlyController extends BaseController
 
             $qtyA = (int)($actualMap[$machineId.'_'.$productId] ?? 0);
 
-            // Prev process dari flow (inbound ke Machining)
             $prevProcessId = $this->resolvePrevProcessId($db, $productId, $mcProcessId);
             if (!$prevProcessId) continue;
 
-            // Row inbound schedule: prev -> Machining, source daily_schedule_items (dsi)
             $key = [
                 $wipDateCol       => $date,
                 'product_id'      => $productId,
@@ -255,10 +272,8 @@ class HourlyController extends BaseController
             ];
 
             $exist = $db->table('production_wip')->where($key)->get()->getRowArray();
+
             if (!$exist) {
-                // Kalau row inbound belum ada, kita buat minimal supaya stock Machining bisa muncul.
-                // qty_in di sini tetap 0 kalau schedule memang belum mengisi qty_in,
-                // tapi stock akan mengikuti qtyA.
                 $payload = $key + [
                     'qty'    => 0,
                     'status' => 'SCHEDULED',
@@ -272,7 +287,6 @@ class HourlyController extends BaseController
 
                 $db->table('production_wip')->insert($payload);
             } else {
-                // Update stock = qtyA (qty actual FG)
                 $upd = ['stock' => $qtyA];
                 if ($db->fieldExists('updated_at', 'production_wip')) $upd['updated_at'] = $now;
                 $db->table('production_wip')->where('id', (int)$exist['id'])->update($upd);
@@ -282,8 +296,8 @@ class HourlyController extends BaseController
 
     /* =========================
      * WIP UPSERT (NEXT PROCESS)
-     * - OUTBOUND: Machining -> next
-     * - qty/qty_in/stock = qtyMove (qty A)
+     * - OUTBOUND: MC -> next
+     * - qty/qty_in/stock = qtyMove
      * ========================= */
     private function upsertWipNextProcess(
         $db,
@@ -309,7 +323,6 @@ class HourlyController extends BaseController
         ];
 
         $exist = $db->table('production_wip')->where($key)->get()->getRowArray();
-
         $now = date('Y-m-d H:i:s');
 
         $payload = $key + [
@@ -318,12 +331,16 @@ class HourlyController extends BaseController
         ];
 
         if ($db->fieldExists('qty_in', 'production_wip'))  $payload['qty_in']  = $qtyMove;
-        if ($db->fieldExists('qty_out', 'production_wip')) $payload['qty_out'] = 0;
-        if ($db->fieldExists('stock', 'production_wip'))   $payload['stock']   = $qtyMove;
+
+        // ✅ samakan dengan die casting: row NEXT juga isi qty_out = qtyMove (biar kolom OUT kebaca di report flow)
+        if ($db->fieldExists('qty_out', 'production_wip')) $payload['qty_out'] = $qtyMove;
+
+        if ($db->fieldExists('stock', 'production_wip'))   $payload['stock']   = 0;
+
         if ($db->fieldExists('updated_at', 'production_wip')) $payload['updated_at'] = $now;
 
         if ($exist) {
-            if (($exist['status'] ?? '') === 'DONE') return; // lock kalau sudah DONE
+            if (strtoupper((string)($exist['status'] ?? '')) === 'DONE') return;
             $db->table('production_wip')->where('id', (int)$exist['id'])->update($payload);
         } else {
             if ($db->fieldExists('created_at', 'production_wip')) $payload['created_at'] = $now;
@@ -333,16 +350,16 @@ class HourlyController extends BaseController
 
     /* =========================
      * FINISH SHIFT TRANSFER (Machining)
-     * - inbound prev->MC: qty_out = qty_in, stock=0, status DONE
-     * - outbound MC->next: qty_in/stock = SUM(qty_fg) (qty A)
+     * style = Die Casting:
+     * A) inbound prev->MC : qty_out = stock (atau qtyA), stock=0, DONE
+     * B) next MC->next    : qty_in=qty_out=transferQty, stock=0, WAITING
      * ========================= */
-    private function finishMachiningTransferFlow($db, string $date): int
+    private function finishMachiningTransferFlow($db, string $date, bool $forceAdmin = false): int
     {
         if (!$db->tableExists('production_wip')) return 0;
         if (!$db->tableExists('machining_hourly')) return 0;
 
-        $wipDateCol = $this->detectWipDateColumn($db);
-
+        $wipDateCol  = $this->detectWipDateColumn($db);
         $mcProcessId = $this->getProcessIdMachining($db);
 
         $hasQtyIn  = $db->fieldExists('qty_in', 'production_wip');
@@ -351,7 +368,6 @@ class HourlyController extends BaseController
 
         $now = date('Y-m-d H:i:s');
 
-        // semua schedule items Machining (satu hari)
         $items = $db->table('daily_schedule_items dsi')
             ->select('dsi.id AS dsi_id, dsi.machine_id, dsi.product_id, dsi.target_per_shift')
             ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
@@ -363,7 +379,6 @@ class HourlyController extends BaseController
 
         if (!$items) return 0;
 
-        // actual FG per machine+product (satu hari)
         $actualRows = $db->table('machining_hourly')
             ->select('machine_id, product_id, SUM(qty_fg) AS fg_total')
             ->where('production_date', $date)
@@ -384,16 +399,16 @@ class HourlyController extends BaseController
             $dsiId     = (int)$si['dsi_id'];
             $machineId = (int)$si['machine_id'];
             $productId = (int)$si['product_id'];
+            $qtyPlan   = (int)($si['target_per_shift'] ?? 0);
 
             if ($dsiId <= 0 || $machineId <= 0 || $productId <= 0) continue;
 
             $qtyA = (int)($actualMap[$machineId.'_'.$productId] ?? 0);
 
-            // resolve prev & next
             $prevProcessId = $this->resolvePrevProcessId($db, $productId, $mcProcessId);
             $nextProcessId = $this->resolveNextProcessId($db, $productId, $mcProcessId);
 
-            // A) inbound prev -> MC : DONE, qty_out = qty_in, stock=0
+            // --- A) inbound prev -> MC ---
             if ($prevProcessId) {
                 $keyInbound = [
                     $wipDateCol        => $date,
@@ -406,32 +421,56 @@ class HourlyController extends BaseController
 
                 $inbound = $db->table('production_wip')->where($keyInbound)->get()->getRowArray();
 
-                if ($inbound) {
-                    $qtyInVal = (int)($inbound['qty_in'] ?? $inbound['qty'] ?? 0);
-
-                    $upd = [
-                        'status' => 'DONE',
+                // kalau belum ada, buat minimal
+                if (!$inbound) {
+                    $ins = $keyInbound + [
+                        'qty'    => $qtyPlan,
+                        'status' => 'WAITING',
                     ];
-                    if ($hasQtyOut) $upd['qty_out'] = $qtyInVal; // semua qty_in pindah ke qty_out
-                    if ($hasStock)  $upd['stock']   = 0;        // stock jadi 0
-                    if ($db->fieldExists('updated_at', 'production_wip')) $upd['updated_at'] = $now;
+                    if ($hasQtyIn)  $ins['qty_in']  = max(0, $qtyPlan - $qtyA);
+                    if ($hasQtyOut) $ins['qty_out'] = 0;
+                    if ($hasStock)  $ins['stock']   = $qtyA;
 
-                    $db->table('production_wip')->where('id', (int)$inbound['id'])->update($upd);
+                    if ($db->fieldExists('created_at', 'production_wip')) $ins['created_at'] = $now;
+                    if ($db->fieldExists('updated_at', 'production_wip')) $ins['updated_at'] = $now;
+
+                    $db->table('production_wip')->insert($ins);
+                    $inbound = $db->table('production_wip')->where($keyInbound)->get()->getRowArray();
                 }
-            }
 
-            // B) outbound MC -> next : qty_in/stock = qtyA (qty actual) kirim ke proses selanjutnya
-            if ($nextProcessId && $qtyA > 0) {
-                $this->upsertWipNextProcess(
-                    $db,
-                    $date,
-                    $productId,
-                    $mcProcessId,
-                    (int)$nextProcessId,
-                    $qtyA,
-                    'daily_schedule_items',
-                    $dsiId
-                );
+                // kalau sudah DONE dan bukan admin-forced, jangan double transfer
+                if ($inbound && !$forceAdmin && strtoupper((string)($inbound['status'] ?? '')) === 'DONE') {
+                    $processed++;
+                    continue;
+                }
+
+                // transferQty: ambil dari STOCK (lebih aman), fallback ke qtyA
+                $stockNow    = $hasStock ? (int)($inbound['stock'] ?? 0) : 0;
+                $transferQty = max($stockNow, $qtyA);
+
+                // update inbound -> DONE
+                $updA = ['status' => 'DONE'];
+                if ($hasQtyOut) $updA['qty_out'] = $transferQty;
+                if ($hasStock)  $updA['stock']   = 0;
+                if ($hasQtyIn)  $updA['qty_in']  = max(0, $qtyPlan - $transferQty);
+
+                if ($db->fieldExists('updated_at', 'production_wip')) $updA['updated_at'] = $now;
+
+                $db->table('production_wip')->where('id', (int)$inbound['id'])->update($updA);
+
+                // --- B) next MC -> next ---
+                if ($nextProcessId > 0 && $transferQty > 0) {
+                    $this->upsertWipNextProcess(
+                        $db,
+                        $date,
+                        $productId,
+                        $mcProcessId,
+                        (int)$nextProcessId,
+                        $transferQty,
+                        'daily_schedule_items',
+                        $dsiId
+                    );
+                }
             }
 
             $processed++;
@@ -508,27 +547,27 @@ class HourlyController extends BaseController
         unset($shift);
 
         [$canFinish, $shift3EndDT, $finishError] = $this->canFinishShift($db, $date);
+        $isAdmin = $this->isAdminSession();
 
         return view('machining/hourly/index', [
             'date'         => $date,
             'operator'     => $operator,
             'shifts'       => $shifts,
             'canFinish'    => $canFinish,
+            'isAdmin'      => $isAdmin,
             'shift3EndAt'  => $shift3EndDT ? $shift3EndDT->format('Y-m-d H:i:s') : null,
             'finishError'  => $finishError,
         ]);
     }
 
     /* =========================
-     * STORE (save hourly biasa)
-     * -> setelah save hourly, update stock WIP Machining = qty A (SUM FG)
+     * STORE
      * ========================= */
     public function store()
     {
         $db    = db_connect();
         $items = $this->request->getPost('items') ?? [];
 
-        // ambil tanggal dari payload
         $date = null;
         foreach ($items as $r) {
             if (!empty($r['date'])) { $date = (string)$r['date']; break; }
@@ -539,7 +578,6 @@ class HourlyController extends BaseController
             $this->saveHourlyRows($db, $items);
 
             if ($date) {
-                // qty A (FG) -> stock WIP Machining (inbound prev->MC)
                 $this->syncMachiningWipStockFromHourly($db, $date);
             }
 
@@ -554,21 +592,14 @@ class HourlyController extends BaseController
         }
     }
 
-    /**
-     * POST /machining/hourly/finish-shift
-     * - Simpan hourly
-     * - Validasi shift 3 selesai
-     * - Update stock Machining dari qty A (biar konsisten)
-     * - Transfer:
-     *   inbound (prev->MC): qty_out=qty_in, stock=0, DONE
-     *   outbound (MC->next): qty_in/stock=qtyA (SUM FG) WAITING
-     */
+    /* =========================
+     * FINISH SHIFT
+     * ========================= */
     public function finishShift()
     {
         $db    = db_connect();
         $items = $this->request->getPost('items') ?? [];
 
-        // ambil date dari payload
         $date = null;
         foreach ($items as $r) {
             if (!empty($r['date'])) { $date = (string)$r['date']; break; }
@@ -577,7 +608,7 @@ class HourlyController extends BaseController
             return redirect()->back()->with('error', 'Tanggal tidak ditemukan dari payload');
         }
 
-        // validasi shift 3 selesai
+        // ✅ canFinishShift sudah bypass admin
         [$canFinish, $shift3EndDT, $finishError] = $this->canFinishShift($db, $date);
         if (!$canFinish) {
             $msg = $finishError ?: 'Belum bisa Finish Shift';
@@ -585,23 +616,25 @@ class HourlyController extends BaseController
             return redirect()->back()->with('error', $msg);
         }
 
+        $forceAdmin = $this->isAdminSession();
+
         $db->transBegin();
         try {
-            // 1) simpan hourly dulu
+            // 1) simpan hourly
             $this->saveHourlyRows($db, $items);
 
-            // 2) update stock Machining dari qty A (supaya akurat sebelum transfer)
+            // 2) update stock dari qty A
             $this->syncMachiningWipStockFromHourly($db, $date);
 
-            // 3) transfer flow sesuai rules
-            $processed = $this->finishMachiningTransferFlow($db, $date);
+            // 3) transfer flow style die casting
+            $processed = $this->finishMachiningTransferFlow($db, $date, $forceAdmin);
 
             if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
 
             return redirect()->back()->with(
                 'success',
-                'Finish Shift sukses: qty_in inbound -> qty_out, stock inbound=0, dan qty A dikirim ke proses berikutnya. (rows: '.$processed.')'
+                'Finish Shift sukses. Transfer ke proses berikutnya selesai. (rows: '.$processed.')'
             );
 
         } catch (\Throwable $e) {

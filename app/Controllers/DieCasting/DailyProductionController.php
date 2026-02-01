@@ -7,7 +7,7 @@ use App\Controllers\BaseController;
 class DailyProductionController extends BaseController
 {
     /* =========================
-     * INDEX
+     * INDEX (biarkan punyamu, tidak wajib diubah)
      * ========================= */
     public function index()
     {
@@ -31,10 +31,9 @@ class DailyProductionController extends BaseController
 
         $dcProcessId = $this->getProcessIdByName($db, 'Die Casting');
 
-        // optional columns production_wip
-        $wipHasQtyIn  = $db->fieldExists('qty_in', 'production_wip');
-        $wipHasQtyOut = $db->fieldExists('qty_out', 'production_wip');
-        $wipHasStock  = $db->fieldExists('stock', 'production_wip');
+        $wipHasQtyIn  = $db->tableExists('production_wip') ? $db->fieldExists('qty_in', 'production_wip') : false;
+        $wipHasQtyOut = $db->tableExists('production_wip') ? $db->fieldExists('qty_out', 'production_wip') : false;
+        $wipHasStock  = $db->tableExists('production_wip') ? $db->fieldExists('stock', 'production_wip') : false;
 
         foreach ($shifts as &$shift) {
             // slots
@@ -86,75 +85,7 @@ class DailyProductionController extends BaseController
                 $shift['hourly_map'][(int)$h['machine_id']][(int)$h['product_id']][(int)$h['time_slot_id']] = $h;
             }
 
-            // build next process map (flow)
-            $productIds = array_values(array_unique(array_map(fn($x) => (int)$x['product_id'], $shift['items'])));
-            if (!$productIds) {
-                $shift['next_process_map'] = [];
-                $shift['wip_map'] = [];
-                $shift['actual_totals'] = [];
-                continue;
-            }
-
-            $flows = $db->table('product_process_flows ppf')
-                ->select('ppf.product_id, ppf.process_id, ppf.sequence, pp.process_name')
-                ->join('production_processes pp', 'pp.id = ppf.process_id')
-                ->whereIn('ppf.product_id', $productIds)
-                ->where('ppf.is_active', 1)
-                ->orderBy('ppf.product_id', 'ASC')
-                ->orderBy('ppf.sequence', 'ASC')
-                ->get()->getResultArray();
-
-            $flowByProduct = [];
-            foreach ($flows as $f) {
-                $pid = (int)$f['product_id'];
-                $flowByProduct[$pid][] = [
-                    'process_id'   => (int)$f['process_id'],
-                    'process_name' => (string)$f['process_name'],
-                    'sequence'     => (int)$f['sequence'],
-                ];
-            }
-
-            $shift['next_process_map'] = [];
-            foreach ($productIds as $pid) {
-                $seq = $flowByProduct[$pid] ?? [];
-                if (!$seq) {
-                    $shift['next_process_map'][$pid] = null;
-                    continue;
-                }
-
-                $idx = null;
-                foreach ($seq as $i => $row) {
-                    if ((int)$row['process_id'] === (int)$dcProcessId) { $idx = $i; break; }
-                }
-
-                if ($idx === null) {
-                    $shift['next_process_map'][$pid] = isset($seq[1])
-                        ? ['process_id' => $seq[1]['process_id'], 'process_name' => $seq[1]['process_name']]
-                        : null;
-                } else {
-                    $shift['next_process_map'][$pid] = isset($seq[$idx + 1])
-                        ? ['process_id' => $seq[$idx + 1]['process_id'], 'process_name' => $seq[$idx + 1]['process_name']]
-                        : null;
-                }
-            }
-
-            // actual totals (display)
-            $actualRows = $db->table('die_casting_hourly')
-                ->select('machine_id, product_id, SUM(qty_fg) AS total_fg')
-                ->where('production_date', $date)
-                ->where('shift_id', $shift['id'])
-                ->groupBy('machine_id, product_id')
-                ->get()->getResultArray();
-
-            $shift['actual_totals'] = [];
-            foreach ($actualRows as $r) {
-                $shift['actual_totals'][(int)$r['machine_id']][(int)$r['product_id']] = (int)$r['total_fg'];
-            }
-
-            /**
-             * WIP MAP untuk tampilan hourly:
-             * Ambil WIP DC stage: from=0 -> to=DC (bukan DC->next)
-             */
+            // WIP MAP (0->DC)
             $shift['wip_map'] = [];
             if ($dcProcessId > 0 && $db->tableExists('production_wip')) {
                 $select = 'dcp.machine_id, pw.product_id, pw.qty, pw.status';
@@ -198,7 +129,7 @@ class DailyProductionController extends BaseController
     }
 
     /* =========================
-     * STORE (bulk save via submit)
+     * STORE
      * ========================= */
     public function store()
     {
@@ -221,9 +152,7 @@ class DailyProductionController extends BaseController
                     empty($row['machine_id']) ||
                     empty($row['product_id']) ||
                     empty($row['time_slot_id'])
-                ) {
-                    continue;
-                }
+                ) continue;
 
                 $shiftIds[(int)$row['shift_id']] = true;
 
@@ -242,14 +171,13 @@ class DailyProductionController extends BaseController
 
             $first = reset($items);
             $date  = (string)($first['date'] ?? '');
+            $isAdmin = $this->isAdminSession();
 
             foreach (array_keys($shiftIds) as $sid) {
-                $this->syncDailyScheduleActual($db, $date, (int)$sid); // <-- ini akan update WIP stock DC
+                $this->syncDailyScheduleActual($db, $date, (int)$sid, $isAdmin);
             }
 
-            if ($db->transStatus() === false) {
-                throw new \Exception('DB error');
-            }
+            if ($db->transStatus() === false) throw new \Exception('DB error');
 
             $db->transCommit();
             return redirect()->back()->with('success', 'Daily production tersimpan');
@@ -261,7 +189,7 @@ class DailyProductionController extends BaseController
     }
 
     /* =========================
-     * SAVE SLOT (ajax per cell)
+     * SAVE SLOT
      * ========================= */
     public function saveSlot()
     {
@@ -296,12 +224,9 @@ class DailyProductionController extends BaseController
                 'created_at'      => date('Y-m-d H:i:s'),
             ]);
 
-            // sync actual + update WIP DC stock
-            $this->syncDailyScheduleActual($db, (string)$data['date'], (int)$data['shift_id']);
+            $this->syncDailyScheduleActual($db, (string)$data['date'], (int)$data['shift_id'], $this->isAdminSession());
 
-            if ($db->transStatus() === false) {
-                throw new \Exception('DB error');
-            }
+            if ($db->transStatus() === false) throw new \Exception('DB error');
 
             $db->transCommit();
             return $this->response->setJSON(['status' => true]);
@@ -316,12 +241,9 @@ class DailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * FINISH SHIFT (SHIFT 3 DC - hanya setelah shift berakhir)
-     *
-     * Alur:
-     * 1) Sync qty_a / qty_ng (hourly -> dcp) + update stock WIP DC
-     * 2) DC stage WIP (0->DC) : qty_out = qty_a, stock=0, status DONE
-     * 3) Buat WIP transfer DC->NEXT : qty_in=qty_a, stock=qty_a, status WAITING
+     * FINISH SHIFT 3:
+     * FIX: proses SEMUA SHIFT DC (shift1+shift2+shift3) untuk tanggal tsb,
+     * supaya stock DC agregasi benar-benar pindah ke flow berikutnya.
      * ===================================================== */
     public function finishShift()
     {
@@ -330,81 +252,79 @@ class DailyProductionController extends BaseController
         $shiftId = (int)$this->request->getPost('shift_id');
 
         if ($date === '' || $shiftId <= 0) {
-            return $this->response->setJSON([
-                'status'  => false,
-                'message' => 'Data tidak lengkap'
-            ]);
+            return $this->response->setJSON(['status' => false, 'message' => 'Data tidak lengkap']);
         }
 
-        if (!$this->isShift3Dc($db, $shiftId)) {
-            return $this->response->setJSON([
-                'status'  => false,
-                'message' => 'Finish Shift hanya untuk Shift 3 Die Casting'
-            ]);
+        $isAdmin = $this->isAdminSession();
+
+        // tetap wajib shift DC
+        if (!$this->isDcShift($db, $shiftId)) {
+            return $this->response->setJSON(['status' => false, 'message' => 'Finish Shift hanya boleh untuk shift Die Casting']);
         }
 
-        if (!$this->isShiftEnded($db, $shiftId, $date)) {
-            return $this->response->setJSON([
-                'status'  => false,
-                'message' => 'Shift 3 belum berakhir, tombol belum boleh digunakan'
-            ]);
+        // non-admin: tetap wajib shift 3 + shift ended
+        if (!$isAdmin) {
+            if (!$this->isShift3Dc($db, $shiftId)) {
+                return $this->response->setJSON(['status' => false, 'message' => 'Finish Shift hanya untuk Shift 3 Die Casting']);
+            }
+            if (!$this->isShiftEnded($db, $shiftId, $date)) {
+                return $this->response->setJSON(['status' => false, 'message' => 'Shift 3 belum berakhir, tombol belum boleh digunakan']);
+            }
         }
 
         $db->transBegin();
 
         try {
             $dcProcessId = $this->getProcessIdByName($db, 'Die Casting');
-            if ($dcProcessId <= 0) {
-                throw new \Exception('Process Die Casting tidak ditemukan');
+            if ($dcProcessId <= 0) throw new \Exception('Process Die Casting tidak ditemukan');
+
+            // 1) sync ulang realtime untuk SEMUA shift DC di tanggal tsb
+            $dcShiftIds = $this->getDcShiftIds($db);
+            foreach ($dcShiftIds as $sid) {
+                // admin boleh force unlock untuk testing
+                $this->syncDailyScheduleActual($db, $date, (int)$sid, $isAdmin);
             }
 
-            // 1) sync actual (ini juga update stock WIP DC)
-            $this->syncDailyScheduleActual($db, $date, $shiftId);
+            // 2) transfer flow untuk SEMUA shift DC (bukan cuma shift 3)
+            $count = $this->finishShiftTransferFlowAllDc($db, $date, $dcProcessId, $dcShiftIds, $isAdmin);
 
-            // 2) transfer flow
-            $count = $this->finishShift3TransferFlow($db, $date, $shiftId, $dcProcessId);
-
-            if ($db->transStatus() === false) {
-                throw new \Exception('DB error');
-            }
+            if ($db->transStatus() === false) throw new \Exception('DB error');
 
             $db->transCommit();
             return $this->response->setJSON([
                 'status'  => true,
-                'message' => 'Finish Shift OK: DC OUT terisi qty A, stock DC 0, dan IN proses next terisi qty A.',
+                'message' => "Finish Shift OK. Transferred rows: {$count}",
                 'count'   => $count
             ]);
 
         } catch (\Throwable $e) {
             $db->transRollback();
-            return $this->response->setJSON([
-                'status'  => false,
-                'message' => $e->getMessage()
-            ]);
+            return $this->response->setJSON(['status' => false, 'message' => $e->getMessage()]);
         }
     }
 
-    /* =========================
-     * CORE TRANSFER FLOW (finish shift 3)
-     * ========================= */
-    private function finishShift3TransferFlow($db, string $date, int $shiftId, int $dcProcessId): int
+    /* =====================================================
+     * TRANSFER ALL DC:
+     * A) DC stage (0->DC): qty_out = stock, stock=0, status DONE
+     * B) NEXT stage (DC->NEXT): qty_in=qty_out, stock=qty_out, WAITING
+     * ===================================================== */
+    private function finishShiftTransferFlowAllDc($db, string $date, int $dcProcessId, array $dcShiftIds, bool $forceAdmin = false): int
     {
         if (!$db->tableExists('production_wip')) return 0;
 
-        // optional columns
-        $hasQtyIn    = $db->fieldExists('qty_in', 'production_wip');
-        $hasQtyOut   = $db->fieldExists('qty_out', 'production_wip');
-        $hasStock    = $db->fieldExists('stock', 'production_wip');
+        $hasQtyIn     = $db->fieldExists('qty_in', 'production_wip');
+        $hasQtyOut    = $db->fieldExists('qty_out', 'production_wip');
+        $hasStock     = $db->fieldExists('stock', 'production_wip');
         $hasUpdatedAt = $db->fieldExists('updated_at', 'production_wip');
         $hasCreatedAt = $db->fieldExists('created_at', 'production_wip');
 
         $now = date('Y-m-d H:i:s');
 
-        // ambil dcp shift 3
+        // ambil semua DCP untuk tanggal tsb dan SEMUA shift DC
         $dcpRows = $db->table('die_casting_production')
-            ->select('id, product_id, qty_p, qty_a')
+            ->select('id, product_id, qty_p, qty_a, shift_id')
             ->where('production_date', $date)
-            ->where('shift_id', $shiftId)
+            ->whereIn('shift_id', $dcShiftIds)
             ->where('product_id >', 0)
             ->get()->getResultArray();
 
@@ -416,23 +336,14 @@ class DailyProductionController extends BaseController
             $sourceId  = (int)$dcp['id'];
             $productId = (int)$dcp['product_id'];
             $qtyPlan   = (int)($dcp['qty_p'] ?? 0);
-            $qtyActual = (int)($dcp['qty_a'] ?? 0);
+            $qtyA      = (int)($dcp['qty_a'] ?? 0);
 
             if ($sourceId <= 0 || $productId <= 0) continue;
 
-            // next process setelah DC (baru dibuat saat finish shift)
-            $nextProcessId = $this->resolveNextProcessByFlow($db, $productId, $dcProcessId);
-            if (!$nextProcessId) {
-                // kalau tidak ada next, tetap tutup DC stage saja
-                $nextProcessId = 0;
-            }
+            // next process
+            $nextProcessId = $this->resolveNextProcessByFlow($db, $productId, $dcProcessId) ?? 0;
 
-            /**
-             * A) Update WIP DC stage (0 -> DC) jadi DONE
-             *    - qty_out = qtyActual
-             *    - stock   = 0
-             *    - qty_in  tetap qtyPlan (plan)
-             */
+            // cari WIP DC stage (0->DC) by source
             $whereA = [
                 'production_date' => $date,
                 'product_id'      => $productId,
@@ -444,61 +355,86 @@ class DailyProductionController extends BaseController
 
             $existA = $db->table('production_wip')->where($whereA)->get()->getRowArray();
 
-            $payloadA = $whereA + [
-                'qty'    => $qtyPlan > 0 ? $qtyPlan : $qtyActual,
+            // kalau belum ada, buat minimal (harusnya sudah ada dari sync)
+            if (!$existA) {
+                $remain = max(0, $qtyPlan - $qtyA);
+                $insA = $whereA + ['qty' => $qtyPlan, 'status' => 'WAITING'];
+                if ($hasQtyIn)  $insA['qty_in']  = $remain;
+                if ($hasQtyOut) $insA['qty_out'] = 0;
+                if ($hasStock)  $insA['stock']   = $qtyA;
+                if ($hasCreatedAt) $insA['created_at'] = $now;
+                if ($hasUpdatedAt) $insA['updated_at'] = $now;
+                $db->table('production_wip')->insert($insA);
+                $existA = $db->table('production_wip')->where($whereA)->get()->getRowArray();
+            }
+
+            // penting: transfer dari STOCK (kalau stock kosong fallback ke qty_a)
+            $stockNow    = $hasStock ? (int)($existA['stock'] ?? 0) : 0;
+            $transferQty = max($stockNow, $qtyA);
+
+            if ($transferQty <= 0) {
+                $processed++;
+                continue;
+            }
+
+            // update DC stage -> DONE
+            $remainIn = max(0, $qtyPlan - $transferQty);
+
+            $updA = [
+                'qty'    => $qtyPlan > 0 ? $qtyPlan : $transferQty,
                 'status' => 'DONE',
             ];
-            if ($hasQtyIn)  $payloadA['qty_in']  = $qtyPlan;
-            if ($hasQtyOut) $payloadA['qty_out'] = $qtyActual;
-            if ($hasStock)  $payloadA['stock']   = 0;
-            if ($hasUpdatedAt) $payloadA['updated_at'] = $now;
+            if ($hasQtyIn)  $updA['qty_in']  = $remainIn;
+            if ($hasQtyOut) $updA['qty_out'] = $transferQty;
+            if ($hasStock)  $updA['stock']   = 0; // <-- stock habis dipindah
+            if ($hasUpdatedAt) $updA['updated_at'] = $now;
 
-            if ($existA) {
-                $db->table('production_wip')->where('id', (int)$existA['id'])->update($payloadA);
-            } else {
-                if ($hasCreatedAt) $payloadA['created_at'] = $now;
-                $db->table('production_wip')->insert($payloadA);
+            // kalau sudah DONE dan non-admin: skip (biar tidak double transfer)
+            if (!$forceAdmin && $existA && strtoupper((string)($existA['status'] ?? '')) === 'DONE') {
+                $processed++;
+                continue;
             }
 
-            /**
-             * B) Create/Update WIP transfer DC -> NEXT
-             *    HANYA dibuat saat finish shift.
-             *    - qty_in = qtyActual
-             *    - stock  = qtyActual
-             *    - qty_out= 0
-             */
-            if ($nextProcessId > 0 && $qtyActual > 0) {
-                $whereB = [
-                    'production_date' => $date,
-                    'product_id'      => $productId,
-                    'from_process_id' => $dcProcessId,
-                    'to_process_id'   => $nextProcessId,
-                    // tetap trace dari sumber DC
-                    'source_table'    => 'die_casting_production',
-                    'source_id'       => $sourceId,
-                ];
+            $db->table('production_wip')->where('id', (int)$existA['id'])->update($updA);
 
-                $existB = $db->table('production_wip')->where($whereB)->get()->getRowArray();
+            // buat/update flow next
+// buat/update flow next
+        if ($nextProcessId > 0) {
+            $whereB = [
+                'production_date' => $date,
+                'product_id'      => $productId,
+                'from_process_id' => $dcProcessId,
+                'to_process_id'   => $nextProcessId,
+                'source_table'    => 'die_casting_production',
+                'source_id'       => $sourceId,
+            ];
 
-                $payloadB = $whereB + [
-                    'qty'    => $qtyActual,
-                    'status' => 'WAITING',
-                ];
-                if ($hasQtyIn)  $payloadB['qty_in']  = $qtyActual;
-                if ($hasQtyOut) $payloadB['qty_out'] = 0;
-                if ($hasStock)  $payloadB['stock']   = $qtyActual;
-                if ($hasUpdatedAt) $payloadB['updated_at'] = $now;
+            $existB = $db->table('production_wip')->where($whereB)->get()->getRowArray();
 
-                if ($existB) {
-                    // kalau sudah DONE jangan overwrite
-                    if (($existB['status'] ?? '') !== 'DONE') {
-                        $db->table('production_wip')->where('id', (int)$existB['id'])->update($payloadB);
-                    }
-                } else {
-                    if ($hasCreatedAt) $payloadB['created_at'] = $now;
-                    $db->table('production_wip')->insert($payloadB);
+            $payloadB = $whereB + [
+                'qty'    => $transferQty,
+                'status' => 'WAITING',
+            ];
+
+            if ($hasQtyIn)  $payloadB['qty_in']  = $transferQty;
+
+            // ✅ FIX INI: agar kolom OUT Die Casting terisi pada report
+            if ($hasQtyOut) $payloadB['qty_out'] = $transferQty;
+
+            if ($hasStock)  $payloadB['stock']   = 0;
+            if ($hasUpdatedAt) $payloadB['updated_at'] = $now;
+
+            if ($existB) {
+                // jangan timpa DONE kecuali admin test
+                if ($forceAdmin || strtoupper((string)($existB['status'] ?? '')) !== 'DONE') {
+                    $db->table('production_wip')->where('id', (int)$existB['id'])->update($payloadB);
                 }
+            } else {
+                if ($hasCreatedAt) $payloadB['created_at'] = $now;
+                $db->table('production_wip')->insert($payloadB);
             }
+        }
+
 
             $processed++;
         }
@@ -506,11 +442,13 @@ class DailyProductionController extends BaseController
         return $processed;
     }
 
-    /* =========================
-     * Sync actual: hourly -> die_casting_production
-     * + update STOCK di production_wip untuk DC stage (0->DC)
-     * ========================= */
-    private function syncDailyScheduleActual($db, string $date, int $shiftId): void
+    /* =====================================================
+     * SYNC hourly -> dcp + WIP realtime
+     * - qty_in = max(0, plan - totalFG)
+     * - stock  = totalFG
+     * - qty_out = 0 sebelum finish
+     * ===================================================== */
+    private function syncDailyScheduleActual($db, string $date, int $shiftId, bool $forceAdmin = false): void
     {
         $dcProcessId = $this->getProcessIdByName($db, 'Die Casting');
         if ($dcProcessId <= 0) return;
@@ -542,7 +480,7 @@ class DailyProductionController extends BaseController
             $fg = (int)($sum['total_fg'] ?? 0);
             $ng = (int)($sum['total_ng'] ?? 0);
 
-            // update dcp actual
+            // update dcp
             $db->table('die_casting_production')
                 ->where('id', $dcpId)
                 ->update([
@@ -550,24 +488,26 @@ class DailyProductionController extends BaseController
                     'qty_ng' => $ng
                 ]);
 
-            // update/create WIP DC stage stock = qty_a (fg)
-            $this->upsertWipDcStage($db, $date, $dcpId, $productId, $qtyPlan, $fg, $dcProcessId);
+            // upsert WIP realtime
+            $this->upsertWipDcStageRealtime($db, $date, $dcpId, $productId, $qtyPlan, $fg, $dcProcessId, $forceAdmin);
         }
     }
 
-    /**
-     * WIP DC stage (0 -> DC):
-     * - qty_in = qty plan
-     * - stock  = qty actual (fg) dari hourly
-     * - qty_out tetap 0 sebelum finish
-     */
-    private function upsertWipDcStage($db, string $date, int $sourceId, int $productId, int $qtyPlan, int $qtyActual, int $dcProcessId): void
-    {
+    private function upsertWipDcStageRealtime(
+        $db,
+        string $date,
+        int $sourceId,
+        int $productId,
+        int $qtyPlan,
+        int $totalFg,
+        int $dcProcessId,
+        bool $forceAdmin = false
+    ): void {
         if (!$db->tableExists('production_wip')) return;
 
-        $hasQtyIn    = $db->fieldExists('qty_in', 'production_wip');
-        $hasQtyOut   = $db->fieldExists('qty_out', 'production_wip');
-        $hasStock    = $db->fieldExists('stock', 'production_wip');
+        $hasQtyIn     = $db->fieldExists('qty_in', 'production_wip');
+        $hasQtyOut    = $db->fieldExists('qty_out', 'production_wip');
+        $hasStock     = $db->fieldExists('stock', 'production_wip');
         $hasUpdatedAt = $db->fieldExists('updated_at', 'production_wip');
         $hasCreatedAt = $db->fieldExists('created_at', 'production_wip');
 
@@ -581,22 +521,23 @@ class DailyProductionController extends BaseController
         ];
 
         $exist = $db->table('production_wip')->where($where)->get()->getRowArray();
-
         $now = date('Y-m-d H:i:s');
 
-        // kalau sudah DONE jangan diubah (finish shift sudah mengunci)
-        if ($exist && strtoupper((string)($exist['status'] ?? '')) === 'DONE') {
+        // non-admin lock DONE
+        if ($exist && strtoupper((string)($exist['status'] ?? '')) === 'DONE' && !$forceAdmin) {
             return;
         }
 
+        $remaining = max(0, $qtyPlan - $totalFg);
+
         $payload = $where + [
             'qty'    => $qtyPlan,
-            'status' => 'WAITING', // atau IN_PROGRESS, tapi konsisten saja
+            'status' => 'WAITING',
         ];
 
-        if ($hasQtyIn)  $payload['qty_in']  = $qtyPlan;
+        if ($hasQtyIn)  $payload['qty_in']  = $remaining;
         if ($hasQtyOut) $payload['qty_out'] = 0;
-        if ($hasStock)  $payload['stock']   = $qtyActual; // <-- ini yang kamu butuhkan (stock dari qty A)
+        if ($hasStock)  $payload['stock']   = $totalFg;
         if ($hasUpdatedAt) $payload['updated_at'] = $now;
 
         if ($exist) {
@@ -608,8 +549,21 @@ class DailyProductionController extends BaseController
     }
 
     /* =========================
-     * SHIFT 3 DC?
+     * Helpers
      * ========================= */
+
+    private function getDcShiftIds($db): array
+    {
+        $rows = $db->table('shifts')
+            ->select('id')
+            ->where('is_active', 1)
+            ->like('shift_name', 'DC')
+            ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
+            ->get()->getResultArray();
+
+        return array_values(array_map(fn($r) => (int)$r['id'], $rows));
+    }
+
     private function isShift3Dc($db, int $shiftId): bool
     {
         $shift = $db->table('shifts')
@@ -626,9 +580,25 @@ class DailyProductionController extends BaseController
         return $isShift3 && $isDC;
     }
 
-    /* =========================
-     * SHIFT ended?
-     * ========================= */
+    private function isDcShift($db, int $shiftId): bool
+    {
+        $shift = $db->table('shifts')
+            ->select('shift_name, is_active')
+            ->where('id', $shiftId)
+            ->get()->getRowArray();
+
+        if (!$shift) return false;
+        if ((int)($shift['is_active'] ?? 0) !== 1) return false;
+
+        return (stripos((string)($shift['shift_name'] ?? ''), 'DC') !== false);
+    }
+
+    private function isAdminSession(): bool
+    {
+        $role = strtoupper((string)(session()->get('role') ?? ''));
+        return $role === 'ADMIN';
+    }
+
     private function isShiftEnded($db, int $shiftId, string $date): bool
     {
         date_default_timezone_set('Asia/Jakarta');
@@ -648,16 +618,11 @@ class DailyProductionController extends BaseController
         $startDT = strtotime($date . ' ' . $firstStart);
         $endDT   = strtotime($date . ' ' . $lastEnd);
 
-        if ($endDT <= $startDT) {
-            $endDT += 86400; // lewat tengah malam
-        }
+        if ($endDT <= $startDT) $endDT += 86400;
 
         return time() >= $endDT;
     }
 
-    /* =========================
-     * Resolve next process by flow
-     * ========================= */
     private function resolveNextProcessByFlow($db, int $productId, int $fromProcessId): ?int
     {
         if (!$db->tableExists('product_process_flows')) return null;
@@ -679,17 +644,11 @@ class DailyProductionController extends BaseController
             }
         }
 
-        // fallback: ambil proses kedua jika from tidak ketemu
-        if ($idx === null) {
-            return isset($flows[1]) ? (int)$flows[1]['process_id'] : null;
-        }
+        if ($idx === null) return isset($flows[1]) ? (int)$flows[1]['process_id'] : null;
 
         return isset($flows[$idx + 1]) ? (int)$flows[$idx + 1]['process_id'] : null;
     }
 
-    /* =========================
-     * Helper: get process id by name
-     * ========================= */
     private function getProcessIdByName($db, string $processName): int
     {
         $row = $db->table('production_processes')

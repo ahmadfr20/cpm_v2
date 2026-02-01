@@ -173,22 +173,32 @@ $exist = $shift['hourly_map']
   <i class="bi bi-save"></i> Simpan
 </button>
 
-<?php if (!empty($canFinish)): ?>
+<?php if (!empty($isAdmin) || !empty($canFinish)): ?>
   <button class="btn btn-warning mt-3 ms-2" type="submit" formaction="/machining/hourly/finish-shift"
           onclick="return confirm('Finish Shift? Total FG Machining akan dikirim ke proses berikutnya sesuai flow.')">
-    <i class="bi bi-send-check"></i> Finish Shift (Kirim FG)
+    <i class="bi bi-send-check"></i>
+    Finish Shift <?= !empty($isAdmin) ? '(ADMIN)' : '' ?>
   </button>
+
+  <?php if (empty($isAdmin) && !empty($shift3EndAt)): ?>
+    <div class="text-muted mt-2" style="font-size:13px">
+      Finish Shift aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?> WIB)
+    </div>
+  <?php endif; ?>
+
 <?php else: ?>
   <button class="btn btn-warning mt-3 ms-2" type="button" disabled
           title="<?= esc($finishError ?? 'Belum bisa Finish Shift') ?>">
     <i class="bi bi-send-check"></i> Finish Shift (Kirim FG)
   </button>
+
   <?php if (!empty($shift3EndAt)): ?>
     <div class="text-muted mt-2" style="font-size:13px">
       Finish Shift aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?> WIB)
     </div>
   <?php endif; ?>
 <?php endif; ?>
+
 
 
 </form>

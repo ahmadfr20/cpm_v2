@@ -208,16 +208,16 @@
     </button>
 
     <?php if ($shift3Id): ?>
-      <button type="button"
-              id="btnFinishShiftToday"
-              class="btn btn-secondary"
-              data-shift-id="<?= (int)$shift3Id ?>"
-              data-start="<?= esc((string)($shift3Start ?? '')) ?>"
-              data-end="<?= esc((string)($shift3End ?? '')) ?>"
-              disabled
-              onclick="finishShiftToday()">
-        <i class="bi bi-send"></i> Finish Shift (Hari Ini)
-      </button>
+<button type="button"
+        id="btnFinishShiftToday"
+        class="btn btn-warning"
+        data-shift-id="<?= (int)$shift3Id ?>"
+        data-start="<?= esc((string)($shift3Start ?? '')) ?>"
+        data-end="<?= esc((string)($shift3End ?? '')) ?>"
+        onclick="finishShiftToday()">
+  <i class="bi bi-send"></i> Finish Shift (Hari Ini)
+</button>
+
 
       <small class="text-muted">
         Aktif saat Shift 3 berjalan
@@ -384,19 +384,11 @@ function updateActiveSlots(){
 function updateFinishButton(){
   const btn = document.getElementById('btnFinishShiftToday');
   if (!btn) return;
-
-  const prodDate = '<?= esc($date) ?>';
-  const start = btn.dataset.start || '';
-  const end   = btn.dataset.end || '';
-
-  const ok = start && end && start !== '-' && end !== '-'
-    ? shiftWindowActiveByProductionDate(prodDate, start, end)
-    : false;
-
-  btn.disabled = !ok;
-  btn.classList.toggle('btn-warning', ok);
-  btn.classList.toggle('btn-secondary', !ok);
+  btn.disabled = false;
+  btn.classList.add('btn-warning');
+  btn.classList.remove('btn-secondary');
 }
+
 
 /* totals */
 function calcTotals(){

@@ -283,6 +283,10 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
         'Machining\ProductionController::index'
     );
 
+    $routes->get('daily-schedule/incoming-wip', 'Machining\DailyScheduleController::incomingWip');
+    $routes->post('daily-schedule/assign-incoming-wip-bulk', 'Machining\DailyScheduleController::assignIncomingWipBulk');
+
+
     $routes->post(
         'production/store',
         'Machining\ProductionController::store'
@@ -326,6 +330,9 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->post('hourly/finish-shift', 'Machining\HourlyController::finishShift');
 
 
+    $routes->get('leak-test/schedule/incoming-wip', 'Machining\LeakTestDailyScheduleController::incomingWip');
+    $routes->post('leak-test/schedule/assign-incoming-wip', 'Machining\LeakTestDailyScheduleController::assignIncomingWip');
+
     $routes->get(
     'leak-test',
     'Machining\LeakTestDailyProductionController::index'
@@ -360,6 +367,10 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->post('assy-bushing/achievement/store', 'Machining\AssyBushingDailyProductionAchievementController::store');
 
 
+    $routes->get('assy-bushing/schedule/incoming-wip', 'Machining\AssyBushingDailyScheduleController::incomingWip');
+    $routes->post('assy-bushing/schedule/assign-incoming-wip', 'Machining\AssyBushingDailyScheduleController::assignIncomingWip');
+
+$routes->post('assy-bushing/hourly/finish-shift', 'Machining\AssyBushingDailyProductionController::finishShift');
     $routes->get('assy-bushing/schedule', 'Machining\AssyBushingDailyScheduleController::index');
     $routes->get('assy-bushing/schedule/product-target', 'Machining\AssyBushingDailyScheduleController::getProductAndTarget');
     $routes->post('assy-bushing/schedule/store', 'Machining\AssyBushingDailyScheduleController::store');

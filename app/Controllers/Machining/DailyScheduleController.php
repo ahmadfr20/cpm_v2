@@ -222,6 +222,239 @@ class DailyScheduleController extends BaseController
         ]);
     }
 
+        /* ============================================
+     * AJAX: daftar incoming WIP untuk Machining
+     * - ambil produk dari production_wip yang to_process_id = Machining
+     * - qty diambil dari qty_in (wajib)
+     * ============================================ */
+    public function incomingWip()
+    {
+        $db   = db_connect();
+        $date = (string)($this->request->getGet('date') ?? date('Y-m-d'));
+
+        if (!$db->tableExists('production_wip')) {
+            return $this->response->setJSON(['status' => false, 'message' => 'production_wip tidak ada']);
+        }
+
+        $mcProcessId = $this->getProcessIdMachining($db);
+
+        $hasQtyIn = $db->fieldExists('qty_in', 'production_wip');
+        if (!$hasQtyIn) {
+            return $this->response->setJSON(['status' => false, 'message' => 'Kolom qty_in tidak ada di production_wip']);
+        }
+
+        // Ambil aggregated per product (total qty_in)
+        $rows = $db->table('production_wip pw')
+            ->select('
+                pw.product_id,
+                SUM(COALESCE(pw.qty_in,0)) AS qty_available,
+                p.part_no,
+                p.part_name
+            ')
+            ->join('products p', 'p.id = pw.product_id')
+            ->where('pw.production_date', $date)
+            ->where('pw.to_process_id', $mcProcessId)
+            ->where('pw.status', 'WAITING')
+            ->groupBy('pw.product_id, p.part_no, p.part_name')
+            ->having('qty_available > 0')
+            ->orderBy('p.part_no', 'ASC')
+            ->get()
+            ->getResultArray();
+
+        $data = array_map(function ($r) {
+            return [
+                'product_id' => (int)$r['product_id'],
+                'part_no'    => (string)$r['part_no'],
+                'part_name'  => (string)$r['part_name'],
+                'qty'        => (int)$r['qty_available'],
+            ];
+        }, $rows);
+
+        return $this->response->setJSON(['status' => true, 'data' => $data]);
+    }
+
+    /* ============================================
+     * AJAX: assign incoming WIP ke schedule Machining
+     * - upsert daily_schedules + daily_schedule_items
+     * - kurangi qty_in di production_wip sesuai qty assign
+     * - qty_out di WIP bertambah, status DONE bila habis
+     * ============================================ */
+    public function assignIncomingWipBulk()
+{
+    $db = db_connect();
+
+    $date      = (string)$this->request->getPost('date');
+    $shiftId   = (int)$this->request->getPost('shift_id');
+    $itemsJson = (string)$this->request->getPost('items');
+
+    if ($date === '' || $shiftId <= 0 || $itemsJson === '') {
+        return $this->response->setJSON(['status' => false, 'message' => 'Data tidak lengkap']);
+    }
+
+    $items = json_decode($itemsJson, true);
+    if (!$items || !is_array($items)) {
+        return $this->response->setJSON(['status' => false, 'message' => 'Format items tidak valid']);
+    }
+
+    $db->transBegin();
+    try {
+        $mcProcessId = $this->getProcessIdMachining($db);
+
+        if (!$db->tableExists('production_wip')) {
+            throw new \Exception('production_wip tidak ada');
+        }
+
+        $hasQtyIn     = $db->fieldExists('qty_in', 'production_wip');
+        $hasQtyOut    = $db->fieldExists('qty_out', 'production_wip');
+        $hasStock     = $db->fieldExists('stock', 'production_wip');
+        $hasUpdatedAt = $db->fieldExists('updated_at', 'production_wip');
+
+        if (!$hasQtyIn) throw new \Exception('Kolom qty_in tidak ada di production_wip');
+
+        $now = date('Y-m-d H:i:s');
+
+        // header schedule per shift (dibuat sekali)
+        $schedule = $db->table('daily_schedules')
+            ->where([
+                'schedule_date' => $date,
+                'shift_id'      => $shiftId,
+                'section'       => 'Machining',
+            ])
+            ->get()->getRowArray();
+
+        if (!$schedule) {
+            $insertHeader = [
+                'schedule_date' => $date,
+                'shift_id'      => $shiftId,
+                'section'       => 'Machining',
+                'is_completed'  => 0,
+                'created_at'    => $now,
+            ];
+            if ($db->fieldExists('process_id', 'daily_schedules')) $insertHeader['process_id'] = $mcProcessId;
+            if ($db->fieldExists('updated_at', 'daily_schedules')) $insertHeader['updated_at'] = $now;
+
+            $db->table('daily_schedules')->insert($insertHeader);
+            $scheduleId = (int)$db->insertID();
+        } else {
+            $scheduleId = (int)$schedule['id'];
+        }
+
+        foreach ($items as $it) {
+            $productId = (int)($it['product_id'] ?? 0);
+            $machineId = (int)($it['machine_id'] ?? 0);
+            $qty       = (int)($it['qty'] ?? 0);
+
+            if ($productId <= 0 || $machineId <= 0 || $qty <= 0) continue;
+
+            if (!$this->validateProductHasFlow($db, $productId, $mcProcessId)) {
+                throw new \Exception("Product ID {$productId} tidak punya flow Machining aktif");
+            }
+
+            // ambil WIP WAITING incoming ke Machining untuk product tsb
+            $wipRows = $db->table('production_wip')
+                ->where('production_date', $date)
+                ->where('to_process_id', $mcProcessId)
+                ->where('product_id', $productId)
+                ->where('status', 'WAITING')
+                ->orderBy('id', 'ASC')
+                ->get()->getResultArray();
+
+            if (!$wipRows) throw new \Exception("WIP incoming habis untuk product {$productId}");
+
+            $available = 0;
+            foreach ($wipRows as $w) $available += (int)($w['qty_in'] ?? 0);
+            if ($qty > $available) throw new \Exception("Qty {$qty} > available {$available} (product {$productId})");
+
+            // upsert schedule item PER machine+product (target += qty)
+            $existItem = $db->table('daily_schedule_items')
+                ->where([
+                    'daily_schedule_id' => $scheduleId,
+                    'shift_id'          => $shiftId,
+                    'machine_id'        => $machineId,
+                    'product_id'        => $productId,
+                ])
+                ->get()->getRowArray();
+
+            if ($existItem) {
+                $db->table('daily_schedule_items')
+                    ->where('id', (int)$existItem['id'])
+                    ->update([
+                        'target_per_shift' => (int)($existItem['target_per_shift'] ?? 0) + $qty,
+                        'is_selected'      => 1
+                    ]);
+            } else {
+                $product = $db->table('products')
+                    ->select('cycle_time, cavity, efficiency_rate')
+                    ->where('id', $productId)
+                    ->get()->getRowArray();
+
+                $cycle  = (int)($product['cycle_time'] ?? 0);
+                $cavity = (int)($product['cavity'] ?? 0);
+                $effRaw = (float)($product['efficiency_rate'] ?? 100.0);
+                $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
+
+                $targetPerHour = 0;
+                if ($cycle > 0 && $cavity > 0) {
+                    $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
+                }
+
+                $db->table('daily_schedule_items')->insert([
+                    'daily_schedule_id' => $scheduleId,
+                    'shift_id'          => $shiftId,
+                    'machine_id'        => $machineId,
+                    'product_id'        => $productId,
+                    'cycle_time'        => $cycle,
+                    'cavity'            => $cavity,
+                    'target_per_hour'   => $targetPerHour,
+                    'target_per_shift'  => $qty,
+                    'is_selected'       => 1
+                ]);
+            }
+
+            // kurangi qty_in WIP (FIFO)
+            $remain = $qty;
+            foreach ($wipRows as $w) {
+                if ($remain <= 0) break;
+
+                $rowId = (int)$w['id'];
+                $saldo = (int)($w['qty_in'] ?? 0);
+                if ($saldo <= 0) continue;
+
+                $take = min($saldo, $remain);
+
+                $update = [
+                    'qty_in' => $saldo - $take,
+                    'status' => (($saldo - $take) <= 0) ? 'DONE' : 'WAITING',
+                ];
+
+                if ($hasQtyOut) $update['qty_out'] = (int)($w['qty_out'] ?? 0) + $take;
+
+                if ($hasStock) {
+                    $update['stock'] = (int)($w['stock'] ?? 0) - $take;
+                    if ($update['stock'] < 0) $update['stock'] = 0;
+                }
+
+                if ($hasUpdatedAt) $update['updated_at'] = $now;
+
+                $db->table('production_wip')->where('id', $rowId)->update($update);
+                $remain -= $take;
+            }
+
+            if ($remain > 0) throw new \Exception("Gagal kurangi WIP untuk product {$productId}");
+        }
+
+        if ($db->transStatus() === false) throw new \Exception('DB error');
+        $db->transCommit();
+        return $this->response->setJSON(['status' => true]);
+
+    } catch (\Throwable $e) {
+        $db->transRollback();
+        return $this->response->setJSON(['status' => false, 'message' => $e->getMessage()]);
+    }
+}
+
+
+
     /* ============================================
      * AJAX: PRODUCT + TARGET (FLOW saja)
      * ============================================ */

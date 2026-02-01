@@ -1,7 +1,7 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-3">Production Flow Product (Table Excel Style)</h4>
+<h4 class="mb-3">Production Flow Product (Excel Style)</h4>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
@@ -33,74 +33,41 @@
 </form>
 
 <form id="bulkForm" method="post" action="<?= site_url('master/production-flow/bulk-update') ?>">
-<?= csrf_field() ?>
+  <?= csrf_field() ?>
 
 <style>
-/* ====== Excel-like table ====== */
-.table-excel {
-  white-space: nowrap;
-  font-size: 12px;
-}
-.table-excel th, .table-excel td {
-  vertical-align: middle;
-  padding: 6px 8px;
-}
+/* ===== Excel-like ===== */
+.table-excel { white-space: nowrap; font-size: 12px; }
+.table-excel th, .table-excel td { vertical-align: middle; padding: 6px 8px; }
 
 thead.excel-head th{
-  background: #fff200; /* kuning excel */
+  background: #fff200;
   color: #000;
   text-transform: uppercase;
   font-weight: 800;
   border: 1px solid #333 !important;
   text-align: center;
 }
+.table-excel td{ border: 1px solid #333 !important; }
 
-.table-excel td{
-  border: 1px solid #333 !important;
-}
-
-/* sticky product columns */
-.sticky-col-no   { position: sticky; left: 0;   background: #fff; z-index: 4; min-width: 60px; }
+/* sticky cols */
+.sticky-col-no   { position: sticky; left: 0; background: #fff; z-index: 4; min-width: 60px; }
 .sticky-col-prod { position: sticky; left: 60px; background: #fff; z-index: 4; min-width: 320px; }
 thead .sticky-col-no, thead .sticky-col-prod { z-index: 10; }
 
-/* sticky action column */
 .sticky-col-action { position: sticky; right: 0; background: #fff; z-index: 5; min-width: 140px; }
 thead .sticky-col-action { z-index: 11; }
 
-/* dot checkbox style */
 .flow-cell { text-align: center; min-width: 110px; }
-.flow-dot-wrap { display:inline-flex; align-items:center; justify-content:center; }
 
-.flow-check {
-  position: absolute;
-  opacity: 0;
-  pointer-events: none;
-}
-
-.flow-dot {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-  border: 2px solid #0f5132;
-  background: #fff;
-  display: inline-block;
+/* checkbox look nicer */
+.flow-check{
+  width: 18px;
+  height: 18px;
   cursor: pointer;
-  box-shadow: inset 0 0 0 2px #fff;
-}
-
-.flow-check:checked + .flow-dot {
-  background: #16a34a; /* hijau */
-  border-color: #0f5132;
-}
-
-.flow-check:not(:checked) + .flow-dot {
-  background: #f8f9fa;
-  border-color: #6c757d;
 }
 
 .small-muted { font-size: 11px; color: #6c757d; }
-
 @media (max-width: 768px){
   .sticky-col-prod { min-width: 260px; }
   .flow-cell { min-width: 95px; }
@@ -128,15 +95,19 @@ thead .sticky-col-action { z-index: 11; }
       <?php $no=1; foreach (($products ?? []) as $p): ?>
         <?php
           $pid = (int)$p['id'];
-          $selectedOrder = $flowOrder[$pid] ?? []; // hanya untuk display info awal (tidak ada input nomor)
+          $selectedOrder = $flowOrder[$pid] ?? [];
         ?>
-        <tr id="row_<?= $pid ?>">
-          <!-- hidden fields untuk bulk save -->
-          <input type="hidden" name="product_ids[]" value="<?= $pid ?>">
-          <input type="hidden" name="flows_order[<?= $pid ?>]" id="order_<?= $pid ?>" value="<?= esc(implode(',', $selectedOrder)) ?>">
-          <input type="hidden" name="flows_selected[<?= $pid ?>][]" value="">
 
-          <td class="sticky-col-no text-center fw-bold"><?= $no++ ?></td>
+        <tr id="row_<?= $pid ?>">
+
+          <!-- ✅ PENTING: Semua hidden harus ada di dalam <td> agar tidak “nyasar” -->
+          <td class="sticky-col-no text-center fw-bold">
+            <?= $no++ ?>
+            <input type="hidden" name="product_ids[]" value="<?= $pid ?>">
+            <input type="hidden" name="flows_order[<?= $pid ?>]" id="order_<?= $pid ?>" value="<?= esc(implode(',', $selectedOrder)) ?>">
+            <!-- dummy agar key flows_selected[pid] tetap ada walau tidak ada yg dicentang -->
+            <input type="hidden" name="flows_selected[<?= $pid ?>][]" value="">
+          </td>
 
           <td class="sticky-col-prod text-start">
             <div class="fw-bold"><?= esc($p['part_no']) ?></div>
@@ -151,17 +122,17 @@ thead .sticky-col-action { z-index: 11; }
               $cbId = "cb_{$pid}_{$procId}";
             ?>
             <td class="flow-cell">
-              <span class="flow-dot-wrap">
-                <input
-                  type="checkbox"
-                  class="form-check-input flow-check flow-check-<?= $pid ?>"
-                  id="<?= $cbId ?>"
-                  name="flows_selected[<?= $pid ?>][]"
-                  value="<?= $procId ?>"
-                  <?= $isChecked ? 'checked' : '' ?>
-                >
-                <label class="flow-dot" for="<?= $cbId ?>" title="<?= esc($pr['process_name']) ?>"></label>
-              </span>
+              <input
+                type="checkbox"
+                class="form-check-input flow-check"
+                id="<?= $cbId ?>"
+                name="flows_selected[<?= $pid ?>][]"
+                value="<?= $procId ?>"
+                data-product="<?= $pid ?>"
+                data-process="<?= $procId ?>"
+                <?= $isChecked ? 'checked' : '' ?>
+                title="<?= esc($pr['process_name']) ?>"
+              >
             </td>
           <?php endforeach; ?>
 
@@ -190,18 +161,35 @@ thead .sticky-col-action { z-index: 11; }
 <script>
 document.addEventListener('DOMContentLoaded', () => {
 
+  // ✅ ambil CSRF name dari server
+  const CSRF_NAME = "<?= csrf_token() ?>";
+
+  function getCsrfInput(){
+    return document.querySelector(`#bulkForm input[name="${CSRF_NAME}"]`);
+  }
+
+  function getCsrfValue(){
+    const inp = getCsrfInput();
+    return inp ? inp.value : "";
+  }
+
+  function setCsrfValue(newHash){
+    const inp = getCsrfInput();
+    if (inp && newHash) inp.value = newHash;
+  }
+
   function setStatus(productId, html) {
     const el = document.getElementById('status_' + productId);
     if (el) el.innerHTML = html;
   }
 
-  // ambil order sesuai urutan kolom (kiri->kanan)
+  // ✅ Ambil urutan yang dicentang sesuai urutan kolom (DOM order)
   function getRowOrder(productId){
-    const checks = document.querySelectorAll('.flow-check-' + productId);
+    const row = document.getElementById('row_' + productId);
+    if (!row) return [];
+    const checked = row.querySelectorAll('input.flow-check:checked');
     const ids = [];
-    checks.forEach(cb => {
-      if (cb.checked) ids.push(String(cb.value));
-    });
+    checked.forEach(cb => ids.push(String(cb.value)));
     return ids;
   }
 
@@ -211,29 +199,28 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hidden) hidden.value = ids.join(',');
   }
 
-  // tanda changed saat checkbox diubah
+  // ✅ Saat checkbox berubah: update order hidden + status changed
   document.addEventListener('change', (e) => {
     const cb = e.target;
+    if (!(cb instanceof HTMLElement)) return;
     if (!cb.classList.contains('flow-check')) return;
 
-    // ambil productId dari class flow-check-{pid}
-    const cls = Array.from(cb.classList).find(c => c.startsWith('flow-check-'));
-    if (!cls) return;
-    const pid = cls.replace('flow-check-','');
+    const pid = cb.getAttribute('data-product');
+    if (!pid) return;
 
     updateHiddenOrder(pid);
     setStatus(pid, '<span class="text-warning">● Changed (not saved)</span>');
   });
 
-  // bulk submit: update hidden order untuk semua row
+  // ✅ Bulk submit: pastikan semua order hidden terbaru
   document.getElementById('bulkForm').addEventListener('submit', () => {
-    document.querySelectorAll('input[id^="order_"]').forEach(h => {
-      const pid = h.id.replace('order_','');
+    document.querySelectorAll('tr[id^="row_"]').forEach(tr => {
+      const pid = tr.id.replace('row_','');
       updateHiddenOrder(pid);
     });
   });
 
-  // save per row (AJAX)
+  // ✅ Save per row (AJAX) + update CSRF hash agar tidak 403 berikutnya
   document.addEventListener('click', async (e) => {
     const btn = e.target.closest('.btn-save-row');
     if (!btn) return;
@@ -246,19 +233,32 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus(productId, '<span class="text-muted">Saving...</span>');
 
     const formData = new FormData();
-    formData.append('<?= csrf_token() ?>', '<?= csrf_hash() ?>');
+    formData.append(CSRF_NAME, getCsrfValue());
     formData.append('product_id', productId);
 
-    // selected[] dan order string sama (urut sesuai kolom)
+    // selected[] & order
     order.forEach(v => formData.append('selected[]', v));
     formData.append('order', order.join(','));
 
     try {
       const res = await fetch("<?= site_url('master/production-flow/save-individual') ?>", {
         method: 'POST',
+        headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
         body: formData
       });
+
+      // Jika kena 403 biasanya token invalid
+      if (!res.ok) {
+        setStatus(productId, `<span class="text-danger">✖ HTTP ${res.status} (cek CSRF)</span>`);
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-save"></i> Save';
+        return;
+      }
+
       const json = await res.json();
+
+      // ✅ update csrf hash dari server
+      if (json && json.csrfHash) setCsrfValue(json.csrfHash);
 
       if (!json.ok) {
         setStatus(productId, `<span class="text-danger">✖ ${json.message}</span>`);
@@ -274,9 +274,9 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // init: set hidden order awal agar konsisten
-  document.querySelectorAll('input[id^="order_"]').forEach(h => {
-    const pid = h.id.replace('order_','');
+  // init order hidden awal (sinkron)
+  document.querySelectorAll('tr[id^="row_"]').forEach(tr => {
+    const pid = tr.id.replace('row_','');
     updateHiddenOrder(pid);
   });
 

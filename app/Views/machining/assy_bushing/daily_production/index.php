@@ -1,11 +1,23 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
+<?php
+// ✅ jika controller belum kirim $isAdmin, fallback aman
+$isAdmin = $isAdmin ?? (strtoupper((string)(session()->get('role') ?? '')) === 'ADMIN');
+
+// ✅ admin boleh finish kapan saja
+$canFinishUI   = $isAdmin ? true : (bool)$canFinish;
+$finishTitleUI = $isAdmin
+    ? 'Admin: Finish Shift kapan saja'
+    : (!$canFinish ? esc($finishError ?? 'Belum bisa finish') : 'Finish Shift');
+?>
+
 <h4 class="mb-3">MACHINING – ASSY BUSHING DAILY PRODUCTION PER HOUR</h4>
 
 <div class="mb-3">
     <strong>Tanggal:</strong> <?= esc($date) ?><br>
-    <strong>Operator:</strong> <?= esc($operator) ?>
+    <strong>Operator:</strong> <?= esc($operator) ?><br>
+    <strong>Role:</strong> <?= esc(strtoupper((string)(session()->get('role') ?? '-'))) ?>
 </div>
 
 <form method="get" class="mb-3">
@@ -170,21 +182,29 @@ $exist = $shift['hourly_map']
       type="submit"
       class="btn btn-warning"
       formaction="/machining/assy-bushing/hourly/finish-shift"
-      <?= (!$canFinish) ? 'disabled' : '' ?>
-      title="<?= !$canFinish ? esc($finishError ?? 'Belum bisa finish') : 'Finish Shift' ?>"
+      <?= (!$canFinishUI) ? 'disabled' : '' ?>
+      title="<?= $finishTitleUI ?>"
     >
       <i class="bi bi-check2-circle"></i>
       Finish Shift
+      <?php if ($isAdmin): ?>
+        <span class="badge bg-dark ms-2">ADMIN</span>
+      <?php endif; ?>
     </button>
 
-    <?php if (!$canFinish && !empty($shift3EndAt)): ?>
+    <?php if (!$isAdmin && !$canFinish && !empty($shift3EndAt)): ?>
       <div class="small text-muted align-self-center">
         Finish aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?>)
       </div>
     <?php endif; ?>
+
+    <?php if ($isAdmin && !empty($shift3EndAt)): ?>
+      <div class="small text-muted align-self-center">
+        Admin override aktif (Shift 3 selesai normal: <?= esc($shift3EndAt) ?>)
+      </div>
+    <?php endif; ?>
   <?php endif; ?>
 </div>
-
 
 </form>
 <?php endforeach ?>

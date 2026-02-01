@@ -3,26 +3,42 @@
 
 <h4 class="mb-3">MACHINING – LEAK TEST DAILY PRODUCTION PER HOUR</h4>
 
+<?php
+  // ✅ Admin detection (sesuaikan key session jika berbeda)
+  $role = session()->get('role')
+        ?? session()->get('role_name')
+        ?? session()->get('user_role')
+        ?? session()->get('level')
+        ?? '';
+  $isAdmin = in_array(strtolower((string)$role), ['admin','administrator','superadmin','super admin'], true);
+
+  // shift terakhir MC (array sudah urut ASC)
+  $lastShift = end($shifts);
+  reset($shifts);
+?>
+
 <div class="mb-3">
-    <strong>Tanggal:</strong> <?= esc($date) ?><br>
-    <strong>Operator:</strong> <?= esc($operator) ?>
+  <strong>Tanggal:</strong> <?= esc($date) ?><br>
+  <strong>Operator:</strong> <?= esc($operator) ?>
 </div>
 
 <form method="get" class="mb-3">
-    <label class="fw-bold me-2">Tanggal Produksi:</label>
-    <input type="date"
-           name="date"
-           value="<?= esc($date) ?>"
-           class="form-control d-inline-block"
-           style="width:180px"
-           onchange="this.form.submit()">
+  <label class="fw-bold me-2">Tanggal Produksi:</label>
+  <input type="date"
+         name="date"
+         value="<?= esc($date) ?>"
+         class="form-control d-inline-block"
+         style="width:180px"
+         onchange="this.form.submit()">
 </form>
 
-<?php
-// shift terakhir MC (array sudah urut ASC)
-$lastShift = end($shifts);
-reset($shifts);
-?>
+<?php if (session()->getFlashdata('success')): ?>
+  <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
+<?php endif ?>
+<?php if (session()->getFlashdata('error')): ?>
+  <div class="alert alert-danger"><?= esc(session()->getFlashdata('error')) ?></div>
+<?php endif ?>
+
 
 <!-- ===================== FORM SIMPAN HOURLY (TANPA NESTED FORM) ===================== -->
 <form method="post" action="/machining/leak-test/hourly/store" id="formSaveHourly">
@@ -106,7 +122,7 @@ reset($shifts);
              value="<?= (int)($exist['qty_ok'] ?? 0) ?>"
              name="items[<?= esc($key) ?>][ok]">
 
-      <!-- ✅ Hidden inputs DIPINDAH ke dalam TD (biar struktur table valid & tidak “nyasar”) -->
+      <!-- Hidden inputs tetap valid -->
       <input type="hidden" name="items[<?= esc($key) ?>][date]" value="<?= esc($date) ?>">
       <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
       <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$item['machine_id'] ?>">
@@ -164,12 +180,13 @@ reset($shifts);
 <?php endforeach ?>
 
 <div class="d-flex gap-2 mt-3">
-    <button type="submit" class="btn btn-success">
-        <i class="bi bi-save"></i> Simpan Leak Test
-    </button>
+  <button type="submit" class="btn btn-success">
+    <i class="bi bi-save"></i> Simpan Leak Test
+  </button>
 </div>
 
 </form>
+
 
 <!-- ===================== FORM FINISH SHIFT (FORM TERPISAH, TANPA NESTED) ===================== -->
 <form method="post"
@@ -177,19 +194,23 @@ reset($shifts);
       id="formFinishShift"
       class="mt-2"
       onsubmit="return confirm('Finish Shift Leak Test? Ini akan transfer WIP ke proses berikutnya.');">
-    <?= csrf_field() ?>
-    <input type="hidden" name="date" value="<?= esc($date) ?>">
-    <input type="hidden" name="shift_id" value="<?= esc($lastShift['id'] ?? '') ?>">
+  <?= csrf_field() ?>
+  <input type="hidden" name="date" value="<?= esc($date) ?>">
+  <input type="hidden" name="shift_id" value="<?= esc($lastShift['id'] ?? '') ?>">
 
-    <button type="submit" class="btn btn-warning" id="btnFinishShift" disabled>
-        <i class="bi bi-check2-circle"></i>
-        Finish Shift (<?= esc($lastShift['shift_name'] ?? 'Shift 3') ?>)
-    </button>
+  <!-- ✅ Admin: tombol selalu aktif -->
+  <button type="submit" class="btn btn-warning" id="btnFinishShift" <?= $isAdmin ? '' : 'disabled' ?>>
+    <i class="bi bi-check2-circle"></i>
+    Finish Shift (<?= esc($lastShift['shift_name'] ?? 'Shift 3') ?>)
+  </button>
 
-    <div class="small text-muted mt-1" id="finishHint">
-        Finish Shift aktif setelah slot terakhir shift berakhir.
-    </div>
+  <div class="small mt-1" id="finishHint">
+    <?= $isAdmin
+      ? 'ADMIN: Finish Shift bisa dilakukan kapan saja (override waktu).'
+      : 'Finish Shift aktif setelah slot terakhir shift berakhir.' ?>
+  </div>
 </form>
+
 
 <!-- ================= CSS ================= -->
 <style>
@@ -275,6 +296,7 @@ reset($shifts);
 .slot-active{ background:#dcfce7 !important; }
 </style>
 
+
 <!-- ================= JS ================= -->
 <script>
 function parseSlotEnd(dateStr, start, end){
@@ -298,15 +320,8 @@ function updateActiveSlots(dateStr){
   document.querySelectorAll('.slot-input').forEach(el=>{
     const active = isSlotActive(dateStr, el.dataset.start, el.dataset.end);
 
-    // input number: readonly
-    if (el.tagName === 'INPUT') {
-      el.readOnly = !active;
-    }
-
-    // select: disabled
-    if (el.tagName === 'SELECT') {
-      el.disabled = !active;
-    }
+    if (el.tagName === 'INPUT') el.readOnly = !active;
+    if (el.tagName === 'SELECT') el.disabled = !active;
 
     const td = el.closest('td');
     if (td) td.classList.toggle('slot-active', active);
@@ -342,6 +357,17 @@ function updateFinishShiftButton() {
   const btn = document.getElementById('btnFinishShift');
   const hint = document.getElementById('finishHint');
   if (!btn) return;
+
+  const isAdmin = <?= $isAdmin ? 'true' : 'false' ?>;
+  if (isAdmin) {
+    btn.disabled = false;
+    if (hint) {
+      hint.innerText = 'ADMIN: Finish Shift bisa dilakukan kapan saja (override waktu).';
+      hint.classList.remove('text-muted');
+      hint.classList.add('text-success');
+    }
+    return;
+  }
 
   const tables = document.querySelectorAll('.production-table');
   if (!tables.length) return;
