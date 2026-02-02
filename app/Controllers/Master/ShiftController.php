@@ -20,12 +20,52 @@ class ShiftController extends BaseController
         $this->pivot = new ShiftTimeSlotModel();
     }
 
-    public function index()
-    {
-        return view('master/shift/index', [
-            'shifts' => $this->shift->getWithTimeSlots()
-        ]);
-    }
+public function index()
+{
+    $shifts = $this->shift->getWithTimeSlots();
+
+    // urutan section yang diinginkan (bisa kamu ubah)
+    $sectionPriority = [
+        'DC' => 1,
+        'MC' => 2,
+    ];
+
+    $getSection = function (string $name) use ($sectionPriority) {
+        foreach ($sectionPriority as $key => $prio) {
+            if (stripos($name, $key) !== false) return [$key, $prio];
+        }
+        return ['OTHER', 99];
+    };
+
+    $getShiftNo = function (array $row) {
+        $name = (string)($row['shift_name'] ?? '');
+        if (preg_match('/\bshift\s*([0-9]+)/i', $name, $m)) {
+            return (int)$m[1];
+        }
+        return (int)($row['shift_code'] ?? 0);
+    };
+
+    usort($shifts, function ($a, $b) use ($getSection, $getShiftNo) {
+        [$secA, $prioA] = $getSection((string)($a['shift_name'] ?? ''));
+        [$secB, $prioB] = $getSection((string)($b['shift_name'] ?? ''));
+
+        // 1) section priority
+        if ($prioA !== $prioB) return $prioA <=> $prioB;
+
+        // 2) shift number within section
+        $noA = $getShiftNo($a);
+        $noB = $getShiftNo($b);
+        if ($noA !== $noB) return $noA <=> $noB;
+
+        // 3) fallback: kode
+        return ((int)($a['shift_code'] ?? 0)) <=> ((int)($b['shift_code'] ?? 0));
+    });
+
+    return view('master/shift/index', [
+        'shifts' => $shifts
+    ]);
+}
+
 
     public function create()
     {

@@ -1,7 +1,7 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-3">Production Flow Product (Excel Style)</h4>
+<h4 class="mb-3">Production Flow Product</h4>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>

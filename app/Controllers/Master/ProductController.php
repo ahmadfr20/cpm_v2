@@ -17,23 +17,33 @@ class ProductController extends BaseController
         $this->customerModel = new CustomerModel();
     }
 
-    public function index()
-    {
-        $keyword    = $this->request->getGet('keyword');
-        $customerId = $this->request->getGet('customer_id');
+public function index()
+{
+    $keyword    = trim((string)$this->request->getGet('keyword'));
+    $customerId = $this->request->getGet('customer_id');
 
-        $products = $this->productModel
-            ->filterProducts($keyword, $customerId)
-            ->paginate(15, 'products');
-
-        return view('master/product/index', [
-            'products'   => $products,
-            'pager'      => $this->productModel->pager,
-            'customers'  => $this->customerModel->findAll(),
-            'keyword'    => $keyword,
-            'customerId' => $customerId
-        ]);
+    // ✅ perPage filter
+    $perPageOptions = [10, 15, 25, 50, 100];
+    $perPage = (int)($this->request->getGet('perPage') ?? 15);
+    if (!in_array($perPage, $perPageOptions, true)) {
+        $perPage = 15;
     }
+
+    $products = $this->productModel
+        ->filterProducts($keyword, $customerId)
+        ->paginate($perPage, 'products');
+
+    return view('master/product/index', [
+        'products'        => $products,
+        'pager'           => $this->productModel->pager,
+        'customers'       => $this->customerModel->findAll(),
+        'keyword'         => $keyword,
+        'customerId'      => $customerId,
+        'perPage'         => $perPage,
+        'perPageOptions'  => $perPageOptions,
+    ]);
+}
+
 
     public function create()
     {

@@ -26,15 +26,33 @@ class MachineController extends BaseController
     /* ===============================
      * LIST MACHINE
      * =============================== */
-    public function index()
-    {
-        return view('master/machine/index', [
-            'machines'  => $this->machineModel->getMachinesFiltered(),
-            'keyword'   => '',
-            'processId' => '',
-            'processes' => $this->processModel->findAll(),
-        ]);
-    }
+public function index()
+{
+    $keyword   = trim((string)($this->request->getGet('keyword') ?? ''));
+    $processId = $this->request->getGet('process_id');
+
+    $perPageOptions = [10, 25, 50, 100];
+    $perPage = (int)($this->request->getGet('perPage') ?? 10);
+    if (!in_array($perPage, $perPageOptions, true)) $perPage = 10;
+
+    $machines = $this->machineModel
+        ->getMachinesFilteredBuilder($keyword, $processId)
+        ->paginate($perPage, 'machines');
+
+    return view('master/machine/index', [
+        'machines'        => $machines,
+        'pager'           => $this->machineModel->pager,
+        'keyword'         => $keyword,
+        'processId'       => $processId,
+        'processes'       => $this->processModel->findAll(),
+        'perPage'         => $perPage,
+        'perPageOptions'  => $perPageOptions,
+    ]);
+}
+
+
+
+
 
     /* ===============================
      * CREATE MACHINE (INI YANG HILANG)

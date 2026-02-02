@@ -11,22 +11,17 @@
                value="<?= esc($timeSlot['time_code']) ?>" required>
     </div>
 
-    <div class="mb-3">
-        <label>Nama Time Slot</label>
-        <input type="text" name="time_name" class="form-control"
-               value="<?= esc($timeSlot['time_name']) ?>" required>
-    </div>
 
     <div class="row">
         <div class="col-md-6 mb-3">
             <label>Jam Mulai</label>
-            <input type="time" name="start_time" class="form-control"
-                   value="<?= $timeSlot['start_time'] ?>" required>
+            <input type="time" name="time_start" class="form-control"
+                   value="<?= $timeSlot['time_start'] ?>" required>
         </div>
         <div class="col-md-6 mb-3">
             <label>Jam Selesai</label>
-            <input type="time" name="end_time" class="form-control"
-                   value="<?= $timeSlot['end_time'] ?>" required>
+            <input type="time" name="time_end" class="form-control"
+                   value="<?= $timeSlot['time_end'] ?>" required>
         </div>
     </div>
 

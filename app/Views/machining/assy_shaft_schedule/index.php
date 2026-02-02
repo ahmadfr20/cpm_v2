@@ -3,6 +3,39 @@
 
 <h4 class="mb-3">DAILY PRODUCTION SCHEDULE – ASSY SHAFT</h4>
 
+<div class="alert alert-warning d-none align-items-center justify-content-between gap-2"
+     id="awaitingWipAsAlert"
+     role="alert">
+  <div>
+    <div class="fw-bold">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      Ada WIP Awaiting untuk Assy Shaft!
+    </div>
+    <div class="small">
+      Tanggal <span class="fw-bold" id="awaitingWipAsDate"><?= esc($date) ?></span> —
+      Total item: <span class="fw-bold" id="awaitingWipAsCount">0</span>,
+      Total qty: <span class="fw-bold" id="awaitingWipAsQty">0</span>
+    </div>
+  </div>
+
+  <div class="d-flex gap-2">
+    <button type="button" class="btn btn-outline-dark btn-sm" id="btnRefreshAwaitingWipAs">
+      <i class="bi bi-arrow-repeat"></i> Refresh
+    </button>
+
+    <button type="button" class="btn btn-success btn-sm" onclick="openAssignIncomingAssyShaftModal()">
+      <i class="bi bi-box-arrow-in-down"></i> Assign Sekarang
+    </button>
+  </div>
+</div>
+
+<div class="mb-3">
+  <button type="button" class="btn btn-primary btn-sm" onclick="openAssignIncomingAssyShaftModal()">
+    <i class="bi bi-plus-circle"></i> Ambil Incoming dari Proses Sebelumnya
+  </button>
+</div>
+
+
 <form method="get" class="mb-3" style="max-width:220px">
     <label class="form-label fw-bold">Tanggal</label>
     <input type="date"
@@ -87,12 +120,88 @@
 </tbody>
 </table>
 
+<style>
+  #assignIncomingAssyShaftModal .modal-dialog { margin-top: 80px; }
+  #incomingTableAssyShaft th, #incomingTableAssyShaft td { vertical-align: middle; }
+  .incoming-mini { font-size: 12px; color: #6c757d; }
+</style>
+
+<div class="modal fade" id="assignIncomingAssyShaftModal" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-xl">
+    <div class="modal-content">
+
+      <div class="modal-header">
+        <h5 class="modal-title">Incoming dari Proses Sebelumnya → Assign ke Assy Shaft</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+      </div>
+
+      <div class="modal-body">
+
+        <div class="row g-2 align-items-end mb-2">
+          <div class="col-md-4">
+            <label class="form-label fw-bold">Shift (tujuan schedule)</label>
+            <select class="form-select form-select-sm" id="as_shift_bulk">
+              <?php foreach ($shifts as $s): ?>
+                <option value="<?= (int)$s['id'] ?>"><?= esc($s['shift_name']) ?></option>
+              <?php endforeach ?>
+            </select>
+            <div class="incoming-mini">Shift dipakai untuk semua baris yang di-assign.</div>
+          </div>
+
+          <div class="col-md-8 text-end">
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleAllIncomingAs(true)">
+              Pilih Semua
+            </button>
+            <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleAllIncomingAs(false)">
+              Uncheck Semua
+            </button>
+
+            <button type="button" class="btn btn-success btn-sm" onclick="submitAssignIncomingAssyShaftBulk()">
+              <i class="bi bi-check2-circle"></i> Assign Selected
+            </button>
+          </div>
+        </div>
+
+        <div class="table-responsive">
+          <table class="table table-bordered table-sm align-middle" id="incomingTableAssyShaft">
+            <thead class="table-secondary">
+              <tr class="text-center">
+                <th style="width:50px">Pick</th>
+                <th style="width:90px">WIP ID</th>
+                <th>Part</th>
+                <th style="width:140px">Avail</th>
+                <th style="width:220px">Pilih Mesin</th>
+                <th style="width:140px">Qty Assign</th>
+                <th style="width:140px">Aksi</th>
+              </tr>
+            </thead>
+            <tbody id="incomingTbodyAssyShaft">
+              <tr>
+                <td colspan="7" class="text-center text-muted">Klik tombol “Ambil Incoming…” untuk memuat data.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-bs-dismiss="modal">Tutup</button>
+      </div>
+
+    </div>
+  </div>
+</div>
+
+
 <button class="btn btn-success btn-sm mb-4">
     <i class="bi bi-save"></i> Simpan <?= esc($shift['shift_name']) ?>
 </button>
 </form>
 
 <?php endforeach ?>
+
+
 
 <script>
 async function loadProducts(selectEl) {
@@ -134,6 +243,274 @@ document.querySelectorAll('.product-select').forEach(selectEl => {
         row.querySelector('.plan-input').value = opt.dataset.target || 0;
     });
 });
+
+/* =========================
+ * MODAL INCOMING (TABLE) - Assy Shaft
+ * ========================= */
+let __incomingAssyShaft = [];
+
+// pakai mesin yang sama (list dari PHP machines)
+const __machinesAssyShaft = <?= json_encode(array_map(fn($m) => [
+  'id'   => (int)$m['id'],
+  'code' => (string)$m['machine_code'],
+  'name' => (string)$m['machine_name'],
+], $machines)) ?>;
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function getCsrfPair() {
+  const inputs = document.querySelectorAll('input[type="hidden"][name]');
+  for (const el of inputs) {
+    if (el.value && el.value.length >= 10) {
+      return { name: el.name, value: el.value };
+    }
+  }
+  return null;
+}
+
+function renderMachineOptionsAssyShaft(selectedId = '') {
+  let html = `<option value="">-- pilih mesin --</option>`;
+  __machinesAssyShaft.forEach(m => {
+    const sel = (String(m.id) === String(selectedId)) ? 'selected' : '';
+    html += `<option value="${m.id}" ${sel}>${escapeHtml(m.code)} - ${escapeHtml(m.name)}</option>`;
+  });
+  return html;
+}
+
+async function openAssignIncomingAssyShaftModal() {
+  if (typeof bootstrap === 'undefined') {
+    alert('Bootstrap JS belum ter-load. Pastikan layout/layout include bootstrap.bundle.min.js');
+    return;
+  }
+
+  const date = "<?= esc($date) ?>";
+  const tbody = document.getElementById('incomingTbodyAssyShaft');
+  tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Loading incoming...</td></tr>`;
+
+  // ✅ endpoint INCOMING Assy Shaft
+  const res = await fetch(`/machining/assy-shaft/schedule/incoming-wip?date=${encodeURIComponent(date)}`, {
+    headers: { 'Accept': 'application/json' }
+  });
+
+  const json = await res.json();
+
+  if (!json.status) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-danger">${escapeHtml(json.message || 'Gagal load incoming')}</td></tr>`;
+    const modalEl = document.getElementById('assignIncomingAssyShaftModal');
+    bootstrap.Modal.getOrCreateInstance(modalEl).show();
+    return;
+  }
+
+  __incomingAssyShaft = json.data || [];
+
+  if (__incomingAssyShaft.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="7" class="text-center text-muted">Tidak ada incoming WIP (WAITING) untuk tanggal ini.</td></tr>`;
+  } else {
+    tbody.innerHTML = '';
+    __incomingAssyShaft.forEach((p, idx) => {
+      const avail = parseInt(p.avail || 0, 10);
+      const rowId = `as_inc_${idx}`;
+
+      tbody.insertAdjacentHTML('beforeend', `
+        <tr id="${rowId}">
+          <td class="text-center">
+            <input type="checkbox" class="form-check-input as-inc-check" checked>
+          </td>
+
+          <td class="text-center">
+            <span class="badge bg-secondary">${escapeHtml(p.wip_id)}</span>
+            <input type="hidden" class="as-inc-wip-id" value="${escapeHtml(p.wip_id)}">
+            <input type="hidden" class="as-inc-product-id" value="${escapeHtml(p.product_id)}">
+          </td>
+
+          <td class="text-start">
+            <div><strong>${escapeHtml(p.part_no)}</strong> - ${escapeHtml(p.part_name)}</div>
+            <div class="incoming-mini">Product ID: ${escapeHtml(p.product_id)}</div>
+          </td>
+
+          <td class="text-center">
+            <span class="badge bg-info text-dark">${avail}</span>
+            <input type="hidden" class="as-inc-avail" value="${avail}">
+          </td>
+
+          <td>
+            <select class="form-select form-select-sm as-inc-machine">
+              ${renderMachineOptionsAssyShaft('')}
+            </select>
+          </td>
+
+          <td>
+            <input type="number" class="form-control form-control-sm as-inc-qty"
+                   min="1" max="${avail}" value="${avail}">
+          </td>
+
+          <td class="text-center">
+            <button type="button" class="btn btn-success btn-sm" onclick="submitAssignIncomingAssyShaftRow('${rowId}')">
+              Assign
+            </button>
+          </td>
+        </tr>
+      `);
+    });
+  }
+
+  const modalEl = document.getElementById('assignIncomingAssyShaftModal');
+  bootstrap.Modal.getOrCreateInstance(modalEl).show();
+}
+
+function toggleAllIncomingAs(flag) {
+  document.querySelectorAll('.as-inc-check').forEach(ch => ch.checked = !!flag);
+}
+
+async function submitAssignIncomingAssyShaftRow(rowId) {
+  const row = document.getElementById(rowId);
+  if (!row) return;
+
+  const date = "<?= esc($date) ?>";
+  const shiftId = document.getElementById('as_shift_bulk').value;
+
+  const wipId = row.querySelector('.as-inc-wip-id').value;
+  const productId = row.querySelector('.as-inc-product-id').value;
+  const avail = parseInt(row.querySelector('.as-inc-avail').value || '0', 10);
+
+  const machineId = row.querySelector('.as-inc-machine').value;
+  const qty = parseInt(row.querySelector('.as-inc-qty').value || '0', 10);
+
+  if (!shiftId || !machineId || !wipId || !productId || qty <= 0) {
+    alert('Shift / Mesin / Qty wajib diisi.');
+    return;
+  }
+  if (qty > avail) {
+    alert(`Qty melebihi available (${avail}).`);
+    return;
+  }
+
+  row.style.opacity = 0.6;
+  row.querySelectorAll('input,select,button').forEach(el => el.disabled = true);
+
+  const csrf = getCsrfPair();
+
+  const payload = new URLSearchParams({
+    date: date,
+    shift_id: shiftId,
+    machine_id: machineId,
+    product_id: productId,
+    qty: String(qty),
+    wip_id: String(wipId),
+  });
+  if (csrf) payload.append(csrf.name, csrf.value);
+
+  try {
+    // ✅ endpoint ASSIGN Assy Shaft
+    const res = await fetch('/machining/assy-shaft/schedule/assign-incoming-wip', {
+      method: 'POST',
+      headers: { 'X-Requested-With': 'XMLHttpRequest', 'Accept': 'application/json' },
+      body: payload
+    });
+
+    const json = await res.json();
+
+    if (!json.status) {
+      alert(json.message || 'Assign gagal');
+      row.style.opacity = 1;
+      row.querySelectorAll('input,select,button').forEach(el => el.disabled = false);
+      return;
+    }
+
+    row.classList.add('table-success');
+    row.querySelector('td:last-child').innerHTML = `<span class="badge bg-success">Assigned</span>`;
+
+  } catch (e) {
+    alert('Server error / jaringan bermasalah');
+    row.style.opacity = 1;
+    row.querySelectorAll('input,select,button').forEach(el => el.disabled = false);
+  }
+}
+
+async function submitAssignIncomingAssyShaftBulk() {
+  const rows = Array.from(document.querySelectorAll('#incomingTbodyAssyShaft tr'));
+  const selectedRows = rows.filter(r => r.querySelector('.as-inc-check') && r.querySelector('.as-inc-check').checked);
+
+  if (selectedRows.length === 0) {
+    alert('Tidak ada baris yang dipilih.');
+    return;
+  }
+
+  for (const r of selectedRows) {
+    if (r.classList.contains('table-success')) continue;
+    await submitAssignIncomingAssyShaftRow(r.getAttribute('id'));
+  }
+
+  alert('Proses assign selected selesai. (Baris sukses akan berwarna hijau)');
+}
+
+/* =========================
+ * ✅ ALERT CHECKER (Awaiting WIP Assy Shaft)
+ * ========================= */
+async function checkAwaitingWipAssyShaft() {
+  const date = "<?= esc($date) ?>";
+  const alertEl = document.getElementById('awaitingWipAsAlert');
+  const countEl = document.getElementById('awaitingWipAsCount');
+  const qtyEl   = document.getElementById('awaitingWipAsQty');
+
+  if (!alertEl || !countEl || !qtyEl) return;
+
+  try {
+    const res = await fetch(`/machining/assy-shaft/schedule/incoming-wip?date=${encodeURIComponent(date)}`, {
+      headers: { 'Accept': 'application/json' }
+    });
+
+    if (!res.ok) {
+      alertEl.classList.add('d-none');
+      alertEl.classList.remove('d-flex');
+      return;
+    }
+
+    const json = await res.json();
+    if (!json.status) {
+      alertEl.classList.add('d-none');
+      alertEl.classList.remove('d-flex');
+      return;
+    }
+
+    const data = json.data || [];
+    if (data.length === 0) {
+      alertEl.classList.add('d-none');
+      alertEl.classList.remove('d-flex');
+      return;
+    }
+
+    let totalQty = 0;
+    data.forEach(x => {
+      const q = parseInt(x.avail ?? 0, 10);
+      if (!isNaN(q)) totalQty += q;
+    });
+
+    countEl.textContent = String(data.length);
+    qtyEl.textContent   = totalQty.toLocaleString('id-ID');
+
+    alertEl.classList.remove('d-none');
+    alertEl.classList.add('d-flex');
+
+  } catch (e) {
+    console.error('checkAwaitingWipAssyShaft error', e);
+    alertEl.classList.add('d-none');
+    alertEl.classList.remove('d-flex');
+  }
+}
+
+document.getElementById('btnRefreshAwaitingWipAs')?.addEventListener('click', () => {
+  checkAwaitingWipAssyShaft();
+});
+
+checkAwaitingWipAssyShaft();
 </script>
 
 <?= $this->endSection() ?>

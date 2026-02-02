@@ -246,9 +246,67 @@ class DailyScheduleController extends BaseController
     }
 
     /* =====================================================
+     * ✅ UPSERT DAILY_SCHEDULES (HEADER)
+     * Key: (schedule_date, process_id, shift_id, section)
+     * ===================================================== */
+    private function upsertDailyScheduleHeader($db, string $date, int $processId, int $shiftId, string $section): int
+    {
+        if (!$db->tableExists('daily_schedules')) return 0;
+
+        $where = [
+            'schedule_date' => $date,
+            'process_id'    => $processId,
+            'shift_id'      => $shiftId,
+            'section'       => $section,
+        ];
+
+        $exist = $db->table('daily_schedules')->where($where)->get()->getRowArray();
+        $now   = date('Y-m-d H:i:s');
+
+        if ($exist) {
+            $update = [
+                'is_completed' => 0,
+            ];
+            if ($db->fieldExists('updated_at', 'daily_schedules')) $update['updated_at'] = $now;
+
+            $db->table('daily_schedules')->where('id', (int)$exist['id'])->update($update);
+            return (int)$exist['id'];
+        }
+
+        $payload = $where + [
+            'is_completed' => 0,
+        ];
+        // created_at di schema daily_schedules: datetime DEFAULT NULL
+        if ($db->fieldExists('created_at', 'daily_schedules')) $payload['created_at'] = $now;
+        if ($db->fieldExists('updated_at', 'daily_schedules')) $payload['updated_at'] = $now;
+
+        $db->table('daily_schedules')->insert($payload);
+        return (int)$db->insertID();
+    }
+
+    /* =====================================================
+     * ✅ REBUILD DAILY_SCHEDULE_ITEMS utk 1 header
+     * - hapus item lama daily_schedule_id
+     * - insert ulang item baru
+     * ===================================================== */
+    private function rebuildDailyScheduleItems($db, int $dailyScheduleId, array $itemsToInsert): void
+    {
+        if ($dailyScheduleId <= 0) return;
+        if (!$db->tableExists('daily_schedule_items')) return;
+
+        // delete lama biar tidak dobel
+        $db->table('daily_schedule_items')->where('daily_schedule_id', $dailyScheduleId)->delete();
+
+        foreach ($itemsToInsert as $it) {
+            $db->table('daily_schedule_items')->insert($it);
+        }
+    }
+
+    /* =====================================================
      * STORE SCHEDULE (PLAN)
-     * - HANYA buat WIP "IN ke DIE CASTING"
-     * - TIDAK mengirim ke proses berikutnya (Machining)
+     * - buat die_casting_production
+     * - buat WIP "IN ke DIE CASTING"
+     * - ✅ tambahan: buat daily_schedules + daily_schedule_items
      * ===================================================== */
     public function store()
     {
@@ -260,10 +318,20 @@ class DailyScheduleController extends BaseController
         }
 
         $today = date('Y-m-d');
+        $now   = date('Y-m-d H:i:s');
 
         $db->transBegin();
         try {
             $processIdDC = $this->getProcessIdDieCasting($db);
+
+            /**
+             * Kumpulkan item untuk daily_schedules per (date, shift)
+             * Struktur:
+             *  $dailyGroup["{$date}_{$shiftId}"] = [
+             *     'date'=>..., 'shift_id'=>..., 'header_id'=>0, 'items'=>[]
+             *  ]
+             */
+            $dailyGroup = [];
 
             foreach ($items as $row) {
                 if (empty($row['date']) || empty($row['shift_id']) || empty($row['machine_id'])) continue;
@@ -288,6 +356,9 @@ class DailyScheduleController extends BaseController
                     ->get()->getRowArray();
                 if (!$product) continue;
 
+                $cycle  = (int)($product['cycle_time'] ?? 0);
+                $cavity = (int)($product['cavity'] ?? 0);
+
                 $partLabel = (($product['part_name'] ?? '') ?: '-') . ' #1';
 
                 // UPSERT die_casting_production (plan)
@@ -298,8 +369,6 @@ class DailyScheduleController extends BaseController
                         'machine_id'      => $machineId
                     ])
                     ->get()->getRowArray();
-
-                $now = date('Y-m-d H:i:s');
 
                 if ($exist) {
                     $db->table('die_casting_production')->where('id', (int)$exist['id'])->update([
@@ -333,14 +402,6 @@ class DailyScheduleController extends BaseController
 
                 /**
                  * ✅ WIP untuk DIE CASTING SAJA (IN masuk ke DC)
-                 * Supaya di inventory, kolom DIE CASTING - IN terisi.
-                 *
-                 * from_process_id = DC
-                 * to_process_id   = DC
-                 * qty_in          = qty plan
-                 * stock           = 0 (stock TIDAK pakai plan)
-                 *
-                 * status: SCHEDULED kalau hari ini, else WAITING
                  */
                 $wipStatus = ($date === $today) ? 'SCHEDULED' : 'WAITING';
 
@@ -358,12 +419,64 @@ class DailyScheduleController extends BaseController
                     0,                     // qty_out
                     0                      // stock selalu 0 (stock pakai qtyA di finish)
                 );
+
+                /**
+                 * ✅ KUMPULKAN untuk daily_schedules + items
+                 */
+                $gKey = $date . '_' . $shiftId;
+                if (!isset($dailyGroup[$gKey])) {
+                    $dailyGroup[$gKey] = [
+                        'date'     => $date,
+                        'shift_id' => $shiftId,
+                        'items'    => [],
+                    ];
+                }
+
+                // target per hour (berdasarkan durasi shift)
+                $totalMinute = $this->getTotalMinuteShift($db, $shiftId);
+                $hours = ($totalMinute > 0) ? ($totalMinute / 60) : 0;
+                $targetPerHour = ($hours > 0) ? (int)ceil($qtyP / $hours) : 0;
+
+                $dailyGroup[$gKey]['items'][] = [
+                    // daily_schedule_id akan diisi nanti
+                    'daily_schedule_id' => 0,
+                    'shift_id'          => $shiftId,
+                    'machine_id'        => $machineId,
+                    'product_id'        => $productId,
+                    'cycle_time'        => $cycle > 0 ? $cycle : 0,
+                    'cavity'            => $cavity > 0 ? $cavity : 0,
+                    'target_per_hour'   => $targetPerHour,
+                    'target_per_shift'  => $qtyP,
+                    'is_selected'       => 1,
+                ];
+            }
+
+            /**
+             * ✅ BUAT HEADER + REBUILD ITEMS untuk setiap (date, shift)
+             */
+            foreach ($dailyGroup as $g) {
+                $date    = (string)$g['date'];
+                $shiftId = (int)$g['shift_id'];
+
+                // section untuk DC
+                $section = 'Die Casting';
+
+                $headerId = $this->upsertDailyScheduleHeader($db, $date, $processIdDC, $shiftId, $section);
+                if ($headerId <= 0) continue;
+
+                $itemsToInsert = [];
+                foreach ($g['items'] as $it) {
+                    $it['daily_schedule_id'] = $headerId;
+                    $itemsToInsert[] = $it;
+                }
+
+                $this->rebuildDailyScheduleItems($db, $headerId, $itemsToInsert);
             }
 
             if ($db->transStatus() === false) throw new \Exception('DB error');
 
             $db->transCommit();
-            return redirect()->back()->with('success', 'Schedule DC tersimpan.');
+            return redirect()->back()->with('success', 'Schedule DC tersimpan + Daily Schedules & Items ter-update.');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
@@ -402,7 +515,6 @@ class DailyScheduleController extends BaseController
                     ->get()->getResultArray();
             }
 
-            // Map actual: [machine_id_product_id] => fg/ng
             $actMap = [];
             foreach ($actuals as $a) {
                 $key = (int)$a['machine_id'] . '_' . (int)$a['product_id'];
@@ -426,16 +538,13 @@ class DailyScheduleController extends BaseController
                 $sourceId  = (int)$r['id'];
                 $machineId = (int)$r['machine_id'];
                 $productId = (int)$r['product_id'];
-
                 if ($sourceId <= 0 || $productId <= 0) continue;
 
-                $key = $machineId . '_' . $productId;
-                $qtyA = (int)($actMap[$key]['fg'] ?? 0);
+                $key   = $machineId . '_' . $productId;
+                $qtyA  = (int)($actMap[$key]['fg'] ?? 0);
                 $qtyNG = (int)($actMap[$key]['ng'] ?? 0);
 
-                /**
-                 * Update die_casting_production actual
-                 */
+                // Update die_casting_production actual
                 $db->table('die_casting_production')
                     ->where('id', $sourceId)
                     ->update([
@@ -444,33 +553,23 @@ class DailyScheduleController extends BaseController
                         'is_completed' => 1,
                     ]);
 
-                /**
-                 * ✅ A) Update WIP DIE CASTING (DC -> DC)
-                 * qty_out = qtyA (actual)
-                 * stock   = 0
-                 * status  = DONE
-                 */
+                // A) Update WIP DIE CASTING (DC -> DC)
                 $this->upsertProductionWip(
                     $db,
                     $date,
                     $productId,
                     $processIdDC,
                     $processIdDC,
-                    $qtyA, // qty legacy pakai actual
+                    $qtyA,
                     'DONE',
                     'die_casting_production',
                     $sourceId,
-                    null,  // qty_in biarkan existing (plan) => jangan override
-                    $qtyA, // qty_out = actual
-                    0      // stock = 0
+                    null,
+                    $qtyA,
+                    0
                 );
 
-                /**
-                 * ✅ B) Create/Update WIP ke proses berikutnya (DC -> NEXT)
-                 * qty_in = qtyA
-                 * stock  = qtyA (ini yang akan muncul sebagai STOCK di proses next)
-                 * status = WAITING (karena next proses belum diproses)
-                 */
+                // B) Create/Update WIP ke proses berikutnya (DC -> NEXT)
                 $nextProcessId = $this->getNextProcessIdByFlow($db, $productId, $processIdDC);
                 if ($nextProcessId && $qtyA > 0) {
                     $this->upsertProductionWip(
@@ -483,9 +582,9 @@ class DailyScheduleController extends BaseController
                         'WAITING',
                         'die_casting_production',
                         $sourceId,
-                        $qtyA,   // qty_in
-                        0,      // qty_out
-                        $qtyA   // stock = actual qtyA
+                        $qtyA,
+                        0,
+                        $qtyA
                     );
                 }
 
@@ -497,7 +596,7 @@ class DailyScheduleController extends BaseController
             $db->transCommit();
             return $this->response->setJSON([
                 'status'  => true,
-                'message' => 'Finish shift OK. WIP DC selesai (qty_out=qtyA, stock=0) dan qtyA masuk ke proses berikutnya sebagai IN/Stock.',
+                'message' => 'Finish shift OK. WIP DC selesai dan qtyA masuk ke proses berikutnya sebagai IN/Stock.',
                 'count'   => $processed
             ]);
         } catch (\Throwable $e) {

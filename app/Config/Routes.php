@@ -393,7 +393,9 @@ $routes->post('assy-bushing/hourly/finish-shift', 'Machining\AssyBushingDailyPro
     $routes->get('assy-shaft/schedule', 'Machining\AssyShaftDailyScheduleController::index');
     $routes->get('assy-shaft/schedule/product-target', 'Machining\AssyShaftDailyScheduleController::getProductAndTarget');
     $routes->post('assy-shaft/schedule/store', 'Machining\AssyShaftDailyScheduleController::store');
-
+    $routes->get('assy-shaft/schedule/incoming-wip', 'Machining\AssyShaftDailyScheduleController::incomingWip');
+    $routes->post('assy-shaft/schedule/assign-incoming-wip', 'Machining\AssyShaftDailyScheduleController::assignIncomingWip');
+    $routes->post('assy-shaft/hourly/finish-shift', 'Machining\AssyShaftDailyProductionController::finishShift');
 
 
 
