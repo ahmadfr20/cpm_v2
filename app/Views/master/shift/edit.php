@@ -22,6 +22,18 @@
                     <input name="shift_code" class="form-control"
                            value="<?= esc($shift['shift_code']) ?>" required>
                 </div>
+                <div class="col-md-3">
+                    <label class="form-label">Day Group</label>
+                    <select name="day_group" class="form-select" required>
+                        <?php $current = $shift['day_group'] ?? 'MON_THU'; ?>
+                        <?php foreach ($dayGroups as $val => $label): ?>
+                            <option value="<?= esc($val) ?>" <?= $current === $val ? 'selected' : '' ?>>
+                                <?= esc($label) ?>
+                            </option>
+                        <?php endforeach ?>
+                    </select>
+                </div>
+
 
                 <div class="col-md-6">
                     <label class="form-label">Shift Name</label>

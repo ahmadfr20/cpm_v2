@@ -12,15 +12,18 @@ class ProductModel extends Model
     protected $allowedFields = [
         'part_no',
         'part_name',
+        'part_prod',
         'customer_id',
-
-        // 🔥 MASTER PRODUCT DIE CASTING
         'cycle_time',
         'cavity',
         'efficiency_rate',
-
         'weight_ascas',
         'weight_runner',
+
+        // ✅ tambahan baru
+        'weight_die_casting', // auto dari ascas + runner
+        'weight_machining',   // input user
+
         'notes',
         'is_active'
     ];
@@ -54,6 +57,7 @@ class ProductModel extends Model
 
     /**
      * PRODUCT BY MACHINE (UNTUK DAILY SCHEDULE)
+     * ✅ ditambah field baru biar konsisten dipakai di schedule (kalau perlu)
      */
     public function getByMachine($machineId)
     {
@@ -64,6 +68,8 @@ class ProductModel extends Model
                 p.part_name,
                 p.weight_ascas,
                 p.weight_runner,
+                p.weight_die_casting,
+                p.weight_machining,
                 p.cycle_time,
                 p.cavity,
                 p.efficiency_rate
@@ -75,5 +81,13 @@ class ProductModel extends Model
             ->orderBy('p.part_name')
             ->get()
             ->getResultArray();
+    }
+
+    public function getOneWithCustomer($id)
+    {
+        return $this->select('products.*, customers.customer_name')
+            ->join('customers', 'customers.id = products.customer_id', 'left')
+            ->where('products.id', $id)
+            ->first();
     }
 }

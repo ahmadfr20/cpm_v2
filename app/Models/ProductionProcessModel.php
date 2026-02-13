@@ -6,11 +6,9 @@ use CodeIgniter\Model;
 
 class ProductionProcessModel extends Model
 {
-    protected $table = 'production_processes';
+    protected $table      = 'production_processes';
     protected $primaryKey = 'id';
+    protected $returnType = 'array';
 
-    protected $allowedFields = [
-        'process_code',
-        'process_name'
-    ];
+    protected $allowedFields = ['process_code', 'process_name'];
 }

@@ -74,6 +74,54 @@ thead .sticky-col-action { z-index: 11; }
 }
 </style>
 
+<?php
+  /**
+   * ✅ Susun ulang kolom proses:
+   * RAW MATERIAL -> DIE CASTING -> BURRYTORY -> SAND BLASTING -> MACHINING -> (sisanya tetap urutan awal)
+   */
+  $wantedNames = [
+    'RAW MATERIAL',
+    'DIE CASTING',
+    'BURRYTORY',
+    'SAND BLASTING',
+    'MACHINING',
+  ];
+
+  $normalize = function($s){
+    $s = strtoupper(trim((string)$s));
+    $s = preg_replace('/\s+/', ' ', $s);
+    return $s;
+  };
+
+  $byName = [];
+  foreach (($processes ?? []) as $pr) {
+    $byName[$normalize($pr['process_name'] ?? '')] = $pr;
+  }
+
+  $orderedProcesses = [];
+
+  // ambil yang diinginkan sesuai urutan baru
+  foreach ($wantedNames as $nm) {
+    $key = $normalize($nm);
+    if (isset($byName[$key])) {
+      $orderedProcesses[] = $byName[$key];
+      unset($byName[$key]);
+    }
+  }
+
+  // sisanya, append sesuai urutan awal dari DB (tidak diacak)
+  foreach (($processes ?? []) as $pr) {
+    $key = $normalize($pr['process_name'] ?? '');
+    if (isset($byName[$key])) {
+      $orderedProcesses[] = $pr;
+      unset($byName[$key]);
+    }
+  }
+
+  // pakai urutan baru untuk table render
+  $processes = $orderedProcesses;
+?>
+
 <div class="table-responsive">
   <table class="table table-sm table-excel mb-0">
     <thead class="excel-head">
@@ -100,12 +148,10 @@ thead .sticky-col-action { z-index: 11; }
 
         <tr id="row_<?= $pid ?>">
 
-          <!-- ✅ PENTING: Semua hidden harus ada di dalam <td> agar tidak “nyasar” -->
           <td class="sticky-col-no text-center fw-bold">
             <?= $no++ ?>
             <input type="hidden" name="product_ids[]" value="<?= $pid ?>">
             <input type="hidden" name="flows_order[<?= $pid ?>]" id="order_<?= $pid ?>" value="<?= esc(implode(',', $selectedOrder)) ?>">
-            <!-- dummy agar key flows_selected[pid] tetap ada walau tidak ada yg dicentang -->
             <input type="hidden" name="flows_selected[<?= $pid ?>][]" value="">
           </td>
 
@@ -160,30 +206,24 @@ thead .sticky-col-action { z-index: 11; }
 
 <script>
 document.addEventListener('DOMContentLoaded', () => {
-
-  // ✅ ambil CSRF name dari server
   const CSRF_NAME = "<?= csrf_token() ?>";
 
   function getCsrfInput(){
     return document.querySelector(`#bulkForm input[name="${CSRF_NAME}"]`);
   }
-
   function getCsrfValue(){
     const inp = getCsrfInput();
     return inp ? inp.value : "";
   }
-
   function setCsrfValue(newHash){
     const inp = getCsrfInput();
     if (inp && newHash) inp.value = newHash;
   }
-
   function setStatus(productId, html) {
     const el = document.getElementById('status_' + productId);
     if (el) el.innerHTML = html;
   }
 
-  // ✅ Ambil urutan yang dicentang sesuai urutan kolom (DOM order)
   function getRowOrder(productId){
     const row = document.getElementById('row_' + productId);
     if (!row) return [];
@@ -199,7 +239,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if (hidden) hidden.value = ids.join(',');
   }
 
-  // ✅ Saat checkbox berubah: update order hidden + status changed
   document.addEventListener('change', (e) => {
     const cb = e.target;
     if (!(cb instanceof HTMLElement)) return;
@@ -212,7 +251,6 @@ document.addEventListener('DOMContentLoaded', () => {
     setStatus(pid, '<span class="text-warning">● Changed (not saved)</span>');
   });
 
-  // ✅ Bulk submit: pastikan semua order hidden terbaru
   document.getElementById('bulkForm').addEventListener('submit', () => {
     document.querySelectorAll('tr[id^="row_"]').forEach(tr => {
       const pid = tr.id.replace('row_','');
@@ -220,7 +258,6 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   });
 
-  // ✅ Save per row (AJAX) + update CSRF hash agar tidak 403 berikutnya
   document.addEventListener('click', async (e) => {
     const btn = e.target.closest('.btn-save-row');
     if (!btn) return;
@@ -236,7 +273,6 @@ document.addEventListener('DOMContentLoaded', () => {
     formData.append(CSRF_NAME, getCsrfValue());
     formData.append('product_id', productId);
 
-    // selected[] & order
     order.forEach(v => formData.append('selected[]', v));
     formData.append('order', order.join(','));
 
@@ -247,7 +283,6 @@ document.addEventListener('DOMContentLoaded', () => {
         body: formData
       });
 
-      // Jika kena 403 biasanya token invalid
       if (!res.ok) {
         setStatus(productId, `<span class="text-danger">✖ HTTP ${res.status} (cek CSRF)</span>`);
         btn.disabled = false;
@@ -256,8 +291,6 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       const json = await res.json();
-
-      // ✅ update csrf hash dari server
       if (json && json.csrfHash) setCsrfValue(json.csrfHash);
 
       if (!json.ok) {
@@ -274,12 +307,10 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 
-  // init order hidden awal (sinkron)
   document.querySelectorAll('tr[id^="row_"]').forEach(tr => {
     const pid = tr.id.replace('row_','');
     updateHiddenOrder(pid);
   });
-
 });
 </script>
 

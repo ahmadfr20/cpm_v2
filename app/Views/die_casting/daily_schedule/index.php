@@ -83,16 +83,14 @@
               <option value="">-- pilih --</option>
             </select>
 
-            <!-- ✅ Hidden fields WAJIB ada di dalam TD (biar valid HTML & terkirim) -->
             <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$m['id'] ?>">
             <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
             <input type="hidden" name="items[<?= esc($key) ?>][date]" value="<?= esc($date) ?>">
 
-            <!-- weights -->
             <input type="hidden" class="wa" name="items[<?= esc($key) ?>][weight_ascas]" value="<?= (float)($p['weight_ascas'] ?? 0) ?>">
             <input type="hidden" class="wr" name="items[<?= esc($key) ?>][weight_runner]" value="<?= (float)($p['weight_runner'] ?? 0) ?>">
 
-            <!-- actual/ng yg dikirim ke controller -->
+
             <input type="hidden" class="qty-a" name="items[<?= esc($key) ?>][qty_a]" value="<?= (int)($p['qty_a'] ?? 0) ?>">
             <input type="hidden" class="qty-ng" name="items[<?= esc($key) ?>][qty_ng]" value="<?= (int)($p['qty_ng'] ?? 0) ?>">
           </td>
@@ -225,7 +223,7 @@ document.querySelectorAll('.product-select').forEach(sel => {
       res.forEach(p => {
         const opt = document.createElement('option');
         opt.value = p.id;
-        opt.textContent = `${p.part_no} - ${p.part_name}`;
+        opt.textContent = `${p.part_prod} - ${p.part_name}`;
         opt.dataset.ascas  = p.weight_ascas || 0;
         opt.dataset.runner = p.weight_runner || 0;
         opt.dataset.target = p.target || 0;

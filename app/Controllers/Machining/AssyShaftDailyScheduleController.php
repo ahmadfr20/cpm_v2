@@ -7,12 +7,71 @@ use App\Controllers\BaseController;
 class AssyShaftDailyScheduleController extends BaseController
 {
     /* =====================================================
+     * ✅ GUARD: role & tanggal (redirect)
+     * - ADMIN: boleh hari ini
+     * - selain ADMIN: hanya boleh besok dst (date > today)
+     * ===================================================== */
+    private function guardScheduleDateByRoleRedirect(string $date)
+    {
+        $role = session()->get('role') ?? '';
+
+        $d = \DateTime::createFromFormat('Y-m-d', $date);
+        if (!$d) {
+            return redirect()->back()->with('error', 'Format tanggal tidak valid');
+        }
+        $d->setTime(0, 0, 0);
+
+        $today = new \DateTime(date('Y-m-d'));
+        $today->setTime(0, 0, 0);
+
+        if ($role !== 'ADMIN' && $d <= $today) {
+            return redirect()->back()->with(
+                'error',
+                'Hanya ADMIN yang boleh membuat schedule untuk hari ini. Selain ADMIN hanya boleh mulai besok.'
+            );
+        }
+
+        return null;
+    }
+
+    /* =====================================================
+     * ✅ GUARD: role & tanggal (JSON)
+     * ===================================================== */
+    private function guardScheduleDateByRoleJson(string $date): ?\CodeIgniter\HTTP\ResponseInterface
+    {
+        $role = session()->get('role') ?? '';
+
+        $d = \DateTime::createFromFormat('Y-m-d', $date);
+        if (!$d) {
+            return $this->response->setJSON(['status' => false, 'message' => 'Format tanggal tidak valid']);
+        }
+        $d->setTime(0, 0, 0);
+
+        $today = new \DateTime(date('Y-m-d'));
+        $today->setTime(0, 0, 0);
+
+        if ($role !== 'ADMIN' && $d <= $today) {
+            return $this->response->setJSON([
+                'status'  => false,
+                'message' => 'Hanya ADMIN yang boleh membuat schedule untuk hari ini. Selain ADMIN hanya boleh mulai besok.'
+            ]);
+        }
+
+        return null;
+    }
+
+    /* =====================================================
      * INDEX
      * ===================================================== */
     public function index()
     {
-        $db   = db_connect();
-        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        $db = db_connect();
+
+        // ✅ default besok jika date kosong / invalid
+        $date = trim((string)$this->request->getGet('date'));
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $date = date('Y-m-d', strtotime('+1 day'));
+        }
 
         // SHIFT MC
         $shifts = $db->table('shifts')
@@ -132,12 +191,16 @@ class AssyShaftDailyScheduleController extends BaseController
     public function store()
     {
         $db    = db_connect();
-        $date  = (string)($this->request->getPost('date') ?? '');
+        $date  = trim((string)($this->request->getPost('date') ?? ''));
         $items = $this->request->getPost('items');
 
-        if (!$date || !$items || !is_array($items)) {
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !$items || !is_array($items)) {
             return redirect()->back()->with('error', 'Data tidak valid');
         }
+
+        // ✅ guard role + tanggal (redirect)
+        $deny = $this->guardScheduleDateByRoleRedirect($date);
+        if ($deny) return $deny;
 
         $assyProcessId = $this->getProcessIdByCodeOrName($db, 'AS', 'Assy Shaft');
         if ($assyProcessId <= 0) {
@@ -254,7 +317,12 @@ class AssyShaftDailyScheduleController extends BaseController
     public function incomingWip()
     {
         $db   = db_connect();
-        $date = (string)($this->request->getGet('date') ?? date('Y-m-d'));
+        $date = trim((string)($this->request->getGet('date') ?? ''));
+
+        // ✅ default besok jika kosong / invalid
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $date = date('Y-m-d', strtotime('+1 day'));
+        }
 
         try {
             if (!$db->tableExists('production_wip')) {
@@ -308,22 +376,26 @@ class AssyShaftDailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * ASSIGN INCOMING WIP (FOR MODAL)  ✅ FIXED
+     * ASSIGN INCOMING WIP (FOR MODAL)
      * ===================================================== */
     public function assignIncomingWip()
     {
         $db = db_connect();
 
-        $date      = (string)($this->request->getPost('date') ?? '');
+        $date      = trim((string)($this->request->getPost('date') ?? ''));
         $shiftId   = (int)($this->request->getPost('shift_id') ?? 0);
         $machineId = (int)($this->request->getPost('machine_id') ?? 0);
         $productId = (int)($this->request->getPost('product_id') ?? 0);
         $qtyAssign = (int)($this->request->getPost('qty') ?? 0);
         $wipId     = (int)($this->request->getPost('wip_id') ?? 0);
 
-        if (!$date || $shiftId <= 0 || $machineId <= 0 || $productId <= 0 || $qtyAssign <= 0 || $wipId <= 0) {
+        if ($date === '' || $shiftId <= 0 || $machineId <= 0 || $productId <= 0 || $qtyAssign <= 0 || $wipId <= 0) {
             return $this->response->setJSON(['status' => false, 'message' => 'Payload tidak lengkap']);
         }
+
+        // ✅ guard role + tanggal (JSON)
+        $deny = $this->guardScheduleDateByRoleJson($date);
+        if ($deny) return $deny;
 
         if (!$db->tableExists('production_wip')) {
             return $this->response->setJSON(['status' => false, 'message' => 'Tabel production_wip tidak ditemukan']);
@@ -339,11 +411,9 @@ class AssyShaftDailyScheduleController extends BaseController
         $hasQtyIn  = $db->fieldExists('qty_in', 'production_wip');
         $hasQtyOut = $db->fieldExists('qty_out', 'production_wip');
 
-        // ambil WIP sumber
         $wip = $db->table('production_wip')->where('id', $wipId)->get()->getRowArray();
         if (!$wip) return $this->response->setJSON(['status' => false, 'message' => 'WIP sumber tidak ditemukan']);
 
-        // validasi
         if ((int)($wip['to_process_id'] ?? 0) !== (int)$assyProcessId) {
             return $this->response->setJSON(['status' => false, 'message' => 'WIP ini bukan incoming Assy Shaft']);
         }
@@ -359,7 +429,6 @@ class AssyShaftDailyScheduleController extends BaseController
             return $this->response->setJSON(['status' => false, 'message' => 'from_process_id kosong']);
         }
 
-        // hitung available
         $avail = 0;
         if ($hasStock) $avail = (int)($wip['stock'] ?? 0);
         else if ($hasQtyIn) $avail = (int)($wip['qty_in'] ?? 0);
@@ -369,7 +438,6 @@ class AssyShaftDailyScheduleController extends BaseController
             return $this->response->setJSON(['status' => false, 'message' => "Qty melebihi available ({$avail})"]);
         }
 
-        // product master
         $product = $db->table('products')
             ->select('cycle_time, cavity, efficiency_rate')
             ->where('id', $productId)
@@ -390,10 +458,8 @@ class AssyShaftDailyScheduleController extends BaseController
 
         $db->transBegin();
         try {
-            // 1) daily_schedules
             $scheduleId = $this->getOrCreateDailySchedule($db, $date, $shiftId, 'Assy Shaft', $assyProcessId);
 
-            // 2) daily_schedule_items per machine (anti duplicate unique)
             $itemId = $this->upsertScheduleItemPerMachine(
                 $db,
                 $scheduleId,
@@ -409,7 +475,6 @@ class AssyShaftDailyScheduleController extends BaseController
                 ]
             );
 
-            // 3) kurangi WIP sumber (pool)
             $remaining = $avail - $qtyAssign;
 
             $wipUpd = [
@@ -430,7 +495,6 @@ class AssyShaftDailyScheduleController extends BaseController
                 throw new \Exception($err['message'] ?? 'Gagal update WIP sumber');
             }
 
-            // 4) buat WIP assigned inbound (row SCHEDULED untuk schedule item)
             $assignedBase = [
                 $wipDateCol       => $date,
                 'product_id'      => $productId,
@@ -446,7 +510,6 @@ class AssyShaftDailyScheduleController extends BaseController
             $this->upsertWipSafeGeneric($db, $assignedBase, $assignedData, 'daily_schedule_items', $itemId);
             $this->upsertWipSafeGeneric($db, $assignedBase, $assignedData, 'daily_schedules', $scheduleId);
 
-            // 5) pastikan outbound AS->NEXT minimal ada
             $pn = $this->resolvePrevNextBySequence($db, $productId, $assyProcessId);
             if (!empty($pn['next'])) {
                 $baseOut = [
@@ -484,15 +547,12 @@ class AssyShaftDailyScheduleController extends BaseController
             ]);
         } catch (\Throwable $e) {
             $db->transRollback();
-            return $this->response->setJSON([
-                'status'  => false,
-                'message' => $e->getMessage()
-            ]);
+            return $this->response->setJSON(['status' => false, 'message' => $e->getMessage()]);
         }
     }
 
     /* =====================================================
-     * HELPERS
+     * HELPERS (tetap sama seperti punyamu)
      * ===================================================== */
 
     private function tableHas($db, string $table, string $field): bool
@@ -511,23 +571,14 @@ class AssyShaftDailyScheduleController extends BaseController
     private function getProcessIdByCodeOrName($db, ?string $code, string $nameExactOrLike): int
     {
         if ($code && $db->fieldExists('process_code', 'production_processes')) {
-            $row = $db->table('production_processes')
-                ->select('id')
-                ->where('process_code', $code)
-                ->get()->getRowArray();
+            $row = $db->table('production_processes')->select('id')->where('process_code', $code)->get()->getRowArray();
             if (!empty($row['id'])) return (int)$row['id'];
         }
 
-        $row = $db->table('production_processes')
-            ->select('id')
-            ->where('process_name', $nameExactOrLike)
-            ->get()->getRowArray();
+        $row = $db->table('production_processes')->select('id')->where('process_name', $nameExactOrLike)->get()->getRowArray();
         if (!empty($row['id'])) return (int)$row['id'];
 
-        $row = $db->table('production_processes')
-            ->select('id')
-            ->like('process_name', $nameExactOrLike)
-            ->get()->getRowArray();
+        $row = $db->table('production_processes')->select('id')->like('process_name', $nameExactOrLike)->get()->getRowArray();
         if (!empty($row['id'])) return (int)$row['id'];
 
         return 0;
@@ -620,7 +671,6 @@ class AssyShaftDailyScheduleController extends BaseController
 
         $scheduleId = (int)$schedule['id'];
 
-        // canonicalize + backfill process_id
         $upd = [];
         if ((string)($schedule['section'] ?? '') !== $sectionName) $upd['section'] = $sectionName;
         if ($db->fieldExists('process_id', 'daily_schedules') && empty($schedule['process_id'])) $upd['process_id'] = $processId;
@@ -633,24 +683,14 @@ class AssyShaftDailyScheduleController extends BaseController
         return $scheduleId;
     }
 
-    /**
-     * 1 mesin 1 baris, anti duplicate unique (merge/delete jika ada dup)
-     */
-    private function upsertScheduleItemPerMachine(
-        $db,
-        int $scheduleId,
-        int $shiftId,
-        int $machineId,
-        int $productId,
-        array $dataItem
-    ): int {
+    private function upsertScheduleItemPerMachine($db, int $scheduleId, int $shiftId, int $machineId, int $productId, array $dataItem): int
+    {
         $exist = $db->table('daily_schedule_items')
             ->where([
                 'daily_schedule_id' => $scheduleId,
                 'machine_id'        => $machineId,
             ])->get()->getRowArray();
 
-        // kalau exist tapi product beda, cek apakah sudah ada row dup untuk productId tsb
         if ($exist && (int)($exist['product_id'] ?? 0) !== $productId) {
             $dup = $db->table('daily_schedule_items')
                 ->where([
@@ -660,7 +700,6 @@ class AssyShaftDailyScheduleController extends BaseController
                 ])->get()->getRowArray();
 
             if ($dup) {
-                // hapus row lama, pakai dup (hindari unique constraint)
                 $db->table('daily_schedule_items')->where('id', (int)$exist['id'])->delete();
                 $exist = $dup;
             }
@@ -713,7 +752,6 @@ class AssyShaftDailyScheduleController extends BaseController
             'qty'    => $qtyPlan,
         ];
 
-        // updated_at hanya jika kolom ada
         if ($db->fieldExists('updated_at', 'production_wip')) {
             $data['updated_at'] = date('Y-m-d H:i:s');
         }
@@ -756,18 +794,12 @@ class AssyShaftDailyScheduleController extends BaseController
                 if ($opt2 === $want2) return $opt;
             }
 
-            // tidak ada dalam enum -> jangan set, biar tidak error
             return null;
         } catch (\Throwable $e) {
             return $value;
         }
     }
 
-    /**
-     * Upsert WIP safe:
-     * - jika source_table/source_id ada, kita WAJIB pakai fullKey (tidak fallback overwrite baseKey)
-     * - fallback baseKey hanya jika schema memang tidak punya source_table/source_id
-     */
     private function upsertWipSafeGeneric($db, array $baseKey, array $data, ?string $sourceTable, ?int $sourceId): void
     {
         if (!$db->tableExists('production_wip')) return;
@@ -782,7 +814,6 @@ class AssyShaftDailyScheduleController extends BaseController
         $fullKey = $baseKey;
         $payload = $data;
 
-        // pastikan tidak memasukkan updated_at jika kolom tidak ada
         if (!$hasUpdatedAt && isset($payload['updated_at'])) unset($payload['updated_at']);
         if ($hasUpdatedAt) $payload['updated_at'] = $now;
 
@@ -799,7 +830,6 @@ class AssyShaftDailyScheduleController extends BaseController
             $payload['source_id'] = $sourceId;
         }
 
-        // 1) update by fullKey
         $exist = $db->table('production_wip')->where($fullKey)->get()->getRowArray();
         if ($exist) {
             if ($db->table('production_wip')->where('id', (int)$exist['id'])->update($payload) === false) {
@@ -809,7 +839,6 @@ class AssyShaftDailyScheduleController extends BaseController
             return;
         }
 
-        // 2) insert fullKey
         $insert = $fullKey + $payload;
         if ($hasCreatedAt) $insert['created_at'] = $now;
 
@@ -820,7 +849,6 @@ class AssyShaftDailyScheduleController extends BaseController
             }
             return;
         } catch (\Throwable $e) {
-            // fallback update baseKey HANYA jika schema memang tidak support source columns
             if (!($hasSourceTable && $hasSourceId)) {
                 $exist2 = $db->table('production_wip')->where($baseKey)->get()->getRowArray();
                 if ($exist2) {

@@ -22,6 +22,16 @@
                     <input name="shift_code" class="form-control" required placeholder="contoh: 1 / 2 / 3">
                 </div>
 
+                <div class="col-md-3">
+                    <label class="form-label">Day Group</label>
+                    <select name="day_group" class="form-select" required>
+                        <?php foreach ($dayGroups as $val => $label): ?>
+                            <option value="<?= esc($val) ?>"><?= esc($label) ?></option>
+                        <?php endforeach ?>
+                    </select>
+                </div>
+
+
                 <div class="col-md-9">
                     <label class="form-label">Shift Name</label>
                     <input name="shift_name" class="form-control" required placeholder="contoh: Shift 1 MC (Mon-Thu)">

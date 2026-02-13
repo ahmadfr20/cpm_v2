@@ -1,8 +1,16 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
+
+<?php if (session()->getFlashdata('error')) : ?>
+  <div class="alert alert-danger" role="alert">
+    <?= esc(session()->getFlashdata('error')) ?>
+  </div>
+<?php endif; ?>
+
 <h3>Welcome, <?= esc($fullname) ?> 👋</h3>
 <p class="text-muted">Silakan pilih menu dashboard</p>
+
 
 <div class="row mt-4">
     <div class="col-md-4">

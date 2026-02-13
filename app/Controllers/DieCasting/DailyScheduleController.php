@@ -12,8 +12,10 @@ class DailyScheduleController extends BaseController
     public function index()
     {
         $db   = db_connect();
-        $date = $this->request->getGet('date') ?? date('Y-m-d');
-
+        $date = $this->request->getGet('date');
+        if (empty($date)) {
+            $date = date('Y-m-d', strtotime('+1 day'));
+        }
         // SHIFT Die Casting (DC)
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
@@ -123,6 +125,7 @@ class DailyScheduleController extends BaseController
                 p.id,
                 p.part_no,
                 p.part_name,
+                p.part_prod,
                 p.weight_ascas,
                 p.weight_runner,
                 p.cycle_time,
@@ -317,8 +320,30 @@ class DailyScheduleController extends BaseController
             return redirect()->back()->with('error', 'Tidak ada data');
         }
 
-        $today = date('Y-m-d');
-        $now   = date('Y-m-d H:i:s');
+        // =====================================================
+        // ✅ RULE ROLE + TANGGAL
+        // ADMIN boleh hari ini, non-admin hanya boleh besok dst
+        // =====================================================
+        $role  = session()->get('role') ?? '';
+        $today = date('Y-m-d'); // pastikan App timezone = Asia/Jakarta
+
+        // ambil tanggal dari salah satu row (semua row harusnya sama)
+        $firstRow = reset($items);
+        $formDate = isset($firstRow['date']) ? trim((string)$firstRow['date']) : '';
+
+        if ($formDate === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $formDate)) {
+            return redirect()->back()->with('error', 'Tanggal schedule tidak valid.');
+        }
+
+        // non-admin tidak boleh hari ini atau tanggal lampau
+        if ($role !== 'ADMIN' && $formDate <= $today) {
+            return redirect()->back()->with(
+                'error',
+                'Hanya ADMIN yang boleh membuat schedule untuk hari ini. Selain ADMIN hanya boleh membuat schedule mulai besok.'
+            );
+        }
+
+        $now = date('Y-m-d H:i:s');
 
         $db->transBegin();
         try {
@@ -328,17 +353,24 @@ class DailyScheduleController extends BaseController
              * Kumpulkan item untuk daily_schedules per (date, shift)
              * Struktur:
              *  $dailyGroup["{$date}_{$shiftId}"] = [
-             *     'date'=>..., 'shift_id'=>..., 'header_id'=>0, 'items'=>[]
+             *     'date'=>..., 'shift_id'=>..., 'items'=>[]
              *  ]
              */
             $dailyGroup = [];
 
             foreach ($items as $row) {
-                if (empty($row['date']) || empty($row['shift_id']) || empty($row['machine_id'])) continue;
+                if (empty($row['date']) || empty($row['shift_id']) || empty($row['machine_id'])) {
+                    continue;
+                }
 
-                $date      = (string)$row['date'];
+                $date      = trim((string)$row['date']);
                 $shiftId   = (int)$row['shift_id'];
                 $machineId = (int)$row['machine_id'];
+
+                // Hard-guard: pastikan semua row tetap pakai tanggal yg sama (opsional tapi aman)
+                if ($date !== $formDate) {
+                    continue;
+                }
 
                 $productId = (int)($row['product_id'] ?? 0);
                 $qtyP      = (int)($row['qty_p'] ?? 0);
@@ -473,7 +505,9 @@ class DailyScheduleController extends BaseController
                 $this->rebuildDailyScheduleItems($db, $headerId, $itemsToInsert);
             }
 
-            if ($db->transStatus() === false) throw new \Exception('DB error');
+            if ($db->transStatus() === false) {
+                throw new \Exception('DB error');
+            }
 
             $db->transCommit();
             return redirect()->back()->with('success', 'Schedule DC tersimpan + Daily Schedules & Items ter-update.');
@@ -482,6 +516,7 @@ class DailyScheduleController extends BaseController
             return redirect()->back()->with('error', $e->getMessage());
         }
     }
+
 
     /* =====================================================
      * FINISH SHIFT

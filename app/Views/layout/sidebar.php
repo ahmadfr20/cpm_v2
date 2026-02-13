@@ -38,6 +38,7 @@ function isActive($path, $currentUrl)
 
     <div class="collapse <?= isActive('master',$currentUrl)?'show':'' ?>" id="menuMaster">
         <ul class="nav flex-column ms-3">
+            <li><a class="nav-link <?= isActive('master/user',$currentUrl)?'active':'' ?>" href="/master/user">Manage Users</a></li>
             <li><a class="nav-link <?= isActive('master/shift',$currentUrl)?'active':'' ?>" href="/master/shift">Shift</a></li>
             <li><a class="nav-link <?= isActive('master/time-slot',$currentUrl)?'active':'' ?>" href="/master/time-slot">Time Slot</a></li>
             <li><a class="nav-link <?= isActive('master/product',$currentUrl)?'active':'' ?>" href="/master/product">Product</a></li>
@@ -45,6 +46,8 @@ function isActive($path, $currentUrl)
             <li><a class="nav-link <?= isActive('master/production-standard',$currentUrl)?'active':'' ?>" href="/master/production-standard">Production Standard</a></li>
             <li><a class="nav-link <?= isActive('master/production-flow',$currentUrl)?'active':'' ?>" href="/master/production-flow">Production Flow</a></li>
             <li><a class="nav-link <?= isActive('master/customer',$currentUrl)?'active':'' ?>" href="/master/customer">Customer</a></li>
+            <li><a class="nav-link <?= isActive('master/vendor',$currentUrl)?'active':'' ?>" href="/master/vendor">Vendor</a></li>
+            <li><a class="nav-link <?= isActive('master/ng-categories',$currentUrl)?'active':'' ?>" href="/master/ng-categories">NG Categories</a></li>
         </ul>
     </div>
 </li>
@@ -205,7 +208,7 @@ function isActive($path, $currentUrl)
 
 <li class="nav-item mt-3">
     <a class="nav-link <?= $currentUrl === 'qc' ? 'active' : '' ?>"
-       href="#">
+       href="final-inspection/daily-production">
         <i class="bi bi-hand-thumbs-up me-2"></i> QC
     </a>
 </li>

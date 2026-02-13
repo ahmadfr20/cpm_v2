@@ -6,10 +6,69 @@ use App\Controllers\BaseController;
 
 class LeakTestDailyScheduleController extends BaseController
 {
+    /* =====================================================
+     * ✅ GUARD: role & tanggal (untuk endpoint JSON)
+     * - ADMIN: boleh hari ini
+     * - selain ADMIN: hanya boleh besok dst (date > today)
+     * ===================================================== */
+    private function guardScheduleDateByRoleJson(string $date): ?\CodeIgniter\HTTP\ResponseInterface
+    {
+        $role = session()->get('role') ?? '';
+
+        $d = \DateTime::createFromFormat('Y-m-d', $date);
+        if (!$d) {
+            return $this->response->setJSON(['status' => false, 'message' => 'Format tanggal tidak valid']);
+        }
+        $d->setTime(0, 0, 0);
+
+        $today = new \DateTime(date('Y-m-d'));
+        $today->setTime(0, 0, 0);
+
+        if ($role !== 'ADMIN' && $d <= $today) {
+            return $this->response->setJSON([
+                'status'  => false,
+                'message' => 'Hanya ADMIN yang boleh membuat schedule untuk hari ini. Selain ADMIN hanya boleh mulai besok.'
+            ]);
+        }
+
+        return null;
+    }
+
+    /* =====================================================
+     * ✅ GUARD: role & tanggal (untuk endpoint redirect)
+     * ===================================================== */
+    private function guardScheduleDateByRoleRedirect(string $date)
+    {
+        $role = session()->get('role') ?? '';
+
+        $d = \DateTime::createFromFormat('Y-m-d', $date);
+        if (!$d) {
+            return redirect()->back()->with('error', 'Format tanggal tidak valid');
+        }
+        $d->setTime(0, 0, 0);
+
+        $today = new \DateTime(date('Y-m-d'));
+        $today->setTime(0, 0, 0);
+
+        if ($role !== 'ADMIN' && $d <= $today) {
+            return redirect()->back()->with(
+                'error',
+                'Hanya ADMIN yang boleh membuat schedule untuk hari ini. Selain ADMIN hanya boleh mulai besok.'
+            );
+        }
+
+        return null;
+    }
+
     public function index()
     {
-        $db   = db_connect();
-        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        $db = db_connect();
+
+        // ✅ default besok jika date kosong / invalid
+        $date = trim((string)$this->request->getGet('date'));
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            $date = date('Y-m-d', strtotime('+1 day'));
+        }
 
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
@@ -58,7 +117,7 @@ class LeakTestDailyScheduleController extends BaseController
         ]);
     }
 
-        /**
+    /**
      * Detect kolom tanggal yang dipakai di production_wip
      */
     private function detectWipDateColumn($db): string
@@ -157,11 +216,6 @@ class LeakTestDailyScheduleController extends BaseController
     /**
      * POST /machining/leak-test/schedule/assign-incoming-wip
      * Payload: date, shift_id, machine_id, product_id, qty, wip_id
-     *
-     * - Upsert daily_schedules (section Leak Test)
-     * - Upsert daily_schedule_items (product + target_per_shift=qty)
-     * - Buat/Update WIP inbound untuk schedule (source_table daily_schedule_items)
-     * - Kurangi available dari WIP incoming (wip_id)
      */
     public function assignIncomingWip()
     {
@@ -177,6 +231,10 @@ class LeakTestDailyScheduleController extends BaseController
         if ($date === '' || $shiftId <= 0 || $machineId <= 0 || $productId <= 0 || $qty <= 0 || $wipId <= 0) {
             return $this->response->setJSON(['status' => false, 'message' => 'Data tidak lengkap']);
         }
+
+        // ✅ guard role + tanggal (JSON)
+        $deny = $this->guardScheduleDateByRoleJson($date);
+        if ($deny) return $deny;
 
         $db->transBegin();
 
@@ -270,7 +328,7 @@ class LeakTestDailyScheduleController extends BaseController
                 'cycle_time'        => $cycle,
                 'cavity'            => $cavity,
                 'target_per_hour'   => $targetPerHour,
-                'target_per_shift'  => min($qty, 1200), // plan dari incoming
+                'target_per_shift'  => min($qty, 1200),
             ];
             if ($db->fieldExists('is_selected', 'daily_schedule_items')) $dataItem['is_selected'] = 1;
 
@@ -313,7 +371,6 @@ class LeakTestDailyScheduleController extends BaseController
             }
 
             // 6) kurangi available dari WIP incoming (wip_id)
-            // kurangi dari stock kalau ada & >0, else dari qty_in, else qty
             $updIncoming = [];
             if ($hasStock && $curStock > 0) {
                 $newStock = max(0, $curStock - $qty);
@@ -343,13 +400,6 @@ class LeakTestDailyScheduleController extends BaseController
         }
     }
 
-
-    /**
-     * AJAX: PRODUCT + TARGET
-     * ✅ Produk hanya yang punya flow (product_process_flows) untuk process Leak Test
-     * ✅ Aman dari mismatch "LEAK TEST" vs "Leak Test"
-     * ✅ Kalau error, tetap return JSON (bukan HTML) agar UI tidak blank
-     */
     public function getProductAndTarget()
     {
         $db        = db_connect();
@@ -361,17 +411,14 @@ class LeakTestDailyScheduleController extends BaseController
         }
 
         try {
-            // ✅ Paling aman: pakai process_code LT
             $leakTestProcessId = $this->getProcessIdByCode($db, 'LT');
             if (!$leakTestProcessId) {
-                // fallback by name (case insensitive)
                 $leakTestProcessId = $this->getProcessIdByNameLike($db, 'LEAK TEST');
             }
             if (!$leakTestProcessId) {
                 return $this->jsonFail('Process Leak Test tidak ditemukan (cek production_processes)', 404);
             }
 
-            // total detik shift
             $slots = $db->table('shift_time_slots sts')
                 ->select('ts.time_start, ts.time_end')
                 ->join('time_slots ts', 'ts.id = sts.time_slot_id')
@@ -386,10 +433,6 @@ class LeakTestDailyScheduleController extends BaseController
                 $totalSecond += ($end - $start);
             }
 
-            /**
-             * 1) Prioritas: produk yang terdaftar di machine_products
-             * + wajib ada flow Leak Test (product_process_flows)
-             */
             $products = $db->table('machine_products mp')
                 ->distinct()
                 ->select('p.id, p.part_no, p.part_name, p.cycle_time, p.cavity, p.efficiency_rate')
@@ -402,10 +445,6 @@ class LeakTestDailyScheduleController extends BaseController
                 ->orderBy('p.part_no')
                 ->get()->getResultArray();
 
-            /**
-             * 2) Fallback: kalau machine_products kosong,
-             * tampilkan semua produk yang punya flow Leak Test
-             */
             if (empty($products)) {
                 $products = $db->table('products p')
                     ->distinct()
@@ -435,24 +474,23 @@ class LeakTestDailyScheduleController extends BaseController
             ]);
 
         } catch (\Throwable $e) {
-            // ✅ supaya FE tidak dapat HTML error (yang bikin JSON parse gagal)
             return $this->jsonFail('Server error: ' . $e->getMessage(), 500);
         }
     }
 
-    /**
-     * STORE (SCHEDULE + WIP) — tetap seperti sebelumnya,
-     * tapi process id leak test pakai code LT agar match DB kamu.
-     */
     public function store()
     {
         $db    = db_connect();
-        $date  = (string)($this->request->getPost('date') ?? '');
+        $date  = trim((string)($this->request->getPost('date') ?? ''));
         $items = $this->request->getPost('items');
 
-        if ($date === '' || !$items || !is_array($items)) {
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !$items || !is_array($items)) {
             return redirect()->back()->with('error', 'Data tidak valid');
         }
+
+        // ✅ guard role + tanggal (redirect)
+        $deny = $this->guardScheduleDateByRoleRedirect($date);
+        if ($deny) return $deny;
 
         $db->transBegin();
 
@@ -471,17 +509,13 @@ class LeakTestDailyScheduleController extends BaseController
                 $machineId = (int)($row['machine_id'] ?? 0);
                 $productId = (int)($row['product_id'] ?? 0);
 
-                if ($shiftId <= 0 || $machineId <= 0 || $productId <= 0) {
-                    continue;
-                }
+                if ($shiftId <= 0 || $machineId <= 0 || $productId <= 0) continue;
 
-                // ✅ qty P dari input (support beberapa kemungkinan key)
                 $planQty = (int)($row['plan'] ?? $row['qty_p'] ?? $row['qtyP'] ?? $row['target_per_shift'] ?? 0);
                 if ($planQty < 0) $planQty = 0;
                 if ($planQty > 1200) $planQty = 1200;
                 if ($planQty <= 0) continue;
 
-                // ✅ wajib punya flow Leak Test aktif
                 $hasFlow = $db->table('product_process_flows')
                     ->where([
                         'product_id' => $productId,
@@ -492,13 +526,10 @@ class LeakTestDailyScheduleController extends BaseController
 
                 if (!$hasFlow) continue;
 
-                // master product
                 $product = $db->table('products')
                     ->select('cycle_time, cavity, efficiency_rate')
                     ->where('id', $productId)
-                    ->get()
-                    ->getRowArray();
-
+                    ->get()->getRowArray();
                 if (!$product) continue;
 
                 $cycle  = (int)($product['cycle_time'] ?? 0);
@@ -510,15 +541,13 @@ class LeakTestDailyScheduleController extends BaseController
 
                 $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
 
-                // ===== DAILY SCHEDULE HEADER =====
                 $schedule = $db->table('daily_schedules')
                     ->where([
                         'schedule_date' => $date,
                         'shift_id'      => $shiftId,
-                        'section'       => 'Leak Test', // samakan dengan index kamu
+                        'section'       => 'Leak Test',
                     ])
-                    ->get()
-                    ->getRowArray();
+                    ->get()->getRowArray();
 
                 if (!$schedule) {
                     $header = [
@@ -536,7 +565,6 @@ class LeakTestDailyScheduleController extends BaseController
                 } else {
                     $scheduleId = (int)$schedule['id'];
 
-                    // backfill process_id bila kosong
                     if ($db->fieldExists('process_id', 'daily_schedules') && empty($schedule['process_id'])) {
                         $upd = ['process_id' => $leakTestProcessId];
                         if ($db->fieldExists('updated_at', 'daily_schedules')) $upd['updated_at'] = $now;
@@ -544,14 +572,12 @@ class LeakTestDailyScheduleController extends BaseController
                     }
                 }
 
-                // ===== DAILY SCHEDULE ITEM UPSERT =====
                 $existItem = $db->table('daily_schedule_items')
                     ->where([
                         'daily_schedule_id' => $scheduleId,
                         'machine_id'        => $machineId,
                     ])
-                    ->get()
-                    ->getRowArray();
+                    ->get()->getRowArray();
 
                 $dataItem = [
                     'daily_schedule_id' => $scheduleId,
@@ -561,7 +587,6 @@ class LeakTestDailyScheduleController extends BaseController
                     'cycle_time'        => $cycle,
                     'cavity'            => $cavity,
                     'target_per_hour'   => $targetPerHour,
-                    // ✅ simpan plan input (qty P) ke target_per_shift
                     'target_per_shift'  => $planQty,
                 ];
                 if ($db->fieldExists('is_selected', 'daily_schedule_items')) $dataItem['is_selected'] = 1;
@@ -579,10 +604,12 @@ class LeakTestDailyScheduleController extends BaseController
                 if (empty($flow['sequence'])) continue;
 
                 $prevProcessId = (int)($flow['prev'] ?? 0);
-                if ($prevProcessId <= 0) continue; // kalau LT proses pertama, tidak ada inbound
+                if ($prevProcessId <= 0) continue;
+
+                $wipDateCol = $this->detectWipDateColumn($db);
 
                 $key = [
-                    'production_date' => $date,
+                    $wipDateCol       => $date,
                     'product_id'      => $productId,
                     'from_process_id' => $prevProcessId,
                     'to_process_id'   => $leakTestProcessId,
@@ -592,17 +619,15 @@ class LeakTestDailyScheduleController extends BaseController
 
                 $payload = [
                     'status' => 'SCHEDULED',
-                    'qty'    => $planQty, // legacy qty ikut plan
+                    'qty'    => $planQty,
                 ];
-
-                if ($db->fieldExists('qty_in', 'production_wip'))  $payload['qty_in']  = $planQty; // ✅ FIX: dari qty P
+                if ($db->fieldExists('qty_in', 'production_wip'))  $payload['qty_in']  = $planQty;
                 if ($db->fieldExists('qty_out', 'production_wip')) $payload['qty_out'] = 0;
-                if ($db->fieldExists('stock', 'production_wip'))   $payload['stock']   = 0; // schedule tidak menambah stock
+                if ($db->fieldExists('stock', 'production_wip'))   $payload['stock']   = 0;
                 if ($db->fieldExists('updated_at', 'production_wip')) $payload['updated_at'] = $now;
 
                 $existWip = $db->table('production_wip')->where($key)->get()->getRowArray();
                 if ($existWip) {
-                    // jangan overwrite DONE
                     if (($existWip['status'] ?? '') !== 'DONE') {
                         $db->table('production_wip')->where('id', (int)$existWip['id'])->update($payload);
                     }
@@ -615,14 +640,13 @@ class LeakTestDailyScheduleController extends BaseController
             if ($db->transStatus() === false) throw new \Exception('DB error');
 
             $db->transCommit();
-            return redirect()->back()->with('success', 'Daily schedule Leak Test tersimpan. qty_in WIP mengikuti qty P (plan).');
+            return redirect()->back()->with('success', 'Daily schedule Leak Test tersimpan. Non-admin hanya boleh mulai besok.');
 
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
         }
     }
-
 
     // ======================= HELPERS =======================
 
