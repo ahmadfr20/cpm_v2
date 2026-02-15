@@ -2,11 +2,9 @@
 <?= $this->section('content') ?>
 
 <style>
-  /* ✅ modal tidak ketutup navbar + lebar */
   .modal .modal-dialog{ max-width: 760px; margin-top: 90px !important; }
   @media (max-width: 768px){ .modal .modal-dialog{ margin-top: 70px !important; } }
 
-  /* ✅ body modal scroll, footer sticky */
   .modal .modal-content{ max-height: calc(100vh - 120px); }
   .modal .modal-body{ overflow: auto; padding-bottom: 12px; }
   .modal .modal-footer{
@@ -17,10 +15,8 @@
     border-top: 1px solid rgba(0,0,0,.1);
   }
 
-  /* ✅ form rata kiri */
   .modal .form-wrap{ max-width: 680px; margin-left: 0; margin-right: auto; }
 
-  /* ✅ struktur label kiri, input kanan (seperti product master) */
   .form-grid .row-item{
     display: grid;
     grid-template-columns: 220px 1fr;
@@ -81,7 +77,7 @@
         <input type="text"
                name="keyword"
                class="form-control"
-               placeholder="contoh: VEN-0001 / PT ABC"
+               placeholder="contoh: VEND-1 / ACC-001 / PT ABC"
                value="<?= esc($keyword ?? '') ?>">
       </div>
 
@@ -116,7 +112,8 @@
         <thead class="table-light">
           <tr>
             <th style="width: 70px;">No</th>
-            <th style="width: 180px;">Vendor Code</th>
+            <th style="width: 160px;">Vendor Code App</th>
+            <th style="width: 180px;">Vendor Code (Accurate)</th>
             <th>Vendor Name</th>
             <th style="width: 140px;">Status</th>
             <th style="width: 190px;" class="text-end">Aksi</th>
@@ -125,7 +122,7 @@
         <tbody>
           <?php if (empty($vendors)): ?>
             <tr>
-              <td colspan="5" class="text-center py-4 text-muted">Data vendor belum tersedia</td>
+              <td colspan="6" class="text-center py-4 text-muted">Data vendor belum tersedia</td>
             </tr>
           <?php else: ?>
             <?php
@@ -136,8 +133,9 @@
             <?php foreach ($vendors as $v): ?>
               <tr>
                 <td><?= $no++ ?></td>
-                <td class="fw-semibold"><?= esc($v['vendor_code']) ?></td>
-                <td><?= esc($v['vendor_name']) ?></td>
+                <td class="fw-semibold"><?= esc($v['vendor_code_app'] ?? '-') ?></td>
+                <td><?= esc($v['vendor_code'] ?? '-') ?></td>
+                <td><?= esc($v['vendor_name'] ?? '-') ?></td>
                 <td>
                   <?php if ((int)($v['is_active'] ?? 1) === 1): ?>
                     <span class="badge bg-success">Aktif</span>
@@ -151,6 +149,7 @@
                           data-bs-toggle="modal"
                           data-bs-target="#modalEditVendor"
                           data-id="<?= esc($v['id'], 'attr') ?>"
+                          data-vendor_code_app="<?= esc($v['vendor_code_app'] ?? '', 'attr') ?>"
                           data-vendor_code="<?= esc($v['vendor_code'] ?? '', 'attr') ?>"
                           data-vendor_name="<?= esc($v['vendor_name'] ?? '', 'attr') ?>"
                           data-is_active="<?= esc($v['is_active'] ?? 1, 'attr') ?>">
@@ -191,13 +190,19 @@
         <div class="modal-header">
           <div>
             <h5 class="modal-title mb-0">Tambah Vendor</h5>
-            <small class="text-muted">Vendor Code otomatis: VEN-0001, VEN-0002, dst.</small>
+            <small class="text-muted">Vendor Code App otomatis: VEND-1, VEND-2, dst.</small>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
 
         <div class="modal-body">
           <div class="form-wrap form-grid">
+
+            <div class="row-item">
+              <label>Vendor Code (Accurate) <span class="text-danger">*</span></label>
+              <input type="text" name="vendor_code" class="form-control" required
+                     placeholder="Kode dari Accurate (bebas)">
+            </div>
 
             <div class="row-item">
               <label>Vendor Name <span class="text-danger">*</span></label>
@@ -240,7 +245,7 @@
         <div class="modal-header">
           <div>
             <h5 class="modal-title mb-0">Edit Vendor</h5>
-            <small class="text-muted">Vendor Code tidak bisa diubah</small>
+            <small class="text-muted">Vendor Code App tidak bisa diubah</small>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
@@ -249,8 +254,13 @@
           <div class="form-wrap form-grid">
 
             <div class="row-item">
-              <label>Vendor Code</label>
-              <input type="text" id="edit_vendor_code" class="form-control" readonly>
+              <label>Vendor Code App</label>
+              <input type="text" id="edit_vendor_code_app" class="form-control" readonly>
+            </div>
+
+            <div class="row-item">
+              <label>Vendor Code (Accurate) <span class="text-danger">*</span></label>
+              <input type="text" name="vendor_code" id="edit_vendor_code" class="form-control" required>
             </div>
 
             <div class="row-item">
@@ -287,11 +297,13 @@
   modalEditVendor.addEventListener('show.bs.modal', function (event) {
     const button = event.relatedTarget;
 
-    const id          = button.getAttribute('data-id');
-    const vendor_code = button.getAttribute('data-vendor_code');
-    const vendor_name = button.getAttribute('data-vendor_name');
-    const is_active   = button.getAttribute('data-is_active');
+    const id             = button.getAttribute('data-id');
+    const vendor_code_app= button.getAttribute('data-vendor_code_app');
+    const vendor_code    = button.getAttribute('data-vendor_code');
+    const vendor_name    = button.getAttribute('data-vendor_name');
+    const is_active      = button.getAttribute('data-is_active');
 
+    document.getElementById('edit_vendor_code_app').value = vendor_code_app || '';
     document.getElementById('edit_vendor_code').value = vendor_code || '';
     document.getElementById('edit_vendor_name').value = vendor_name || '';
     document.getElementById('edit_is_active').value = (is_active ?? '1');

@@ -467,10 +467,164 @@ class LeakTestDailyScheduleController extends BaseController
     /* =====================================================
      * STORE (punya kamu, tidak diubah)
      * ===================================================== */
-    public function store()
+       public function store()
     {
-        // pakai store kamu yang terakhir (yang delta reserve/transfer/incoming),
-        // tidak aku utak-atik karena fokus perbaikan ada di produk tidak tampil.
-        return redirect()->back()->with('error', 'Tempelkan isi store kamu yang terakhir di sini (tidak perlu diubah).');
+        $db    = db_connect();
+        $date  = trim((string)($this->request->getPost('date') ?? ''));
+        $items = $this->request->getPost('items');
+
+        if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !$items || !is_array($items)) {
+            return redirect()->back()->with('error', 'Data tidak valid');
+        }
+
+        $deny = $this->guardScheduleDateByRoleRedirect($date);
+        if ($deny) return $deny;
+
+        $processIdLT = $this->getProcessIdLeakTest($db);
+        $now = date('Y-m-d H:i:s');
+
+        $db->transBegin();
+        try {
+            foreach ($items as $row) {
+                $shiftId   = (int)($row['shift_id'] ?? 0);
+                $machineId = (int)($row['machine_id'] ?? 0);
+                $productId = (int)($row['product_id'] ?? 0);
+
+                if ($shiftId <= 0 || $machineId <= 0) continue;
+
+                $planInput = (int)($row['plan'] ?? 0);
+                if ($planInput < 0) $planInput = 0;
+                if ($planInput > 1200) $planInput = 1200;
+
+                if ($productId <= 0) continue;
+
+                if (!$this->validateProductHasFlow($db, $productId, $processIdLT)) {
+                    throw new \Exception("Product ID {$productId} tidak punya flow Leak Test aktif.");
+                }
+
+                // ===== header daily_schedules =====
+                $schedule = $db->table('daily_schedules')
+                    ->where([
+                        'schedule_date' => $date,
+                        'shift_id'      => $shiftId,
+                        'section'       => 'Leak Test',
+                    ])
+                    ->get()->getRowArray();
+
+                if (!$schedule) {
+                    $header = [
+                        'schedule_date' => $date,
+                        'shift_id'      => $shiftId,
+                        'section'       => 'Leak Test',
+                        'is_completed'  => 0,
+                        'created_at'    => $now,
+                    ];
+                    if ($db->fieldExists('process_id', 'daily_schedules')) $header['process_id'] = $processIdLT;
+                    if ($db->fieldExists('updated_at', 'daily_schedules')) $header['updated_at'] = $now;
+
+                    $db->table('daily_schedules')->insert($header);
+                    $scheduleId = (int)$db->insertID();
+                } else {
+                    $scheduleId = (int)$schedule['id'];
+                    if ($db->fieldExists('process_id', 'daily_schedules') && empty($schedule['process_id'])) {
+                        $upd = ['process_id' => $processIdLT];
+                        if ($db->fieldExists('updated_at', 'daily_schedules')) $upd['updated_at'] = $now;
+                        $db->table('daily_schedules')->where('id', $scheduleId)->update($upd);
+                    }
+                }
+
+                // ===== cek item lama (delta) =====
+                $existItem = $db->table('daily_schedule_items')
+                    ->where([
+                        'daily_schedule_id' => $scheduleId,
+                        'machine_id'        => $machineId,
+                    ])
+                    ->get()->getRowArray();
+
+                $oldProductId = $existItem ? (int)($existItem['product_id'] ?? 0) : 0;
+                $oldPlan      = $existItem ? (int)($existItem['target_per_shift'] ?? 0) : 0;
+
+                $prevProcessIdNew = $this->resolvePrevProcessByFlow($db, $productId, $processIdLT);
+
+                // release old jika product diganti
+                if ($existItem && $oldProductId > 0 && $oldProductId !== $productId) {
+                    $prevOld = $this->resolvePrevProcessByFlow($db, $oldProductId, $processIdLT);
+                    if ($prevOld && $oldPlan > 0) {
+                        $this->applyPrevReserveToNext($db, $date, $oldProductId, $prevOld, -$oldPlan);
+                        $this->upsertIncomingWipForLeakTest($db, $date, $oldProductId, $prevOld, $processIdLT, (int)$existItem['id'], -$oldPlan);
+                    }
+                    $oldPlan = 0;
+                }
+
+                // master product
+                $product = $db->table('products')
+                    ->select('cycle_time, cavity, efficiency_rate')
+                    ->where('id', $productId)
+                    ->get()->getRowArray();
+
+                if (!$product) throw new \Exception("Product ID {$productId} tidak ditemukan.");
+
+                $cycle  = (int)($product['cycle_time'] ?? 0);
+                $cavity = (int)($product['cavity'] ?? 0);
+                if ($cycle <= 0 || $cavity <= 0) {
+                    throw new \Exception("Cycle time / cavity belum valid untuk Product ID {$productId}.");
+                }
+
+                $effRaw = (float)($product['efficiency_rate'] ?? 100.0);
+                $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
+
+                $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
+
+                // upsert schedule item
+                $dataItem = [
+                    'daily_schedule_id' => $scheduleId,
+                    'shift_id'          => $shiftId,
+                    'machine_id'        => $machineId,
+                    'product_id'        => $productId,
+                    'cycle_time'        => $cycle,
+                    'cavity'            => $cavity,
+                    'target_per_hour'   => $targetPerHour,
+                    'target_per_shift'  => $planInput,
+                    'is_selected'       => ($planInput > 0) ? 1 : 0,
+                ];
+
+                if ($existItem) {
+                    $db->table('daily_schedule_items')->where('id', (int)$existItem['id'])->update($dataItem);
+                    $itemId = (int)$existItem['id'];
+                } else {
+                    if ($planInput <= 0) continue;
+                    $db->table('daily_schedule_items')->insert($dataItem);
+                    $itemId = (int)$db->insertID();
+                }
+
+                // apply delta
+                if ($prevProcessIdNew) {
+                    $delta = $planInput - $oldPlan;
+
+                    if ($delta > 0) {
+                        $stockPrev = $this->getPrevProcessStock($db, $date, $productId, $prevProcessIdNew);
+                        if ($stockPrev <= 0) throw new \Exception("Stock kosong pada proses sebelumnya untuk Product ID {$productId}.");
+                        if ($delta > $stockPrev) throw new \Exception("Scheduling tambahan ({$delta}) > stock ({$stockPrev}) untuk Product ID {$productId}.");
+                    }
+
+                    if ($delta !== 0) {
+                        $this->applyPrevReserveToNext($db, $date, $productId, $prevProcessIdNew, $delta);
+                        $this->upsertIncomingWipForLeakTest($db, $date, $productId, $prevProcessIdNew, $processIdLT, $itemId, $delta);
+                    }
+                }
+            }
+
+            if ($db->transStatus() === false) throw new \Exception('DB error');
+            $db->transCommit();
+
+            return redirect()->back()->with(
+                'success',
+                'Schedule Leak Test tersimpan. Stock prev berkurang + transfer tercatat + qty_in Leak Test bertambah (stock Leak Test tetap 0).'
+            );
+
+        } catch (\Throwable $e) {
+            $db->transRollback();
+            return redirect()->back()->with('error', $e->getMessage());
+        }
     }
 }

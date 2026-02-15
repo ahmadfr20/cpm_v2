@@ -28,7 +28,8 @@ class CustomerController extends BaseController
 
         if ($keyword !== '') {
             $builder->groupStart()
-                ->like('customer_code', $keyword)
+                ->like('customer_code', $keyword)        // Accurate code
+                ->orLike('customer_code_app', $keyword)   // App code
                 ->orLike('customer_name', $keyword)
                 ->groupEnd();
         }
@@ -45,34 +46,34 @@ class CustomerController extends BaseController
     }
 
     /**
-     * Generate customer_code: CUS-0001, CUS-0002, ...
+     * ✅ Generate customer_code_app: CUST-0001, CUST-0002, ...
      * Aman dari duplicate dengan loop check + transaksi.
      */
-    private function generateCustomerCode(): string
+    private function generateCustomerCodeApp(): string
     {
-        // Ambil customer_code terbesar yang diawali "CUS-"
+        // Ambil customer_code_app terbesar yang diawali "CUST-"
         $row = $this->customerModel
-            ->select('customer_code')
-            ->like('customer_code', 'CUS-', 'after')
-            ->orderBy('customer_code', 'DESC')
+            ->select('customer_code_app')
+            ->like('customer_code_app', 'CUST-', 'after')
+            ->orderBy('customer_code_app', 'DESC')
             ->first();
 
         $lastNumber = 0;
-        if ($row && !empty($row['customer_code'])) {
-            // ambil angka di belakang prefix
-            $num = (int) preg_replace('/\D+/', '', (string) $row['customer_code']);
+        if ($row && !empty($row['customer_code_app'])) {
+            $num = (int) preg_replace('/\D+/', '', (string) $row['customer_code_app']);
             $lastNumber = $num;
         }
 
-        // generate berikutnya
         $next = $lastNumber + 1;
-        return 'CUS-' . str_pad((string)$next, 4, '0', STR_PAD_LEFT);
+        return 'CUST-' . str_pad((string)$next, 4, '0', STR_PAD_LEFT);
     }
 
     public function store()
     {
         $rules = [
             'customer_name' => 'required|min_length[2]|max_length[150]',
+            // customer_code (Accurate) bebas, optional
+            'customer_code' => 'permit_empty|max_length[30]',
         ];
 
         if (!$this->validate($rules)) {
@@ -85,22 +86,25 @@ class CustomerController extends BaseController
         $db->transBegin();
 
         try {
-            // generate code (antisipasi tabrakan: cek ulang)
-            $code = $this->generateCustomerCode();
+            // ✅ customer_code_app auto-generate, anti tabrakan
+            $codeApp = $this->generateCustomerCodeApp();
             $tries = 0;
 
-            while ($this->customerModel->where('customer_code', $code)->first()) {
+            while ($this->customerModel->where('customer_code_app', $codeApp)->first()) {
                 $tries++;
-                if ($tries > 10) {
-                    throw new \Exception('Gagal generate customer code. Silakan coba lagi.');
+                if ($tries > 20) {
+                    throw new \Exception('Gagal generate Customer Code App. Silakan coba lagi.');
                 }
-                $code = $this->generateCustomerCode();
+                $codeApp = $this->generateCustomerCodeApp();
             }
 
             $this->customerModel->insert([
-                'customer_code' => $code,
-                'customer_name' => trim($this->request->getPost('customer_name')),
-                'is_active'     => (int) ($this->request->getPost('is_active') ?? 1),
+                // ✅ Accurate code (bebas)
+                'customer_code'     => trim((string)$this->request->getPost('customer_code')),
+                // ✅ App code (auto)
+                'customer_code_app' => $codeApp,
+                'customer_name'     => trim((string)$this->request->getPost('customer_name')),
+                'is_active'         => (int) ($this->request->getPost('is_active') ?? 1),
             ]);
 
             if ($db->transStatus() === false) {
@@ -124,6 +128,7 @@ class CustomerController extends BaseController
 
         $rules = [
             'customer_name' => 'required|min_length[2]|max_length[150]',
+            'customer_code' => 'permit_empty|max_length[30]',
         ];
 
         if (!$this->validate($rules)) {
@@ -133,8 +138,10 @@ class CustomerController extends BaseController
         }
 
         $this->customerModel->update($id, [
-            // customer_code tetap (tidak boleh diubah)
-            'customer_name' => trim($this->request->getPost('customer_name')),
+            // ✅ Accurate code boleh diubah (bebas)
+            'customer_code' => trim((string)$this->request->getPost('customer_code')),
+            // ✅ App code TIDAK diubah
+            'customer_name' => trim((string)$this->request->getPost('customer_name')),
             'is_active'     => (int) ($this->request->getPost('is_active') ?? ($customer['is_active'] ?? 1)),
         ]);
 

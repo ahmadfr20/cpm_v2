@@ -106,7 +106,10 @@ $routes->group('master', ['filter' => 'auth:ADMIN'], function ($routes) {
     $routes->post('customer/store', 'Master\CustomerController::store');
     $routes->get('customer/edit/(:num)', 'Master\CustomerController::edit/$1');
     $routes->post('customer/update/(:num)', 'Master\CustomerController::update/$1');
-    $routes->get('customer/delete/(:num)', 'Master\CustomerController::delete/$1');
+
+    // ✅ FIX: DELETE harus POST dan path-nya sesuai form
+    $routes->post('customer/(:num)/delete', 'Master\CustomerController::delete/$1');
+
 
     // Vendor
     $routes->get('vendor', 'Master\VendorController::index');

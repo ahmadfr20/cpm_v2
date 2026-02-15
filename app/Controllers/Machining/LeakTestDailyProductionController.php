@@ -15,6 +15,26 @@ class LeakTestDailyProductionController extends BaseController
         $date     = $this->request->getGet('date') ?? date('Y-m-d');
         $operator = session()->get('fullname') ?? '-';
 
+        // ✅ NG Categories (pakai master kalau ada, fallback ke array)
+        $ngCategories = [];
+        if ($db->tableExists('ng_categories')) {
+            $ngCategories = $db->table('ng_categories')
+                ->select('id, ng_code, ng_name')
+                ->where('is_active', 1)
+                ->orderBy('ng_code', 'ASC')
+                ->get()->getResultArray();
+        } else {
+            // fallback hardcode (jika master belum ada)
+            $ngCategories = [
+                ['id' => 1, 'ng_code' => 1, 'ng_name' => 'BOCOR'],
+                ['id' => 2, 'ng_code' => 2, 'ng_name' => 'CRACK'],
+                ['id' => 3, 'ng_code' => 3, 'ng_name' => 'SCRATCH'],
+                ['id' => 4, 'ng_code' => 4, 'ng_name' => 'POROS'],
+                ['id' => 5, 'ng_code' => 5, 'ng_name' => 'DIMENSI'],
+                ['id' => 6, 'ng_code' => 6, 'ng_name' => 'LAINNYA'],
+            ];
+        }
+
         $shifts = $db->table('shifts')
             ->where('is_active', 1)
             ->like('shift_name', 'MC')
@@ -70,27 +90,51 @@ class LeakTestDailyProductionController extends BaseController
                 ->get()->getResultArray();
 
             $shift['hourly_map'] = [];
+            $shift['ng_detail_map'] = [];
+
             foreach ($hourly as $h) {
-                $shift['hourly_map']
-                    [(int)$h['machine_id']]
-                    [(int)$h['product_id']]
-                    [(int)$h['time_slot_id']] = $h;
+                $mid = (int)$h['machine_id'];
+                $pid = (int)$h['product_id'];
+                $sid = (int)$h['time_slot_id'];
+
+                $shift['hourly_map'][$mid][$pid][$sid] = $h;
+
+                // ✅ decode ng_category JSON => ng_detail_map
+                $raw = (string)($h['ng_category'] ?? '');
+                $details = [];
+
+                if ($raw !== '') {
+                    $decoded = json_decode($raw, true);
+                    if (is_array($decoded)) {
+                        // expected: [{ng_category_id, qty}, ...]
+                        foreach ($decoded as $d) {
+                            $details[] = [
+                                'ng_category_id' => (int)($d['ng_category_id'] ?? 0),
+                                'qty'            => (int)($d['qty'] ?? 0),
+                            ];
+                        }
+                    } else {
+                        // backward compatibility: kalau dulu text biasa, tampilkan 1 baris saja
+                        $details[] = ['ng_category_id' => 0, 'qty' => (int)($h['qty_ng'] ?? 0)];
+                    }
+                }
+
+                $shift['ng_detail_map'][$mid][$pid][$sid] = $details;
             }
         }
         unset($shift);
 
         return view('machining/leak_test/daily_production/index', [
-            'date'     => $date,
-            'operator' => $operator,
-            'shifts'   => $shifts,
-            'isAdmin'  => $this->isAdmin()
+            'date'         => $date,
+            'operator'     => $operator,
+            'shifts'       => $shifts,
+            'isAdmin'      => $this->isAdmin(),
+            'ngCategories' => $ngCategories, // ✅ penting buat dropdown inline
         ]);
     }
 
     /* =====================================================
-     * STORE HOURLY
-     * - simpan hourly (replace/upsert)
-     * - sync realtime untuk shift yang terkena
+     * STORE HOURLY (NG inline -> JSON)
      * ===================================================== */
     public function store()
     {
@@ -120,7 +164,7 @@ class LeakTestDailyProductionController extends BaseController
         $db->transBegin();
 
         try {
-            $shiftTouched = []; // shift_id => true
+            $shiftTouched = [];
             $dateTouched  = null;
 
             foreach ($items as $row) {
@@ -137,25 +181,61 @@ class LeakTestDailyProductionController extends BaseController
                 $dateTouched = $date;
                 $shiftTouched[$shiftId] = true;
 
-                // REPLACE membutuhkan unique key, jika tidak ada, CI4 akan tetap INSERT baru.
-                // Pastikan ada UNIQUE(production_date,shift_id,machine_id,product_id,time_slot_id)
-                $payload = [
+                $okQty = (int)($row['ok'] ?? 0);
+
+                // ✅ total NG dari ng_details
+                $ngDetails = $row['ng_details'] ?? [];
+                $ngTotal = 0;
+                $cleanDetails = [];
+
+                if (is_array($ngDetails)) {
+                    foreach ($ngDetails as $d) {
+                        $ngId = (int)($d['ng_category_id'] ?? 0);
+                        $qty  = (int)($d['qty'] ?? 0);
+                        // simpan row kosong juga boleh (untuk UI), tapi total cuma yg valid
+                        $cleanDetails[] = ['ng_category_id' => $ngId, 'qty' => $qty];
+                        if ($ngId > 0 && $qty > 0) $ngTotal += $qty;
+                    }
+                }
+
+                // ✅ Simpan JSON ke ng_category (kalau kolom ada)
+                $ngCategoryJson = $hourlyHasNgCat ? json_encode($cleanDetails, JSON_UNESCAPED_UNICODE) : null;
+
+                // ✅ upsert manual (lebih aman daripada replace untuk created_at)
+                $where = [
                     'production_date' => $date,
                     'shift_id'        => $shiftId,
                     'machine_id'      => $machineId,
                     'product_id'      => $productId,
                     'time_slot_id'    => $slotId,
-                    'qty_ok'          => (int)($row['ok'] ?? 0),
                 ];
 
-                if ($hourlyHasQtyNg) $payload['qty_ng'] = (int)($row['ng'] ?? 0);
-                if ($hourlyHasNgCat) $payload['ng_category'] = $row['ng_category'] ?? null;
+                $exist = $db->table('machining_leak_test_hourly')->where($where)->get()->getRowArray();
 
-                if ($hourlyHasCreated) $payload['created_at'] = $now;
-                if ($hourlyHasUpdated) $payload['updated_at'] = $now;
+                if ($exist) {
+                    $upd = [
+                        'qty_ok' => $okQty,
+                    ];
+                    if ($hourlyHasQtyNg) $upd['qty_ng'] = $ngTotal;
+                    if ($hourlyHasNgCat) $upd['ng_category'] = $ngCategoryJson;
 
-                $ok = $db->table('machining_leak_test_hourly')->replace($payload);
-                if ($ok === false) $this->dbFail($db, 'Replace machining_leak_test_hourly');
+                    if ($hourlyHasUpdated) $upd['updated_at'] = $now;
+
+                    $ok = $db->table('machining_leak_test_hourly')->where('id', (int)$exist['id'])->update($upd);
+                    if ($ok === false) $this->dbFail($db, 'Update machining_leak_test_hourly');
+                } else {
+                    $ins = $where + [
+                        'qty_ok' => $okQty,
+                    ];
+                    if ($hourlyHasQtyNg) $ins['qty_ng'] = $ngTotal;
+                    if ($hourlyHasNgCat) $ins['ng_category'] = $ngCategoryJson;
+
+                    if ($hourlyHasCreated) $ins['created_at'] = $now;
+                    if ($hourlyHasUpdated) $ins['updated_at'] = $now;
+
+                    $ok = $db->table('machining_leak_test_hourly')->insert($ins);
+                    if ($ok === false) $this->dbFail($db, 'Insert machining_leak_test_hourly');
+                }
             }
 
             if (!$dateTouched || empty($shiftTouched)) {
@@ -163,7 +243,6 @@ class LeakTestDailyProductionController extends BaseController
                 return redirect()->back()->with('success', 'Tidak ada data valid untuk disimpan.');
             }
 
-            // Sync realtime untuk shift yang berubah (seperti Die Casting)
             foreach (array_keys($shiftTouched) as $sid) {
                 $this->syncLeakTestRealtime($db, $dateTouched, (int)$sid, $isAdmin);
             }
@@ -182,10 +261,7 @@ class LeakTestDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * FINISH SHIFT (Ala Die Casting) + ADMIN OVERRIDE
-     * - 1) sync realtime semua shift MC tanggal tsb
-     * - 2) transfer flow LT -> next
-     * - qty_in pindah ke qty_out di NEXT sesuai jumlah input (request kamu)
+     * FINISH SHIFT (tetap)
      * ===================================================== */
     public function finishShift()
     {
@@ -203,12 +279,9 @@ class LeakTestDailyProductionController extends BaseController
             return redirect()->back()->with('error', 'Finish Shift hanya boleh untuk shift MC.');
         }
 
-        // non-admin: hanya shift terakhir + sudah berakhir
         if (!$isAdmin) {
             $lastShift = $this->getLastMachiningShift($db);
-            if (!$lastShift) {
-                return redirect()->back()->with('error', 'Tidak ditemukan shift MC aktif.');
-            }
+            if (!$lastShift) return redirect()->back()->with('error', 'Tidak ditemukan shift MC aktif.');
             if ((int)$lastShift['id'] !== $shiftId) {
                 return redirect()->back()->with('error', 'Finish Shift hanya boleh pada shift terakhir MC (admin bisa override).');
             }
@@ -218,29 +291,21 @@ class LeakTestDailyProductionController extends BaseController
         }
 
         $ltProcessId = $this->getProcessIdByCode($db, 'LT');
-        if (!$ltProcessId) {
-            return redirect()->back()->with('error', 'Process LT (Leak Test) tidak ditemukan.');
-        }
+        if (!$ltProcessId) return redirect()->back()->with('error', 'Process LT (Leak Test) tidak ditemukan.');
 
         $mcShiftIds = $this->getMcShiftIds($db);
-        if (empty($mcShiftIds)) {
-            return redirect()->back()->with('error', 'Tidak ada shift MC aktif.');
-        }
+        if (empty($mcShiftIds)) return redirect()->back()->with('error', 'Tidak ada shift MC aktif.');
 
         $db->transBegin();
 
         try {
-            // 1) Sync realtime semua shift MC (seperti DC)
             foreach ($mcShiftIds as $sid) {
                 $this->syncLeakTestRealtime($db, $date, (int)$sid, $isAdmin);
             }
 
-            // 2) Transfer flow untuk semua inbound LT
             $count = $this->finishShiftTransferFlowAllLt($db, $date, (int)$ltProcessId, $isAdmin);
 
-            if ($db->transStatus() === false) {
-                $this->dbFail($db, 'FinishShift transaction failed');
-            }
+            if ($db->transStatus() === false) $this->dbFail($db, 'FinishShift transaction failed');
 
             $db->transCommit();
 
@@ -257,7 +322,7 @@ class LeakTestDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * SYNC REALTIME (Hourly -> Schedule Actual + WIP inbound prev->LT)
+     * SYNC REALTIME (tidak diubah)
      * ===================================================== */
     private function syncLeakTestRealtime($db, string $date, int $shiftId, bool $forceAdmin = false): void
     {
@@ -300,7 +365,6 @@ class LeakTestDailyProductionController extends BaseController
 
             $okTotal = (int)($sumRow['ok_total'] ?? 0);
 
-            // update actual di schedule item
             if ($dsiHasQtyOk) {
                 $ok = $db->table('daily_schedule_items')->where('id', $dsiId)->update(['qty_ok' => $okTotal]);
                 if ($ok === false) $this->dbFail($db, 'Update daily_schedule_items.qty_ok');
@@ -309,17 +373,14 @@ class LeakTestDailyProductionController extends BaseController
                 if ($ok === false) $this->dbFail($db, 'Update daily_schedule_items.qty_a');
             }
 
-            // lt process id (prefer ds.process_id)
             $ltProcessId = (int)($r['lt_process_id'] ?? 0);
             if ($ltProcessId <= 0) $ltProcessId = (int)($this->getProcessIdByCode($db, 'LT') ?? 0);
             if ($ltProcessId <= 0) continue;
 
-            // upsert WIP inbound prev->LT
             if (!$db->tableExists('production_wip')) continue;
 
             $prevProcessId = $this->resolvePrevProcessIdActive($db, $productId, $ltProcessId);
 
-            // kunci inbound konsisten (seperti store kamu)
             $where = [
                 'production_date' => $date,
                 'product_id'      => $productId,
@@ -330,28 +391,22 @@ class LeakTestDailyProductionController extends BaseController
 
             $exist = $db->table('production_wip')->where($where)->get()->getRowArray();
 
-            // sebelum finish: stock = hasil OK, qty_out = hasil OK (biar report mudah)
             $payload = [
                 'from_process_id' => $prevProcessId,
                 'status'          => 'SCHEDULED',
             ];
-            if ($w['qty_out'])   $payload['qty_out'] = $okTotal;
-            if ($w['stock'])     $payload['stock']   = $okTotal;
+            if ($w['qty_out'])    $payload['qty_out'] = $okTotal;
+            if ($w['stock'])      $payload['stock']   = $okTotal;
             if ($w['updated_at']) $payload['updated_at'] = $now;
 
             if ($exist) {
-                // non-admin lock DONE (jangan timpa DONE)
-                if (!$forceAdmin && strtoupper((string)($exist['status'] ?? '')) === 'DONE') {
-                    continue;
-                }
+                if (!$forceAdmin && strtoupper((string)($exist['status'] ?? '')) === 'DONE') continue;
                 $ok = $db->table('production_wip')->where('id', (int)$exist['id'])->update($payload);
                 if ($ok === false) $this->dbFail($db, 'Update production_wip inbound realtime');
             } else {
                 $ins = $where + $payload;
-
                 if ($w['qty'])    $ins['qty'] = 0;
                 if ($w['qty_in']) $ins['qty_in'] = 0;
-
                 if ($w['created_at']) $ins['created_at'] = $now;
                 if ($w['updated_at']) $ins['updated_at'] = $now;
 
@@ -362,10 +417,7 @@ class LeakTestDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * TRANSFER FLOW ALL LT
-     * - inbound prev->LT : DONE, qty_out=transferQty, stock=0
-     * - outbound LT->NEXT: WAITING, qty_in += transferQty,
-     *   ✅ qty_out juga += transferQty (sesuai request)
+     * TRANSFER FLOW (tidak diubah dari versi kamu)
      * ===================================================== */
     private function finishShiftTransferFlowAllLt($db, string $date, int $ltProcessId, bool $forceAdmin = false): int
     {
@@ -374,7 +426,6 @@ class LeakTestDailyProductionController extends BaseController
         $w = $this->wipCols($db);
         $now = date('Y-m-d H:i:s');
 
-        // ambil semua inbound LT yg belum DONE
         $inRows = $db->table('production_wip')
             ->where('production_date', $date)
             ->where('to_process_id', $ltProcessId)
@@ -388,8 +439,6 @@ class LeakTestDailyProductionController extends BaseController
         if (!$inRows) return 0;
 
         $processed = 0;
-
-        // agregasi transfer per product
         $byProduct = [];
 
         foreach ($inRows as $r) {
@@ -397,23 +446,17 @@ class LeakTestDailyProductionController extends BaseController
             $productId = (int)($r['product_id'] ?? 0);
             if ($wipId <= 0 || $productId <= 0) continue;
 
-            if (!$forceAdmin && strtoupper((string)($r['status'] ?? '')) === 'DONE') {
-                continue;
-            }
+            if (!$forceAdmin && strtoupper((string)($r['status'] ?? '')) === 'DONE') continue;
 
-            // transferQty: pakai stock dulu, fallback qty_out, fallback qty_in
             $stockNow = $w['stock'] ? (int)($r['stock'] ?? 0) : 0;
             $outNow   = $w['qty_out'] ? (int)($r['qty_out'] ?? 0) : 0;
             $inNow    = $w['qty_in'] ? (int)($r['qty_in'] ?? 0) : 0;
 
             $transferQty = max($stockNow, $outNow, $inNow);
 
-            // mark inbound DONE
-            $updA = [
-                'status' => 'DONE',
-            ];
+            $updA = ['status' => 'DONE'];
             if ($w['qty_out']) $updA['qty_out'] = $transferQty;
-            if ($w['qty_in'])  $updA['qty_in']  = 0;           // qty_in dianggap sudah dipindah keluar
+            if ($w['qty_in'])  $updA['qty_in']  = 0;
             if ($w['stock'])   $updA['stock']   = 0;
             if ($w['updated_at']) $updA['updated_at'] = $now;
 
@@ -435,11 +478,9 @@ class LeakTestDailyProductionController extends BaseController
             $byProduct[$productId]['qty'] += $transferQty;
         }
 
-        // upsert outbound LT->NEXT
         foreach ($byProduct as $productId => $agg) {
             $qty = (int)$agg['qty'];
             $nextProcessId = (int)$agg['next_process_id'];
-
             if ($qty <= 0 || $nextProcessId <= 0) continue;
 
             $whereB = [
@@ -452,24 +493,17 @@ class LeakTestDailyProductionController extends BaseController
             $existB = $db->table('production_wip')->where($whereB)->get()->getRowArray();
 
             if ($existB) {
-                // tambah qty_in & qty_out
-                $updB = [
-                    'status' => 'WAITING',
-                ];
+                $updB = ['status' => 'WAITING'];
                 if ($w['updated_at']) $updB['updated_at'] = $now;
 
                 if ($w['qty_in']) {
                     $oldIn = (int)($existB['qty_in'] ?? 0);
                     $updB['qty_in'] = $oldIn + $qty;
                 }
-
-                // ✅ sesuai request: qty_in yang pindah juga dicatat ke qty_out
                 if ($w['qty_out']) {
                     $oldOut = (int)($existB['qty_out'] ?? 0);
                     $updB['qty_out'] = $oldOut + $qty;
                 }
-
-                // optional: kalau kamu ingin stock next = qty_in, ubah ini:
                 if ($w['stock']) {
                     $oldStock = (int)($existB['stock'] ?? 0);
                     $updB['stock'] = $oldStock + $qty;
@@ -478,15 +512,11 @@ class LeakTestDailyProductionController extends BaseController
                 $ok = $db->table('production_wip')->where('id', (int)$existB['id'])->update($updB);
                 if ($ok === false) $this->dbFail($db, 'Update production_wip outbound WAITING');
             } else {
-                $insB = $whereB + [
-                    'status' => 'WAITING',
-                ];
+                $insB = $whereB + ['status' => 'WAITING'];
                 if ($w['qty']) $insB['qty'] = 0;
-
                 if ($w['qty_in'])  $insB['qty_in']  = $qty;
-                if ($w['qty_out']) $insB['qty_out'] = $qty;  // ✅ pindah qty_in -> qty_out sesuai qty input
-
-                if ($w['stock']) $insB['stock'] = $qty;
+                if ($w['qty_out']) $insB['qty_out'] = $qty;
+                if ($w['stock'])   $insB['stock']   = $qty;
 
                 if ($w['source_table']) $insB['source_table'] = 'production_wip';
                 if ($w['source_id'])    $insB['source_id'] = (int)($agg['source_wip_id'] ?? null);
@@ -503,9 +533,8 @@ class LeakTestDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * HELPERS
+     * HELPERS (tetap)
      * ===================================================== */
-
     private function isAdmin(): bool
     {
         $role = session()->get('role')

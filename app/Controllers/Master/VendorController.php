@@ -28,7 +28,8 @@ class VendorController extends BaseController
 
         if ($keyword !== '') {
             $builder->groupStart()
-                ->like('vendor_code', $keyword)
+                ->like('vendor_code', $keyword)        // accurate code
+                ->orLike('vendor_code_app', $keyword)  // app code
                 ->orLike('vendor_name', $keyword)
                 ->groupEnd();
         }
@@ -45,29 +46,31 @@ class VendorController extends BaseController
     }
 
     /**
-     * Generate vendor_code: VEN-0001, VEN-0002, ...
+     * Generate vendor_code_app: VEND-1, VEND-2, ...
+     * (auto increment berdasarkan max angka yang sudah ada)
      */
-    private function generateVendorCode(): string
+    private function generateVendorCodeApp(): string
     {
         $row = $this->vendorModel
-            ->select('vendor_code')
-            ->like('vendor_code', 'VEN-', 'after')
-            ->orderBy('vendor_code', 'DESC')
+            ->select('vendor_code_app')
+            ->like('vendor_code_app', 'VEND-', 'after')
+            ->orderBy('vendor_code_app', 'DESC')
             ->first();
 
         $lastNumber = 0;
-        if ($row && !empty($row['vendor_code'])) {
-            $num = (int) preg_replace('/\D+/', '', (string) $row['vendor_code']);
+        if ($row && !empty($row['vendor_code_app'])) {
+            $num = (int) preg_replace('/\D+/', '', (string) $row['vendor_code_app']);
             $lastNumber = $num;
         }
 
         $next = $lastNumber + 1;
-        return 'VEN-' . str_pad((string)$next, 4, '0', STR_PAD_LEFT);
+        return 'VEND-' . $next; // kalau mau padding: 'VEND-' . str_pad((string)$next, 4, '0', STR_PAD_LEFT);
     }
 
     public function store()
     {
         $rules = [
+            'vendor_code' => 'required|min_length[1]|max_length[50]',   // bebas (accurate)
             'vendor_name' => 'required|min_length[2]|max_length[100]',
         ];
 
@@ -81,22 +84,23 @@ class VendorController extends BaseController
         $db->transBegin();
 
         try {
-            $code = $this->generateVendorCode();
-
-            // antisipasi race condition (cek ulang)
+            // auto generate vendor_code_app (antisipasi tabrakan)
+            $codeApp = $this->generateVendorCodeApp();
             $tries = 0;
-            while ($this->vendorModel->where('vendor_code', $code)->first()) {
+
+            while ($this->vendorModel->where('vendor_code_app', $codeApp)->first()) {
                 $tries++;
-                if ($tries > 10) {
-                    throw new \Exception('Gagal generate vendor code. Silakan coba lagi.');
+                if ($tries > 20) {
+                    throw new \Exception('Gagal generate vendor code app. Silakan coba lagi.');
                 }
-                $code = $this->generateVendorCode();
+                $codeApp = $this->generateVendorCodeApp();
             }
 
             $this->vendorModel->insert([
-                'vendor_code' => $code,
-                'vendor_name' => trim((string) $this->request->getPost('vendor_name')),
-                'is_active'   => (int) ($this->request->getPost('is_active') ?? 1),
+                'vendor_code'     => trim((string)$this->request->getPost('vendor_code')), // manual
+                'vendor_code_app' => $codeApp, // auto
+                'vendor_name'     => trim((string)$this->request->getPost('vendor_name')),
+                'is_active'       => (int) ($this->request->getPost('is_active') ?? 1),
             ]);
 
             if ($db->transStatus() === false) {
@@ -119,6 +123,7 @@ class VendorController extends BaseController
         }
 
         $rules = [
+            'vendor_code' => 'required|min_length[1]|max_length[50]',
             'vendor_name' => 'required|min_length[2]|max_length[100]',
         ];
 
@@ -129,8 +134,9 @@ class VendorController extends BaseController
         }
 
         $this->vendorModel->update($id, [
-            // vendor_code tetap (tidak diubah)
-            'vendor_name' => trim((string) $this->request->getPost('vendor_name')),
+            // vendor_code_app tetap (tidak diubah)
+            'vendor_code' => trim((string)$this->request->getPost('vendor_code')), // manual
+            'vendor_name' => trim((string)$this->request->getPost('vendor_name')),
             'is_active'   => (int) ($this->request->getPost('is_active') ?? ($vendor['is_active'] ?? 1)),
         ]);
 

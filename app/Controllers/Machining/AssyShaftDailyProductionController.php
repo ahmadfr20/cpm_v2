@@ -102,8 +102,8 @@ class AssyShaftDailyProductionController extends BaseController
         $startStr = (string)($last['time_start'] ?? '00:00:00');
         $endStr   = (string)($last['time_end'] ?? '00:00:00');
 
-        $startDT = new \DateTime($date . ' ' . $startStr, $tz);
-        $endDT   = new \DateTime($date . ' ' . $endStr, $tz);
+        $startDT = new \DateTime($date . ' ' . $startStr, new \DateTimeZone('Asia/Jakarta'));
+        $endDT   = new \DateTime($date . ' ' . $endStr, new \DateTimeZone('Asia/Jakarta'));
 
         if ($endDT <= $startDT) $endDT->modify('+1 day');
         return $endDT;
@@ -133,9 +133,6 @@ class AssyShaftDailyProductionController extends BaseController
         return [true, $endDT, null];
     }
 
-    /**
-     * Prev/Next process berdasarkan product_process_flows.sequence
-     */
     private function resolvePrevNextBySequence($db, int $productId, int $currentProcessId): array
     {
         if (!$db->tableExists('product_process_flows')) return ['prev' => null, 'next' => null];
@@ -177,7 +174,7 @@ class AssyShaftDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * WIP HELPERS
+     * WIP HELPERS (punyamu, dipertahankan)
      * ===================================================== */
 
     private function normalizeSourceTableValue($db, string $value): string
@@ -302,9 +299,6 @@ class AssyShaftDailyProductionController extends BaseController
         return [0, 0];
     }
 
-    /**
-     * ✅ Update inbound WIP saat STORE: qty_in turun, stock naik (pakai delta)
-     */
     private function updateInboundWipQtyInAndStock($db, string $date, int $productId, int $prevId, int $deltaFg, ?int $dsiId, ?int $dsId): void
     {
         if ($deltaFg === 0) return;
@@ -344,8 +338,6 @@ class AssyShaftDailyProductionController extends BaseController
 
         if ($hasSource && !empty($dsiId)) $apply('daily_schedule_items', (int)$dsiId);
         if ($hasSource && !empty($dsId))  $apply('daily_schedules', (int)$dsId);
-
-        // fallback tanpa source
         $apply(null, null);
     }
 
@@ -368,6 +360,95 @@ class AssyShaftDailyProductionController extends BaseController
         $this->updateInboundWipQtyInAndStock($db, $date, $productId, $prevId, $deltaFg, $dsiId ?: null, $dsId ?: null);
     }
 
+    /* =====================================================
+     * NG DETAIL HELPERS (BARU)
+     * ===================================================== */
+
+    /**
+     * Simpan detail NG (hapus dulu per slot-key, insert ulang)
+     * lalu update qty_ng di hourly = SUM detail
+     */
+    private function saveNgDetailsAndUpdateHourlyNg($db, array $items): void
+    {
+        if (!$db->tableExists('machining_assy_shaft_hourly_ng_details')) return;
+
+        $now = date('Y-m-d H:i:s');
+
+        foreach ($items as $row) {
+            if (
+                empty($row['date']) ||
+                empty($row['shift_id']) ||
+                empty($row['machine_id']) ||
+                empty($row['product_id']) ||
+                empty($row['time_slot_id'])
+            ) continue;
+
+            $date      = (string)$row['date'];
+            $shiftId   = (int)$row['shift_id'];
+            $machineId = (int)$row['machine_id'];
+            $productId = (int)$row['product_id'];
+            $slotId    = (int)$row['time_slot_id'];
+
+            $details = $row['ng_details'] ?? [];
+            if (!is_array($details)) $details = [];
+
+            // delete old details
+            $ok = $db->table('machining_assy_shaft_hourly_ng_details')
+                ->where([
+                    'production_date' => $date,
+                    'shift_id'        => $shiftId,
+                    'machine_id'      => $machineId,
+                    'product_id'      => $productId,
+                    'time_slot_id'    => $slotId,
+                ])->delete();
+            if ($ok === false) $this->throwDbError($db, 'Delete NG details gagal');
+
+            // insert new details
+            $totalNg = 0;
+            foreach ($details as $d) {
+                $ngCatId = (int)($d['ng_category_id'] ?? 0);
+                $qty     = (int)($d['qty'] ?? 0);
+                if ($ngCatId <= 0 || $qty <= 0) continue;
+
+                $totalNg += $qty;
+
+                $ins = [
+                    'production_date' => $date,
+                    'shift_id'        => $shiftId,
+                    'machine_id'      => $machineId,
+                    'product_id'      => $productId,
+                    'time_slot_id'    => $slotId,
+                    'ng_category_id'  => $ngCatId,
+                    'qty'             => $qty,
+                ];
+                if ($db->fieldExists('created_at', 'machining_assy_shaft_hourly_ng_details')) $ins['created_at'] = $now;
+                if ($db->fieldExists('updated_at', 'machining_assy_shaft_hourly_ng_details')) $ins['updated_at'] = $now;
+
+                $ok = $db->table('machining_assy_shaft_hourly_ng_details')->insert($ins);
+                if ($ok === false) $this->throwDbError($db, 'Insert NG details gagal');
+            }
+
+            // update hourly qty_ng = totalNg (auto)
+            $upd = ['qty_ng' => $totalNg];
+            if ($db->fieldExists('updated_at', 'machining_assy_shaft_hourly')) $upd['updated_at'] = $now;
+
+            $ok = $db->table('machining_assy_shaft_hourly')
+                ->where([
+                    'production_date' => $date,
+                    'shift_id'        => $shiftId,
+                    'machine_id'      => $machineId,
+                    'product_id'      => $productId,
+                    'time_slot_id'    => $slotId,
+                ])->update($upd);
+
+            if ($ok === false) $this->throwDbError($db, 'Update qty_ng hourly gagal');
+        }
+    }
+
+    /* =====================================================
+     * HOURLY SAVE (diubah sedikit: qty_ng diabaikan, pakai detail)
+     * ===================================================== */
+
     private function saveHourlyRows($db, array $items): void
     {
         $now = date('Y-m-d H:i:s');
@@ -388,17 +469,18 @@ class AssyShaftDailyProductionController extends BaseController
             $timeSlotId = (int)$row['time_slot_id'];
 
             $newFg = (int)($row['ok'] ?? $row['fg'] ?? 0);
-            $newNg = (int)($row['ng'] ?? 0);
 
-            $old = $db->table('machining_assy_shaft_hourly')
-                ->where('production_date', $date)
-                ->where('shift_id', $shiftId)
-                ->where('machine_id', $machineId)
-                ->where('product_id', $productId)
-                ->where('time_slot_id', $timeSlotId)
-                ->get()->getRowArray();
+            // NG jangan dipakai dari input manual (akan diupdate oleh detail)
+            $oldHourly = $db->table('machining_assy_shaft_hourly')
+                ->where([
+                    'production_date' => $date,
+                    'shift_id'        => $shiftId,
+                    'machine_id'      => $machineId,
+                    'product_id'      => $productId,
+                    'time_slot_id'    => $timeSlotId,
+                ])->get()->getRowArray();
 
-            $oldFg = (int)($old['qty_fg'] ?? 0);
+            $oldFg = (int)($oldHourly['qty_fg'] ?? 0);
             $deltaFg = $newFg - $oldFg;
 
             $payload = [
@@ -408,27 +490,25 @@ class AssyShaftDailyProductionController extends BaseController
                 'product_id'      => $productId,
                 'time_slot_id'    => $timeSlotId,
                 'qty_fg'          => $newFg,
-                'qty_ng'          => $newNg,
+                // qty_ng biarkan nilai lama; nanti saveNgDetailsAndUpdateHourlyNg() yang set
+                'qty_ng'          => (int)($oldHourly['qty_ng'] ?? 0),
             ];
 
-            if ($db->fieldExists('created_at', 'machining_assy_shaft_hourly') && empty($old)) $payload['created_at'] = $now;
+            if ($db->fieldExists('created_at', 'machining_assy_shaft_hourly') && empty($oldHourly)) $payload['created_at'] = $now;
             if ($db->fieldExists('updated_at', 'machining_assy_shaft_hourly')) $payload['updated_at'] = $now;
 
             $ok = $db->table('machining_assy_shaft_hourly')->replace($payload);
             if ($ok === false) $this->throwDbError($db, 'Replace machining_assy_shaft_hourly gagal');
 
-            // ✅ WIP delta update
+            // WIP delta update (tetap)
             $this->applyHourlyDeltaToWip($db, $row, $date, $deltaFg);
         }
     }
 
-    /**
-     * ✅ FIX UTAMA:
-     * Saat finish shift:
-     * - inbound (prev->AS): qty_out += stock, qty_in -= stock, stock=0
-     * - outbound (AS->NEXT): qty_in += stock, qty_out += stock (agar "Out AS" kebaca), stock=0
-     * - next process TIDAK terisi stock (stock selalu 0)
-     */
+    /* =====================================================
+     * FINISH SHIFT (punyamu, dipertahankan)
+     * ===================================================== */
+
     private function finishAssyShaftTransferFromWip($db, string $date): array
     {
         if (!$db->tableExists('production_wip')) return ['rows' => 0, 'sent' => 0];
@@ -444,7 +524,6 @@ class AssyShaftDailyProductionController extends BaseController
         if (!$hasQtyOut) throw new \Exception('Kolom qty_out tidak ditemukan di production_wip.');
         if (!$hasStock)  throw new \Exception('Kolom stock tidak ditemukan di production_wip.');
 
-        // Ambil inbound ke AS yang stock > 0
         $inRows = $db->table('production_wip')
             ->where($wipDateCol, $date)
             ->where('to_process_id', $asProcessId)
@@ -470,9 +549,6 @@ class AssyShaftDailyProductionController extends BaseController
 
             $send = $stock;
 
-            // =========================
-            // A) UPDATE INBOUND (prev -> AS) : by ID (hindari dobel)
-            // =========================
             $db->table('production_wip')
                 ->where('id', $id)
                 ->set('qty_out', "qty_out + {$send}", false)
@@ -488,9 +564,6 @@ class AssyShaftDailyProductionController extends BaseController
                     ->update();
             }
 
-            // =========================
-            // B) UPDATE INBOUND "row lain" (header/item) yg key sama tapi BUKAN id ini
-            // =========================
             $baseInbound = [
                 $wipDateCol       => $date,
                 'product_id'      => $productId,
@@ -514,12 +587,6 @@ class AssyShaftDailyProductionController extends BaseController
                     ->update();
             }
 
-            // =========================
-            // C) UPDATE OUTBOUND (AS -> NEXT)
-            //    ✅ qty_in next bertambah
-            //    ✅ qty_out outbound juga bertambah supaya "Out ASSY SHAFT" kebaca
-            //    ✅ stock next tetap 0
-            // =========================
             $baseOut = [
                 $wipDateCol       => $date,
                 'product_id'      => $productId,
@@ -527,38 +594,35 @@ class AssyShaftDailyProductionController extends BaseController
                 'to_process_id'   => $nextId,
             ];
 
-            // ambil src untuk ikut key (kalau ada)
             $srcTable = $hasSource ? (string)($r['source_table'] ?? '') : null;
             $srcId    = $hasSource ? (int)($r['source_id'] ?? 0) : null;
             if ($srcTable !== null && $srcTable !== '') $srcTable = $this->normalizeSourceTableValue($db, $srcTable);
 
-            // upsert outbound with same source
             $outRow = $this->getWipRow($db, $baseOut, ($srcTable ?: null), ($srcId ?: null));
             $outQty    = (int)($outRow['qty'] ?? 0);
             $outQtyIn  = $hasQtyIn ? (int)($outRow['qty_in'] ?? 0) : 0;
             $outQtyOut = (int)($outRow['qty_out'] ?? 0);
 
             $outData = [
-                'status' => 'WAITING',
-                'qty'    => $outQty + $send,
-                'stock'  => 0,
-                'qty_out'=> $outQtyOut + $send, // ✅ ini yang bikin kolom "Out ASSY SHAFT" terisi di banyak query UI
+                'status'  => 'WAITING',
+                'qty'     => $outQty + $send,
+                'stock'   => 0,
+                'qty_out' => $outQtyOut + $send,
             ];
             if ($hasQtyIn) $outData['qty_in'] = $outQtyIn + $send;
 
             $this->upsertWipByFullKey($db, $baseOut, $outData, ($srcTable ?: null), ($srcId ?: null));
 
-            // fallback outbound tanpa source (untuk UI yang baca row ini)
             $outRow2 = $this->getWipRow($db, $baseOut, null, null);
             $outQty2    = (int)($outRow2['qty'] ?? 0);
             $outQtyIn2  = $hasQtyIn ? (int)($outRow2['qty_in'] ?? 0) : 0;
             $outQtyOut2 = (int)($outRow2['qty_out'] ?? 0);
 
             $outData2 = [
-                'status' => 'WAITING',
-                'qty'    => $outQty2 + $send,
-                'stock'  => 0,
-                'qty_out'=> $outQtyOut2 + $send,
+                'status'  => 'WAITING',
+                'qty'     => $outQty2 + $send,
+                'stock'   => 0,
+                'qty_out' => $outQtyOut2 + $send,
             ];
             if ($hasQtyIn) $outData2['qty_in'] = $outQtyIn2 + $send;
 
@@ -582,6 +646,16 @@ class AssyShaftDailyProductionController extends BaseController
         $operator = session()->get('fullname') ?? '-';
 
         $shifts = $this->getMachiningShifts($db);
+
+        // ✅ NG Categories
+        $ngCategories = [];
+        if ($db->tableExists('ng_categories')) {
+            $ngCategories = $db->table('ng_categories')
+                ->select('id, ng_code, ng_name')
+                ->where('is_active', 1)
+                ->orderBy('ng_code', 'ASC')
+                ->get()->getResultArray();
+        }
 
         foreach ($shifts as &$shift) {
             $shift['slots'] = $db->table('shift_time_slots sts')
@@ -636,19 +710,33 @@ class AssyShaftDailyProductionController extends BaseController
             foreach ($hourly as $h) {
                 $shift['hourly_map'][(int)$h['machine_id']][(int)$h['product_id']][(int)$h['time_slot_id']] = $h;
             }
+
+            // ✅ NG detail map
+            $shift['ng_detail_map'] = [];
+            if ($db->tableExists('machining_assy_shaft_hourly_ng_details')) {
+                $details = $db->table('machining_assy_shaft_hourly_ng_details')
+                    ->where('production_date', $date)
+                    ->where('shift_id', (int)$shift['id'])
+                    ->get()->getResultArray();
+
+                foreach ($details as $d) {
+                    $shift['ng_detail_map'][(int)$d['machine_id']][(int)$d['product_id']][(int)$d['time_slot_id']][] = $d;
+                }
+            }
         }
         unset($shift);
 
         [$canFinish, $shift3EndDT, $finishError] = $this->canFinishShift($db, $date);
 
         return view('machining/assy_shaft/daily_production/index', [
-            'date'         => $date,
-            'operator'     => $operator,
-            'shifts'       => $shifts,
-            'canFinish'    => $canFinish,
-            'isAdmin'      => $this->isAdminSession(),
-            'shift3EndAt'  => $shift3EndDT ? $shift3EndDT->format('Y-m-d H:i:s') : null,
-            'finishError'  => $finishError,
+            'date'          => $date,
+            'operator'      => $operator,
+            'shifts'        => $shifts,
+            'ngCategories'  => $ngCategories,
+            'canFinish'     => $canFinish,
+            'isAdmin'       => $this->isAdminSession(),
+            'shift3EndAt'   => $shift3EndDT ? $shift3EndDT->format('Y-m-d H:i:s') : null,
+            'finishError'   => $finishError,
         ]);
     }
 
@@ -668,11 +756,12 @@ class AssyShaftDailyProductionController extends BaseController
         $db->transBegin();
         try {
             $this->saveHourlyRows($db, $items);
+            $this->saveNgDetailsAndUpdateHourlyNg($db, $items);
 
             if ($db->transStatus() === false) $this->throwDbError($db, 'Transaksi store hourly gagal');
             $db->transCommit();
 
-            return redirect()->back()->with('success', 'Hourly Assy Shaft tersimpan (WIP qty_in turun, stock naik).');
+            return redirect()->back()->with('success', 'Hourly Assy Shaft tersimpan + NG detail tersimpan (qty_ng auto).');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
@@ -701,7 +790,11 @@ class AssyShaftDailyProductionController extends BaseController
 
         $db->transBegin();
         try {
-            if (!empty($items)) $this->saveHourlyRows($db, $items);
+            // simpan dulu jika ada input belum tersimpan
+            if (!empty($items)) {
+                $this->saveHourlyRows($db, $items);
+                $this->saveNgDetailsAndUpdateHourlyNg($db, $items);
+            }
 
             $res = $this->finishAssyShaftTransferFromWip($db, (string)$date);
 

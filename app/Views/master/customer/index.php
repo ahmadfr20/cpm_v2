@@ -2,11 +2,9 @@
 <?= $this->section('content') ?>
 
 <style>
-  /* ✅ modal lebar & tidak ketutup navbar */
   .modal .modal-dialog{ max-width: 760px; margin-top: 90px !important; }
   @media (max-width: 768px){ .modal .modal-dialog{ margin-top: 70px !important; } }
 
-  /* ✅ body modal scroll, footer sticky */
   .modal .modal-content{ max-height: calc(100vh - 120px); }
   .modal .modal-body{ overflow: auto; padding-bottom: 12px; }
   .modal .modal-footer{
@@ -17,10 +15,8 @@
     border-top: 1px solid rgba(0,0,0,.1);
   }
 
-  /* ✅ form rata kiri seperti product master */
   .modal .form-wrap{ max-width: 680px; margin-left: 0; margin-right: auto; }
 
-  /* ✅ struktur label kiri, input kanan */
   .form-grid .row-item{
     display: grid;
     grid-template-columns: 220px 1fr;
@@ -30,7 +26,6 @@
   }
   .form-grid label{ font-weight: 600; margin: 0; }
   .form-grid .form-control, .form-grid .form-select{ width: 100%; }
-
   .table td, .table th { vertical-align: middle; }
 </style>
 
@@ -77,9 +72,9 @@
   <div class="card-body">
     <form method="get" action="/master/customer" class="row g-2 align-items-end">
       <div class="col-md-5">
-        <label class="form-label mb-1">Cari (Code / Name)</label>
+        <label class="form-label mb-1">Cari (Code Accurate / Code App / Name)</label>
         <input type="text" name="keyword" class="form-control"
-               placeholder="contoh: CUS-0001 / PT ABC"
+               placeholder="contoh: ACC-001 / CUST-0001 / PT ABC"
                value="<?= esc($keyword ?? '') ?>">
       </div>
 
@@ -112,7 +107,8 @@
         <thead class="table-light">
           <tr>
             <th style="width: 70px;">No</th>
-            <th style="width: 180px;">Customer Code</th>
+            <th style="width: 200px;">Customer Code (Accurate)</th>
+            <th style="width: 170px;">Customer Code App</th>
             <th>Customer Name</th>
             <th style="width: 140px;">Status</th>
             <th style="width: 190px;" class="text-end">Aksi</th>
@@ -121,7 +117,7 @@
         <tbody>
           <?php if (empty($customers)): ?>
             <tr>
-              <td colspan="5" class="text-center py-4 text-muted">Data customer belum tersedia</td>
+              <td colspan="6" class="text-center py-4 text-muted">Data customer belum tersedia</td>
             </tr>
           <?php else: ?>
             <?php
@@ -132,7 +128,8 @@
             <?php foreach ($customers as $c): ?>
               <tr>
                 <td><?= $no++ ?></td>
-                <td class="fw-semibold"><?= esc($c['customer_code']) ?></td>
+                <td class="fw-semibold"><?= esc($c['customer_code'] ?? '-') ?></td>
+                <td class="fw-semibold"><?= esc($c['customer_code_app'] ?? '-') ?></td>
                 <td><?= esc($c['customer_name']) ?></td>
                 <td>
                   <?php if ((int)($c['is_active'] ?? 1) === 1): ?>
@@ -148,6 +145,7 @@
                           data-bs-target="#modalEditCustomer"
                           data-id="<?= esc($c['id'], 'attr') ?>"
                           data-customer_code="<?= esc($c['customer_code'] ?? '', 'attr') ?>"
+                          data-customer_code_app="<?= esc($c['customer_code_app'] ?? '', 'attr') ?>"
                           data-customer_name="<?= esc($c['customer_name'] ?? '', 'attr') ?>"
                           data-is_active="<?= esc($c['is_active'] ?? 1, 'attr') ?>">
                     <i class="bi bi-pencil"></i> Edit
@@ -186,13 +184,22 @@
         <div class="modal-header">
           <div>
             <h5 class="modal-title mb-0">Tambah Customer</h5>
-            <small class="text-muted">Customer Code otomatis: CUS-0001, CUS-0002, dst.</small>
+            <small class="text-muted">
+              Customer Code App otomatis: <b>CUST-0001</b>, <b>CUST-0002</b>, dst.
+            </small>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
 
         <div class="modal-body">
           <div class="form-wrap form-grid">
+
+            <!-- ✅ Accurate code (bebas) -->
+            <div class="row-item">
+              <label>Customer Code (Accurate)</label>
+              <input type="text" name="customer_code" class="form-control"
+                     placeholder="Bebas (kode dari Accurate), contoh: ACC-CUS-001">
+            </div>
 
             <div class="row-item">
               <label>Customer Name <span class="text-danger">*</span></label>
@@ -232,7 +239,7 @@
         <div class="modal-header">
           <div>
             <h5 class="modal-title mb-0">Edit Customer</h5>
-            <small class="text-muted">Customer Code tidak bisa diubah</small>
+            <small class="text-muted">Customer Code App tidak bisa diubah</small>
           </div>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
         </div>
@@ -240,9 +247,17 @@
         <div class="modal-body">
           <div class="form-wrap form-grid">
 
+            <!-- ✅ Accurate code (bebas) -->
             <div class="row-item">
-              <label>Customer Code</label>
-              <input type="text" id="edit_customer_code" class="form-control" readonly>
+              <label>Customer Code (Accurate)</label>
+              <input type="text" name="customer_code" id="edit_customer_code" class="form-control"
+                     placeholder="Bebas (kode dari Accurate)">
+            </div>
+
+            <!-- ✅ App code (auto, readonly) -->
+            <div class="row-item">
+              <label>Customer Code App</label>
+              <input type="text" id="edit_customer_code_app" class="form-control" readonly>
             </div>
 
             <div class="row-item">
@@ -279,10 +294,12 @@
 
     const id = button.getAttribute('data-id');
     const customer_code = button.getAttribute('data-customer_code');
+    const customer_code_app = button.getAttribute('data-customer_code_app');
     const customer_name = button.getAttribute('data-customer_name');
     const is_active = button.getAttribute('data-is_active');
 
     document.getElementById('edit_customer_code').value = customer_code || '';
+    document.getElementById('edit_customer_code_app').value = customer_code_app || '';
     document.getElementById('edit_customer_name').value = customer_name || '';
     document.getElementById('edit_is_active').value = (is_active ?? '1');
 

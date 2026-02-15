@@ -13,7 +13,7 @@ class AssyBushingDailyProductionController extends BaseController
     private function isAdminSession(): bool
     {
         $role = strtoupper((string)(session()->get('role') ?? ''));
-        return $role === 'ADMIN';
+        return in_array($role, ['ADMIN', 'SUPERADMIN'], true);
     }
 
     private function getProcessIdByCodeOrName($db, ?string $code, string $nameExactOrLike): int
@@ -125,9 +125,6 @@ class AssyBushingDailyProductionController extends BaseController
         return [true, $endDT, null];
     }
 
-    /**
-     * Prev/Next process berdasarkan product_process_flows.sequence
-     */
     private function resolvePrevNextBySequence($db, int $productId, int $currentProcessId): array
     {
         if (!$db->tableExists('product_process_flows')) return ['prev' => null, 'next' => null];
@@ -168,6 +165,10 @@ class AssyBushingDailyProductionController extends BaseController
         ];
     }
 
+    /* =====================================================
+     * DB WRITE
+     * ===================================================== */
+
     private function saveHourlyRows($db, array $items): void
     {
         $now = date('Y-m-d H:i:s');
@@ -187,6 +188,7 @@ class AssyBushingDailyProductionController extends BaseController
                 'machine_id'      => (int)$row['machine_id'],
                 'product_id'      => (int)$row['product_id'],
                 'time_slot_id'    => (int)$row['time_slot_id'],
+                // assy bushing pakai qty_fg untuk OK
                 'qty_fg'          => (int)($row['ok'] ?? $row['fg'] ?? 0),
                 'qty_ng'          => (int)($row['ng'] ?? 0),
             ];
@@ -199,11 +201,82 @@ class AssyBushingDailyProductionController extends BaseController
     }
 
     /**
-     * Upsert aman untuk production_wip.
-     * Bisa handle kasus:
-     * - ada kolom source_table/source_id (bisa insert item+header)
-     * - tidak ada kolom source_table/source_id (fallback update row baseKey)
+     * Simpan detail NG (hapus dulu per slot-key, lalu insert lagi)
+     * + return total NG per key untuk update hourly qty_ng
      */
+    private function saveNgDetailsAndUpdateHourlyNg($db, array $items): void
+    {
+        if (!$db->tableExists('machining_assy_bushing_hourly_ng_details')) return;
+
+        $now = date('Y-m-d H:i:s');
+
+        foreach ($items as $row) {
+            if (
+                empty($row['date']) ||
+                empty($row['shift_id']) ||
+                empty($row['machine_id']) ||
+                empty($row['product_id']) ||
+                empty($row['time_slot_id'])
+            ) continue;
+
+            $date      = (string)$row['date'];
+            $shiftId   = (int)$row['shift_id'];
+            $machineId = (int)$row['machine_id'];
+            $productId = (int)$row['product_id'];
+            $slotId    = (int)$row['time_slot_id'];
+
+            $details = $row['ng_details'] ?? [];
+            if (!is_array($details)) $details = [];
+
+            // 1) delete old details for this key
+            $db->table('machining_assy_bushing_hourly_ng_details')
+                ->where([
+                    'production_date' => $date,
+                    'shift_id'        => $shiftId,
+                    'machine_id'      => $machineId,
+                    'product_id'      => $productId,
+                    'time_slot_id'    => $slotId,
+                ])->delete();
+
+            // 2) insert new
+            $totalNg = 0;
+            foreach ($details as $d) {
+                $ngCatId = (int)($d['ng_category_id'] ?? 0);
+                $qty     = (int)($d['qty'] ?? 0);
+
+                if ($ngCatId <= 0 || $qty <= 0) continue;
+                $totalNg += $qty;
+
+                $ins = [
+                    'production_date' => $date,
+                    'shift_id'        => $shiftId,
+                    'machine_id'      => $machineId,
+                    'product_id'      => $productId,
+                    'time_slot_id'    => $slotId,
+                    'ng_category_id'  => $ngCatId,
+                    'qty'             => $qty,
+                ];
+                if ($db->fieldExists('created_at', 'machining_assy_bushing_hourly_ng_details')) $ins['created_at'] = $now;
+                if ($db->fieldExists('updated_at', 'machining_assy_bushing_hourly_ng_details')) $ins['updated_at'] = $now;
+
+                $db->table('machining_assy_bushing_hourly_ng_details')->insert($ins);
+            }
+
+            // 3) update hourly qty_ng = totalNg (auto)
+            $upd = ['qty_ng' => $totalNg];
+            if ($db->fieldExists('updated_at', 'machining_assy_bushing_hourly')) $upd['updated_at'] = $now;
+
+            $db->table('machining_assy_bushing_hourly')
+                ->where([
+                    'production_date' => $date,
+                    'shift_id'        => $shiftId,
+                    'machine_id'      => $machineId,
+                    'product_id'      => $productId,
+                    'time_slot_id'    => $slotId,
+                ])->update($upd);
+        }
+    }
+
     private function upsertWipSafe($db, array $baseKey, array $data, ?string $sourceTable = null, ?int $sourceId = null): void
     {
         if (!$db->tableExists('production_wip')) return;
@@ -224,10 +297,8 @@ class AssyBushingDailyProductionController extends BaseController
         if ($hasSourceTable && $sourceTable !== null) $payload['source_table'] = $sourceTable;
         if ($hasSourceId && $sourceId !== null)       $payload['source_id']    = $sourceId;
 
-        // 1) UPDATE by fullKey
         $exist = $db->table('production_wip')->where($fullKey)->get()->getRowArray();
         if ($exist) {
-            // guard DONE
             if (
                 isset($payload['status']) &&
                 strtoupper((string)($exist['status'] ?? '')) === 'DONE' &&
@@ -238,7 +309,6 @@ class AssyBushingDailyProductionController extends BaseController
             return;
         }
 
-        // 2) INSERT fullKey
         $insert = $fullKey + $payload;
         if ($hasCreatedAt) $insert['created_at'] = $now;
 
@@ -246,7 +316,6 @@ class AssyBushingDailyProductionController extends BaseController
             $db->table('production_wip')->insert($insert);
             return;
         } catch (\Throwable $e) {
-            // 3) fallback: update row baseKey (kalau unique key cuma baseKey)
             $exist2 = $db->table('production_wip')->where($baseKey)->get()->getRowArray();
             if (!$exist2) return;
 
@@ -260,9 +329,6 @@ class AssyBushingDailyProductionController extends BaseController
         }
     }
 
-    /**
-     * Ambil WIP row: prefer item (source_table/items), fallback baseKey.
-     */
     private function getWipRowPreferItem($db, array $baseKey, ?int $dsiId = null): ?array
     {
         if (!$db->tableExists('production_wip')) return null;
@@ -279,22 +345,13 @@ class AssyBushingDailyProductionController extends BaseController
             if ($r) return $r;
         }
 
-        // fallback baseKey (bisa return row header atau single row jika unique tanpa source)
         return $db->table('production_wip')->where($baseKey)->get()->getRowArray();
     }
 
     /* =====================================================
-     * CORE LOGIC
+     * CORE LOGIC (WIP SYNC + FINISH)
      * ===================================================== */
 
-    /**
-     * SYNC inbound WIP (prev->AB) berdasarkan hourly:
-     * - produced_total = SUM hourly FG (cap <= plan)
-     * - qty_out existing dipakai untuk hitung stock (yang belum terkirim)
-     * - stock = produced_total - qty_out_existing
-     * - qty_in = plan - qty_out_existing
-     * - status tidak diubah (kalau existing SCHEDULED ya tetap)
-     */
     private function syncAssyBushingWipStockFromHourly($db, string $date): void
     {
         if (!$db->tableExists('production_wip')) return;
@@ -307,7 +364,6 @@ class AssyBushingDailyProductionController extends BaseController
         $hasQtyOut = $db->fieldExists('qty_out', 'production_wip');
         $hasStock  = $db->fieldExists('stock', 'production_wip');
 
-        // schedule items
         $items = $db->table('daily_schedule_items dsi')
             ->select('dsi.id AS dsi_id, ds.id AS ds_id, dsi.machine_id, dsi.product_id, dsi.target_per_shift, ds.shift_id')
             ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
@@ -319,7 +375,6 @@ class AssyBushingDailyProductionController extends BaseController
 
         if (!$items) return;
 
-        // SUM qty_fg per (shift,machine,product)
         $actualRows = $db->table('machining_assy_bushing_hourly')
             ->select('shift_id, machine_id, product_id, SUM(qty_fg) AS fg_total')
             ->where('production_date', $date)
@@ -343,7 +398,6 @@ class AssyBushingDailyProductionController extends BaseController
             $produced = (int)($actualMap[$shiftId.'_'.$machineId.'_'.$productId] ?? 0);
             if ($produced > $qtyPlan) $produced = $qtyPlan;
 
-            // prev process pakai sequence
             $pn = $this->resolvePrevNextBySequence($db, $productId, $abProcessId);
             $prevProcessId = $pn['prev'];
             if (!$prevProcessId) continue;
@@ -373,25 +427,11 @@ class AssyBushingDailyProductionController extends BaseController
             if ($hasQtyIn)  $data['qty_in']  = $qtyInRemain;
             if ($hasQtyOut) $data['qty_out'] = $oldQtyOut;
 
-            // item + header
             $this->upsertWipSafe($db, $baseInbound, $data, 'daily_schedule_items', $dsiId);
             $this->upsertWipSafe($db, $baseInbound, $data, 'daily_schedules', $dsId);
         }
     }
 
-    /**
-     * FINISH SHIFT:
-     * - transfer = stock inbound (prev->AB) yang belum terkirim
-     * - inbound prev->AB:
-     *    qty_out += transfer
-     *    qty_in  = plan - qty_out
-     *    stock   = 0
-     *    status DONE jika qty_in==0 else WAITING
-     * - next AB->NEXT:
-     *    qty_in  += transfer
-     *    qty_out += transfer
-     *    stock   += transfer   (agar proses next "melihat" kiriman)
-     */
     private function finishAssyBushingTransferFlow($db, string $date): int
     {
         if (!$db->tableExists('production_wip')) return 0;
@@ -430,9 +470,6 @@ class AssyBushingDailyProductionController extends BaseController
             if (!$prevProcessId) throw new \Exception("Prev process tidak ditemukan (product_id={$productId})");
             if (!$nextProcessId) throw new \Exception("Next process tidak ditemukan (product_id={$productId})");
 
-            // =========================
-            // A) INBOUND prev -> AB
-            // =========================
             $baseInbound = [
                 $wipDateCol       => $date,
                 'product_id'      => $productId,
@@ -448,19 +485,12 @@ class AssyBushingDailyProductionController extends BaseController
             $oldStock = ($hasStock && $inRow) ? (int)($inRow['stock'] ?? 0) : 0;
             $oldStock = max(0, $oldStock);
 
-            // transfer = stock yang belum terkirim
             $transfer = min($oldStock, max(0, $qtyPlan - $oldQtyOut));
-            if ($transfer <= 0) {
-                $processed++;
-                continue;
-            }
+            if ($transfer <= 0) { $processed++; continue; }
 
-            $newQtyOut = $oldQtyOut + $transfer;
-            $newQtyOut = min($newQtyOut, $qtyPlan);
-
-            $newQtyIn = $hasQtyIn ? max(0, $qtyPlan - $newQtyOut) : 0;
-
-            $inStatus = ($hasQtyIn && $newQtyIn > 0) ? 'WAITING' : 'DONE';
+            $newQtyOut = min($oldQtyOut + $transfer, $qtyPlan);
+            $newQtyIn  = $hasQtyIn ? max(0, $qtyPlan - $newQtyOut) : 0;
+            $inStatus  = ($hasQtyIn && $newQtyIn > 0) ? 'WAITING' : 'DONE';
 
             $inData = [
                 'qty'    => $qtyPlan,
@@ -470,13 +500,9 @@ class AssyBushingDailyProductionController extends BaseController
             if ($hasQtyIn)  $inData['qty_in']  = $newQtyIn;
             if ($hasStock)  $inData['stock']   = 0;
 
-            // update inbound item + header
             $this->upsertWipSafe($db, $baseInbound, $inData, 'daily_schedule_items', $dsiId);
             $this->upsertWipSafe($db, $baseInbound, $inData, 'daily_schedules', $dsId);
 
-            // =========================
-            // B) NEXT AB -> NEXT
-            // =========================
             $baseNext = [
                 $wipDateCol       => $date,
                 'product_id'      => $productId,
@@ -487,7 +513,6 @@ class AssyBushingDailyProductionController extends BaseController
             $nxRow = $this->getWipRowPreferItem($db, $baseNext, $dsiId);
 
             $nxQty    = (int)($nxRow['qty'] ?? 0) + $transfer;
-
             $nxQtyIn  = $hasQtyIn  ? (int)($nxRow['qty_in'] ?? 0) + $transfer : 0;
             $nxQtyOut = $hasQtyOut ? (int)($nxRow['qty_out'] ?? 0) + $transfer : 0;
             $nxStock  = $hasStock  ? (int)($nxRow['stock'] ?? 0) + $transfer : 0;
@@ -498,7 +523,7 @@ class AssyBushingDailyProductionController extends BaseController
             ];
             if ($hasQtyIn)  $nxData['qty_in']  = $nxQtyIn;
             if ($hasQtyOut) $nxData['qty_out'] = $nxQtyOut;
-            if ($hasStock)  $nxData['stock']   = $nxStock; // ✅ next bisa lihat kiriman
+            if ($hasStock)  $nxData['stock']   = $nxStock;
 
             $this->upsertWipSafe($db, $baseNext, $nxData, 'daily_schedule_items', $dsiId);
             $this->upsertWipSafe($db, $baseNext, $nxData, 'daily_schedules', $dsId);
@@ -510,7 +535,7 @@ class AssyBushingDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * CONTROLLER ACTIONS
+     * ACTIONS
      * ===================================================== */
 
     public function index()
@@ -520,6 +545,16 @@ class AssyBushingDailyProductionController extends BaseController
         $operator = session()->get('fullname') ?? '-';
 
         $shifts = $this->getMachiningShifts($db);
+
+        // NG Categories (pakai tabel yg sama seperti machining/leak test)
+        $ngCategories = [];
+        if ($db->tableExists('ng_categories')) {
+            $ngCategories = $db->table('ng_categories')
+                ->select('id, ng_code, ng_name')
+                ->where('is_active', 1)
+                ->orderBy('ng_code', 'ASC')
+                ->get()->getResultArray();
+        }
 
         foreach ($shifts as &$shift) {
             $shift['slots'] = $db->table('shift_time_slots sts')
@@ -574,6 +609,19 @@ class AssyBushingDailyProductionController extends BaseController
             foreach ($hourly as $h) {
                 $shift['hourly_map'][(int)$h['machine_id']][(int)$h['product_id']][(int)$h['time_slot_id']] = $h;
             }
+
+            // ✅ load NG details (kalau tabel ada)
+            $shift['ng_detail_map'] = [];
+            if ($db->tableExists('machining_assy_bushing_hourly_ng_details')) {
+                $details = $db->table('machining_assy_bushing_hourly_ng_details')
+                    ->where('production_date', $date)
+                    ->where('shift_id', $shift['id'])
+                    ->get()->getResultArray();
+
+                foreach ($details as $d) {
+                    $shift['ng_detail_map'][(int)$d['machine_id']][(int)$d['product_id']][(int)$d['time_slot_id']][] = $d;
+                }
+            }
         }
         unset($shift);
 
@@ -583,6 +631,7 @@ class AssyBushingDailyProductionController extends BaseController
             'date'         => $date,
             'operator'     => $operator,
             'shifts'       => $shifts,
+            'ngCategories' => $ngCategories,
             'canFinish'    => $canFinish,
             'isAdmin'      => $this->isAdminSession(),
             'shift3EndAt'  => $shift3EndDT ? $shift3EndDT->format('Y-m-d H:i:s') : null,
@@ -605,13 +654,19 @@ class AssyBushingDailyProductionController extends BaseController
 
         $db->transBegin();
         try {
+            // 1) simpan hourly OK/NG (ng nanti di-update dari detail)
             $this->saveHourlyRows($db, $items);
+
+            // 2) simpan detail NG + update qty_ng hourly
+            $this->saveNgDetailsAndUpdateHourlyNg($db, $items);
+
+            // 3) sync WIP stock berdasarkan hourly qty_fg
             $this->syncAssyBushingWipStockFromHourly($db, (string)$date);
 
             if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
 
-            return redirect()->back()->with('success', 'Hourly Assy Bushing tersimpan + Stock WIP Assy Bushing ter-update');
+            return redirect()->back()->with('success', 'Hourly Assy Bushing tersimpan + NG detail tersimpan + Stock WIP ter-update');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
@@ -640,22 +695,22 @@ class AssyBushingDailyProductionController extends BaseController
 
         $db->transBegin();
         try {
-            // kalau ada input shift3 belum disimpan, simpan dulu
-            if (!empty($items)) $this->saveHourlyRows($db, $items);
+            // simpan dulu jika ada input belum tersimpan
+            if (!empty($items)) {
+                $this->saveHourlyRows($db, $items);
+                $this->saveNgDetailsAndUpdateHourlyNg($db, $items);
+            }
 
-            // sync dulu: bentuk stock inbound yang benar (produced - qty_out)
+            // sync inbound stock
             $this->syncAssyBushingWipStockFromHourly($db, (string)$date);
 
-            // finish + transfer ke next flow
+            // transfer flow
             $processed = $this->finishAssyBushingTransferFlow($db, (string)$date);
 
             if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
 
-            return redirect()->back()->with(
-                'success',
-                'Finish Shift Assy Bushing sukses. Transfer ke proses berikutnya selesai. (rows: '.$processed.')'
-            );
+            return redirect()->back()->with('success', 'Finish Shift Assy Bushing sukses (rows: '.$processed.')');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
