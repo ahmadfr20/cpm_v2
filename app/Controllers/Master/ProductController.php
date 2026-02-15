@@ -70,30 +70,33 @@ class ProductController extends BaseController
         }
 
         // ✅ ambil weight
-        $weightAscas    = (float)($this->request->getPost('weight_ascas') ?? 0);
-        $weightRunner   = (float)($this->request->getPost('weight_runner') ?? 0);
-        $weightMachining= (float)($this->request->getPost('weight_machining') ?? 0);
+        $weightAscas      = (float)($this->request->getPost('weight_ascas') ?? 0);
+        $weightRunner     = (float)($this->request->getPost('weight_runner') ?? 0);
+        $weightMachining  = (float)($this->request->getPost('weight_machining') ?? 0);
 
         // ✅ auto hitung die casting
         $weightDieCasting = $weightAscas + $weightRunner;
 
+        // ✅ CT machining (baru)
+        $ctMachining = (int)($this->request->getPost('cycle_time_machining') ?? 0);
+
         $id = $this->productModel->insert([
-            'part_no'            => $this->request->getPost('part_no'),
-            'part_name'          => $this->request->getPost('part_name'),
-            'part_prod'          => $this->request->getPost('part_prod'),
-            'customer_id'        => $customerId,
-            'weight_ascas'       => $weightAscas,
-            'weight_runner'      => $weightRunner,
+            'part_no'             => $this->request->getPost('part_no'),
+            'part_prod'           => $this->request->getPost('part_prod'), // ✅ baru
+            'part_name'           => $this->request->getPost('part_name'),
+            'customer_id'         => $customerId,
 
-            // ✅ tambahan
-            'weight_die_casting' => $weightDieCasting,
-            'weight_machining'   => $weightMachining,
+            'weight_ascas'        => $weightAscas,
+            'weight_runner'       => $weightRunner,
+            'weight_die_casting'  => $weightDieCasting,
+            'weight_machining'    => $weightMachining,
 
-            'cycle_time'         => $this->request->getPost('cycle_time'),
-            'cavity'             => $this->request->getPost('cavity'),
-            'efficiency_rate'    => $this->request->getPost('efficiency_rate'),
-            'notes'              => $this->request->getPost('notes'),
-            'is_active'          => 1
+            'cycle_time'          => $this->request->getPost('cycle_time'),
+            'cycle_time_machining'=> $ctMachining, // ✅ baru
+            'cavity'              => $this->request->getPost('cavity'),
+            'efficiency_rate'     => $this->request->getPost('efficiency_rate'),
+            'notes'               => $this->request->getPost('notes'),
+            'is_active'           => 1
         ]);
 
         if ($this->isAjaxRequest()) {
@@ -130,30 +133,32 @@ class ProductController extends BaseController
             return redirect()->back()->withInput()->with('error', 'Customer wajib dipilih');
         }
 
-        $weightAscas     = (float)($this->request->getPost('weight_ascas') ?? 0);
-        $weightRunner    = (float)($this->request->getPost('weight_runner') ?? 0);
-        $weightMachining = (float)($this->request->getPost('weight_machining') ?? 0);
+        $weightAscas      = (float)($this->request->getPost('weight_ascas') ?? 0);
+        $weightRunner     = (float)($this->request->getPost('weight_runner') ?? 0);
+        $weightMachining  = (float)($this->request->getPost('weight_machining') ?? 0);
 
         // ✅ auto hitung die casting
         $weightDieCasting = $weightAscas + $weightRunner;
 
+        // ✅ CT machining (baru)
+        $ctMachining = (int)($this->request->getPost('cycle_time_machining') ?? 0);
+
         $this->productModel->update($id, [
-            'part_no'            => $this->request->getPost('part_no'),
-            'part_name'          => $this->request->getPost('part_name'),
-            'part_prod'          => $this->request->getPost('part_prod'),
-            'customer_id'        => $customerId,
+            'part_no'             => $this->request->getPost('part_no'),
+            'part_prod'           => $this->request->getPost('part_prod'), // ✅ baru
+            'part_name'           => $this->request->getPost('part_name'),
+            'customer_id'         => $customerId,
 
-            'weight_ascas'       => $weightAscas,
-            'weight_runner'      => $weightRunner,
+            'weight_ascas'        => $weightAscas,
+            'weight_runner'       => $weightRunner,
+            'weight_die_casting'  => $weightDieCasting,
+            'weight_machining'    => $weightMachining,
 
-            // ✅ tambahan
-            'weight_die_casting' => $weightDieCasting,
-            'weight_machining'   => $weightMachining,
-
-            'cycle_time'         => $this->request->getPost('cycle_time'),
-            'cavity'             => $this->request->getPost('cavity'),
-            'efficiency_rate'    => $this->request->getPost('efficiency_rate'),
-            'notes'              => $this->request->getPost('notes'),
+            'cycle_time'          => $this->request->getPost('cycle_time'),
+            'cycle_time_machining'=> $ctMachining, // ✅ baru
+            'cavity'              => $this->request->getPost('cavity'),
+            'efficiency_rate'     => $this->request->getPost('efficiency_rate'),
+            'notes'               => $this->request->getPost('notes'),
         ]);
 
         if ($this->isAjaxRequest()) {

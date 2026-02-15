@@ -40,7 +40,7 @@ class DailyScheduleController extends BaseController
         foreach ($slots as $s) {
             $start = strtotime($s['time_start']);
             $end   = strtotime($s['time_end']);
-            if ($end <= $start) $end += 86400; // lewat tengah malam
+            if ($end <= $start) $end += 86400;
             $totalSecond += ($end - $start);
         }
 
@@ -93,84 +93,215 @@ class DailyScheduleController extends BaseController
         return (int)$prevFlow['process_id'];
     }
 
-    /* =====================================================
-     * UPSERT WIP incoming untuk schedule Machining:
-     * prev -> Machining, source_table=daily_schedule_items, source_id=itemId
-     *
-     * REQUIREMENT USER:
-     * - qty_p(plan) pada schedule harus masuk ke qty_in production_wip
-     * - stock pada tampilan "IN/OUT/STOCK" tidak boleh kosong (jadi stock=qty_in)
-     * - OUTGOING Machining->next TIDAK dibuat di schedule (dibuat saat finish shift hourly)
-     * ===================================================== */
-    private function upsertIncomingWipSchedule(
+    /* ============================================
+     * Helper: detect date column production_wip
+     * ============================================ */
+    private function detectWipDateColumn($db): string
+    {
+        if ($db->fieldExists('production_date', 'production_wip')) return 'production_date';
+        if ($db->fieldExists('schedule_date', 'production_wip'))   return 'schedule_date';
+        if ($db->fieldExists('wip_date', 'production_wip'))        return 'wip_date';
+        throw new \Exception('Tabel production_wip tidak punya kolom tanggal (production_date / schedule_date / wip_date).');
+    }
+
+    /* ============================================
+     * Helper: detect stock column production_wip
+     * ============================================ */
+    private function detectWipStockColumn($db): ?string
+    {
+        foreach (['stock', 'stock_qty', 'qty_stock'] as $c) {
+            if ($db->fieldExists($c, 'production_wip')) return $c;
+        }
+        return null;
+    }
+
+    private function ensureTransferColumn($db): void
+    {
+        if (!$db->tableExists('production_wip')) return;
+        if (!$db->fieldExists('transfer', 'production_wip')) {
+            throw new \Exception('Kolom transfer belum ada di production_wip. Jalankan migration tambah kolom transfer.');
+        }
+    }
+
+    /* =========================================================
+     * Ambil ROW stock terbaru untuk prev process (carry-over)
+     * - Prioritas: DATE(dateCol) <= $date
+     * - Fallback: row terbaru tanpa filter tanggal (schedule jauh)
+     * ========================================================= */
+    private function getPrevProcessLatestRow($db, string $date, int $productId, int $prevProcessId): ?array
+    {
+        if (!$db->tableExists('production_wip')) return null;
+
+        $dateCol  = $this->detectWipDateColumn($db);
+        $stockCol = $this->detectWipStockColumn($db);
+        if (!$stockCol) return null;
+
+        $builder = $db->table('production_wip pw')
+            ->select("pw.id, pw.$stockCol as stock_val, pw.transfer, pw.qty_in, pw.qty_out")
+            ->where('pw.product_id', $productId)
+            ->where('pw.to_process_id', $prevProcessId);
+
+        $builder->where("DATE(pw.$dateCol) <=", $date, false);
+
+        $row = $builder
+            ->orderBy("DATE(pw.$dateCol)", 'DESC', false)
+            ->orderBy("pw.id", 'DESC')
+            ->get()
+            ->getRowArray();
+
+        if ($row) return $row;
+
+        return $db->table('production_wip pw')
+            ->select("pw.id, pw.$stockCol as stock_val, pw.transfer, pw.qty_in, pw.qty_out")
+            ->where('pw.product_id', $productId)
+            ->where('pw.to_process_id', $prevProcessId)
+            ->orderBy("pw.id", 'DESC')
+            ->get()
+            ->getRowArray();
+    }
+
+    private function getPrevProcessStock($db, string $date, int $productId, int $prevProcessId): int
+    {
+        $row = $this->getPrevProcessLatestRow($db, $date, $productId, $prevProcessId);
+        return (int)($row['stock_val'] ?? 0);
+    }
+
+    /* =========================================================
+     * RESERVE/RELEASE dari prev process untuk dikirim ke next
+     * - stock prev berkurang saat reserve
+     * - transfer prev bertambah saat reserve
+     * ========================================================= */
+    private function applyPrevReserveToNext(
         $db,
         string $date,
         int $productId,
         int $prevProcessId,
-        int $machiningProcessId,
-        int $scheduleItemId,
-        int $planQty
+        int $deltaQty
     ): void {
+        if ($deltaQty === 0) return;
         if (!$db->tableExists('production_wip')) return;
-        if ($prevProcessId <= 0) return; // kalau Machining proses pertama, tidak ada incoming
+
+        $this->ensureTransferColumn($db);
+
+        $stockCol = $this->detectWipStockColumn($db);
+        if (!$stockCol) return;
+
+        $hasUpdatedAt = $db->fieldExists('updated_at', 'production_wip');
+        $now = date('Y-m-d H:i:s');
+
+        $prevRow = $this->getPrevProcessLatestRow($db, $date, $productId, $prevProcessId);
+        if (!$prevRow) return;
+
+        $rowId       = (int)$prevRow['id'];
+        $curStock    = (int)($prevRow['stock_val'] ?? 0);
+        $curTransfer = (int)($prevRow['transfer'] ?? 0);
+
+        $newStock = $curStock - $deltaQty;     // reserve (delta+) => turun
+        if ($newStock < 0) $newStock = 0;
+
+        $newTransfer = $curTransfer + $deltaQty; // reserve => naik
+        if ($newTransfer < 0) $newTransfer = 0;
+
+        $update = [
+            $stockCol  => $newStock,
+            'transfer' => $newTransfer,
+        ];
+
+        if ($hasUpdatedAt) $update['updated_at'] = $now;
+
+        $db->table('production_wip')->where('id', $rowId)->update($update);
+    }
+
+    /* =========================================================
+     * Incoming Machining saat schedule:
+     * qty_in bertambah, stock tetap 0
+     * ========================================================= */
+    private function upsertIncomingWipMachining(
+        $db,
+        string $date,
+        int $productId,
+        int $fromPrevProcessId,
+        int $toMachiningProcessId,
+        int $scheduleItemId,
+        int $deltaQty
+    ): void {
+        if ($deltaQty === 0) return;
+        if (!$db->tableExists('production_wip')) return;
+
+        $dateCol = $this->detectWipDateColumn($db);
 
         $hasQtyIn  = $db->fieldExists('qty_in', 'production_wip');
+        $hasStock  = $db->fieldExists('stock', 'production_wip');
+        $hasQty    = $db->fieldExists('qty', 'production_wip');
         $hasQtyOut = $db->fieldExists('qty_out', 'production_wip');
-        // $hasStock  = $db->fieldExists('stock', 'production_wip');
         $hasCreatedAt = $db->fieldExists('created_at', 'production_wip');
         $hasUpdatedAt = $db->fieldExists('updated_at', 'production_wip');
+
+        if (!$hasQtyIn) throw new \Exception('Kolom qty_in tidak ada di production_wip');
 
         $now = date('Y-m-d H:i:s');
 
         $key = [
-            'production_date' => $date,
+            $dateCol          => $date,
             'product_id'      => $productId,
-            'from_process_id' => $prevProcessId,
-            'to_process_id'   => $machiningProcessId,
+            'from_process_id' => $fromPrevProcessId,
+            'to_process_id'   => $toMachiningProcessId,
             'source_table'    => 'daily_schedule_items',
             'source_id'       => $scheduleItemId,
         ];
 
         $exist = $db->table('production_wip')->where($key)->get()->getRowArray();
 
-        // Schedule = rencana masuk ke Machining
-        $payload = $key + [
-            'qty'    => $planQty,      // legacy qty, isi sama dengan plan
-            'status' => 'SCHEDULED',
-        ];
-
-        // IMPORTANT: qty_in HARUS terisi dari plan
-        if ($hasQtyIn)  $payload['qty_in'] = $planQty;
-
-        // belum ada output saat schedule
-        if ($hasQtyOut) $payload['qty_out'] = 0;
-
-        // agar "Stock" tidak kosong pada view inventory, isi = plan (stock awal = masuk)
-        // if ($hasStock)  $payload['stock'] = $planQty;
-
-        if ($hasUpdatedAt) $payload['updated_at'] = $now;
-
         if ($exist) {
-            // kalau sudah DONE jangan ditimpa oleh schedule
-            if (($exist['status'] ?? '') !== 'DONE') {
-                $db->table('production_wip')->where('id', (int)$exist['id'])->update($payload);
-            }
+            $newQtyIn = (int)($exist['qty_in'] ?? 0) + $deltaQty;
+            if ($newQtyIn < 0) $newQtyIn = 0;
+
+            $upd = [
+                'qty_in' => $newQtyIn,
+                'status' => ($newQtyIn > 0) ? 'WAITING' : ($exist['status'] ?? 'WAITING'),
+            ];
+
+            if ($hasQty)    $upd['qty'] = $newQtyIn;
+            if ($hasQtyOut) $upd['qty_out'] = (int)($exist['qty_out'] ?? 0);
+
+            // ✅ stock tetap 0 (belum diproses)
+            if ($hasStock)  $upd['stock'] = 0;
+
+            if ($hasUpdatedAt) $upd['updated_at'] = $now;
+
+            $db->table('production_wip')->where('id', (int)$exist['id'])->update($upd);
             return;
         }
 
-        if ($hasCreatedAt) $payload['created_at'] = $now;
-        $db->table('production_wip')->insert($payload);
+        $qtyIn = max(0, $deltaQty);
+        if ($qtyIn <= 0) return;
+
+        $ins = $key + [
+            'qty_in' => $qtyIn,
+            'status' => 'WAITING',
+        ];
+
+        if ($hasQty)    $ins['qty'] = $qtyIn;
+        if ($hasQtyOut) $ins['qty_out'] = 0;
+        if ($hasStock)  $ins['stock'] = 0;
+
+        if ($db->fieldExists('transfer', 'production_wip')) $ins['transfer'] = 0;
+
+        if ($hasCreatedAt) $ins['created_at'] = $now;
+        if ($hasUpdatedAt) $ins['updated_at'] = $now;
+
+        $db->table('production_wip')->insert($ins);
     }
 
     /* ============================================
-     * INDEX
+     * INDEX (view)
      * ============================================ */
     public function index()
     {
         $db   = db_connect();
         $date = $this->request->getGet('date');
         if (empty($date)) {
-        $date = date('Y-m-d', strtotime('+1 day'));
+            $date = date('Y-m-d', strtotime('+1 day'));
         }
 
         $shifts = $db->table('shifts')
@@ -225,256 +356,15 @@ class DailyScheduleController extends BaseController
         ]);
     }
 
-        /* ============================================
-     * AJAX: daftar incoming WIP untuk Machining
-     * - ambil produk dari production_wip yang to_process_id = Machining
-     * - qty diambil dari qty_in (wajib)
-     * ============================================ */
-    public function incomingWip()
-    {
-        $db   = db_connect();
-        $date = (string)($this->request->getGet('date') ?? date('Y-m-d'));
-
-        if (!$db->tableExists('production_wip')) {
-            return $this->response->setJSON(['status' => false, 'message' => 'production_wip tidak ada']);
-        }
-
-        $mcProcessId = $this->getProcessIdMachining($db);
-
-        $hasQtyIn = $db->fieldExists('qty_in', 'production_wip');
-        if (!$hasQtyIn) {
-            return $this->response->setJSON(['status' => false, 'message' => 'Kolom qty_in tidak ada di production_wip']);
-        }
-
-        // Ambil aggregated per product (total qty_in)
-        $rows = $db->table('production_wip pw')
-            ->select('
-                pw.product_id,
-                SUM(COALESCE(pw.qty_in,0)) AS qty_available,
-                p.part_no,
-                p.part_name
-            ')
-            ->join('products p', 'p.id = pw.product_id')
-            ->where('pw.production_date', $date)
-            ->where('pw.to_process_id', $mcProcessId)
-            ->where('pw.status', 'WAITING')
-            ->groupBy('pw.product_id, p.part_no, p.part_name')
-            ->having('qty_available > 0')
-            ->orderBy('p.part_no', 'ASC')
-            ->get()
-            ->getResultArray();
-
-        $data = array_map(function ($r) {
-            return [
-                'product_id' => (int)$r['product_id'],
-                'part_no'    => (string)$r['part_no'],
-                'part_name'  => (string)$r['part_name'],
-                'qty'        => (int)$r['qty_available'],
-            ];
-        }, $rows);
-
-        return $this->response->setJSON(['status' => true, 'data' => $data]);
-    }
-
     /* ============================================
-     * AJAX: assign incoming WIP ke schedule Machining
-     * - upsert daily_schedules + daily_schedule_items
-     * - kurangi qty_in di production_wip sesuai qty assign
-     * - qty_out di WIP bertambah, status DONE bila habis
-     * ============================================ */
-    public function assignIncomingWipBulk()
-    {
-        $db = db_connect();
-        $role  = session()->get('role') ?? '';
-        $today = date('Y-m-d');
-
-        if ($role !== 'ADMIN' && $date <= $today) {
-            return $this->response->setJSON([
-                'status' => false,
-                'message' => 'Hanya ADMIN yang boleh membuat schedule untuk hari ini. Selain ADMIN hanya boleh mulai besok.'
-            ]);
-        }
-
-
-        $date      = (string)$this->request->getPost('date');
-        $shiftId   = (int)$this->request->getPost('shift_id');
-        $itemsJson = (string)$this->request->getPost('items');
-
-        if ($date === '' || $shiftId <= 0 || $itemsJson === '') {
-            return $this->response->setJSON(['status' => false, 'message' => 'Data tidak lengkap']);
-        }
-
-        $items = json_decode($itemsJson, true);
-        if (!$items || !is_array($items)) {
-            return $this->response->setJSON(['status' => false, 'message' => 'Format items tidak valid']);
-        }
-
-        $db->transBegin();
-        try {
-            $mcProcessId = $this->getProcessIdMachining($db);
-
-            if (!$db->tableExists('production_wip')) {
-                throw new \Exception('production_wip tidak ada');
-            }
-
-            $hasQtyIn     = $db->fieldExists('qty_in', 'production_wip');
-            $hasQtyOut    = $db->fieldExists('qty_out', 'production_wip');
-            $hasStock     = $db->fieldExists('stock', 'production_wip');
-            $hasUpdatedAt = $db->fieldExists('updated_at', 'production_wip');
-
-            if (!$hasQtyIn) throw new \Exception('Kolom qty_in tidak ada di production_wip');
-
-            $now = date('Y-m-d H:i:s');
-
-            // header schedule per shift (dibuat sekali)
-            $schedule = $db->table('daily_schedules')
-                ->where([
-                    'schedule_date' => $date,
-                    'shift_id'      => $shiftId,
-                    'section'       => 'Machining',
-                ])
-                ->get()->getRowArray();
-
-            if (!$schedule) {
-                $insertHeader = [
-                    'schedule_date' => $date,
-                    'shift_id'      => $shiftId,
-                    'section'       => 'Machining',
-                    'is_completed'  => 0,
-                    'created_at'    => $now,
-                ];
-                if ($db->fieldExists('process_id', 'daily_schedules')) $insertHeader['process_id'] = $mcProcessId;
-                if ($db->fieldExists('updated_at', 'daily_schedules')) $insertHeader['updated_at'] = $now;
-
-                $db->table('daily_schedules')->insert($insertHeader);
-                $scheduleId = (int)$db->insertID();
-            } else {
-                $scheduleId = (int)$schedule['id'];
-            }
-
-            foreach ($items as $it) {
-                $productId = (int)($it['product_id'] ?? 0);
-                $machineId = (int)($it['machine_id'] ?? 0);
-                $qty       = (int)($it['qty'] ?? 0);
-
-                if ($productId <= 0 || $machineId <= 0 || $qty <= 0) continue;
-
-                if (!$this->validateProductHasFlow($db, $productId, $mcProcessId)) {
-                    throw new \Exception("Product ID {$productId} tidak punya flow Machining aktif");
-                }
-
-                // ambil WIP WAITING incoming ke Machining untuk product tsb
-                $wipRows = $db->table('production_wip')
-                    ->where('production_date', $date)
-                    ->where('to_process_id', $mcProcessId)
-                    ->where('product_id', $productId)
-                    ->where('status', 'WAITING')
-                    ->orderBy('id', 'ASC')
-                    ->get()->getResultArray();
-
-                if (!$wipRows) throw new \Exception("WIP incoming habis untuk product {$productId}");
-
-                $available = 0;
-                foreach ($wipRows as $w) $available += (int)($w['qty_in'] ?? 0);
-                if ($qty > $available) throw new \Exception("Qty {$qty} > available {$available} (product {$productId})");
-
-                // upsert schedule item PER machine+product (target += qty)
-                $existItem = $db->table('daily_schedule_items')
-                    ->where([
-                        'daily_schedule_id' => $scheduleId,
-                        'shift_id'          => $shiftId,
-                        'machine_id'        => $machineId,
-                        'product_id'        => $productId,
-                    ])
-                    ->get()->getRowArray();
-
-                if ($existItem) {
-                    $db->table('daily_schedule_items')
-                        ->where('id', (int)$existItem['id'])
-                        ->update([
-                            'target_per_shift' => (int)($existItem['target_per_shift'] ?? 0) + $qty,
-                            'is_selected'      => 1
-                        ]);
-                } else {
-                    $product = $db->table('products')
-                        ->select('cycle_time, cavity, efficiency_rate')
-                        ->where('id', $productId)
-                        ->get()->getRowArray();
-
-                    $cycle  = (int)($product['cycle_time'] ?? 0);
-                    $cavity = (int)($product['cavity'] ?? 0);
-                    $effRaw = (float)($product['efficiency_rate'] ?? 100.0);
-                    $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
-
-                    $targetPerHour = 0;
-                    if ($cycle > 0 && $cavity > 0) {
-                        $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
-                    }
-
-                    $db->table('daily_schedule_items')->insert([
-                        'daily_schedule_id' => $scheduleId,
-                        'shift_id'          => $shiftId,
-                        'machine_id'        => $machineId,
-                        'product_id'        => $productId,
-                        'cycle_time'        => $cycle,
-                        'cavity'            => $cavity,
-                        'target_per_hour'   => $targetPerHour,
-                        'target_per_shift'  => $qty,
-                        'is_selected'       => 1
-                    ]);
-                }
-
-                // kurangi qty_in WIP (FIFO)
-                $remain = $qty;
-                foreach ($wipRows as $w) {
-                    if ($remain <= 0) break;
-
-                    $rowId = (int)$w['id'];
-                    $saldo = (int)($w['qty_in'] ?? 0);
-                    if ($saldo <= 0) continue;
-
-                    $take = min($saldo, $remain);
-
-                    $update = [
-                        'qty_in' => $saldo - $take,
-                        'status' => (($saldo - $take) <= 0) ? 'DONE' : 'WAITING',
-                    ];
-
-                    if ($hasQtyOut) $update['qty_out'] = (int)($w['qty_out'] ?? 0) + $take;
-
-                    if ($hasStock) {
-                        $update['stock'] = (int)($w['stock'] ?? 0) - $take;
-                        if ($update['stock'] < 0) $update['stock'] = 0;
-                    }
-
-                    if ($hasUpdatedAt) $update['updated_at'] = $now;
-
-                    $db->table('production_wip')->where('id', $rowId)->update($update);
-                    $remain -= $take;
-                }
-
-                if ($remain > 0) throw new \Exception("Gagal kurangi WIP untuk product {$productId}");
-            }
-
-            if ($db->transStatus() === false) throw new \Exception('DB error');
-            $db->transCommit();
-            return $this->response->setJSON(['status' => true]);
-
-        } catch (\Throwable $e) {
-            $db->transRollback();
-            return $this->response->setJSON(['status' => false, 'message' => $e->getMessage()]);
-        }
-    }
-
-
-
-    /* ============================================
-     * AJAX: PRODUCT + TARGET (FLOW saja)
+     * ✅ AJAX: PRODUCT + TARGET + STOCK PREV
+     * Endpoint untuk select2 (productUrl)
      * ============================================ */
     public function getProductAndTarget()
     {
         $db      = db_connect();
         $shiftId = (int)$this->request->getGet('shift_id');
+        $date    = (string)($this->request->getGet('date') ?? date('Y-m-d'));
 
         if ($shiftId <= 0) return $this->response->setJSON([]);
 
@@ -483,8 +373,11 @@ class DailyScheduleController extends BaseController
         $totalSecond = $this->getTotalSecondShift($db, $shiftId);
         if ($totalSecond <= 0) return $this->response->setJSON([]);
 
+        $hasCtMach = $db->fieldExists('cycle_time_machining', 'products');
+
         $products = $db->table('product_process_flows ppf')
-            ->select('p.id, p.part_no, p.part_name, p.cycle_time, p.cavity, p.efficiency_rate')
+            ->select('p.id, p.part_no, p.part_name, p.cavity, p.efficiency_rate'
+                . ($hasCtMach ? ', p.cycle_time_machining' : ', p.cycle_time'))
             ->join('products p', 'p.id = ppf.product_id')
             ->where('ppf.is_active', 1)
             ->where('p.is_active', 1)
@@ -495,11 +388,13 @@ class DailyScheduleController extends BaseController
             ->getResultArray();
 
         foreach ($products as &$p) {
-            $cycle  = (int)($p['cycle_time'] ?? 0);
+            $cycle  = $hasCtMach ? (int)($p['cycle_time_machining'] ?? 0) : (int)($p['cycle_time'] ?? 0);
             $cavity = (int)($p['cavity'] ?? 0);
 
             $effRaw = (float)($p['efficiency_rate'] ?? 100.0);
             $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
+
+            $p['cycle_time_used'] = $cycle;
 
             if ($cycle > 0 && $cavity > 0) {
                 $targetShift = floor(($totalSecond / $cycle) * $cavity * $eff);
@@ -511,6 +406,11 @@ class DailyScheduleController extends BaseController
                 $p['target_per_shift'] = 0;
                 $p['target_per_hour']  = 0;
             }
+
+            // prev flow + stock prev (carry-over)
+            $prevId = $this->resolvePrevProcessByFlow($db, (int)$p['id'], $processIdMC);
+            $p['prev_process_id'] = (int)($prevId ?? 0);
+            $p['stock_prev']      = $prevId ? $this->getPrevProcessStock($db, $date, (int)$p['id'], $prevId) : 0;
         }
         unset($p);
 
@@ -519,9 +419,6 @@ class DailyScheduleController extends BaseController
 
     /* ============================================
      * STORE
-     * - Simpan schedule Machining
-     * - Buat/Update WIP incoming (prev -> Machining) dengan qty_in = plan
-     * - JANGAN buat WIP outgoing (Machining -> next) di sini
      * ============================================ */
     public function store()
     {
@@ -533,26 +430,18 @@ class DailyScheduleController extends BaseController
             return redirect()->back()->with('error', 'Data tidak valid');
         }
 
-        // =====================================================
-        // ✅ RULE ROLE + TANGGAL
-        // ADMIN boleh hari ini, non-admin hanya besok dst
-        // =====================================================
         $role  = session()->get('role') ?? '';
-        $today = date('Y-m-d'); // pastikan App timezone = Asia/Jakarta
-
+        $today = date('Y-m-d');
         if ($role !== 'ADMIN' && $date <= $today) {
-            return redirect()->back()->with(
-                'error',
-                'Hanya ADMIN yang boleh membuat schedule untuk hari ini. Selain ADMIN hanya boleh membuat schedule mulai besok.'
-            );
+            return redirect()->back()->with('error', 'Hanya ADMIN yang boleh membuat schedule untuk hari ini. Selain ADMIN hanya boleh membuat schedule mulai besok.');
         }
 
+        $processIdMC = $this->getProcessIdMachining($db);
+        $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
+        $now         = date('Y-m-d H:i:s');
+
         $db->transBegin();
-
         try {
-            $processIdMC = $this->getProcessIdMachining($db);
-            $now = date('Y-m-d H:i:s');
-
             foreach ($items as $row) {
                 $shiftId   = (int)($row['shift_id'] ?? 0);
                 $machineId = (int)($row['machine_id'] ?? 0);
@@ -560,30 +449,15 @@ class DailyScheduleController extends BaseController
 
                 if ($shiftId <= 0 || $machineId <= 0 || $productId <= 0) continue;
 
-                $planInput = (int)($row['plan'] ?? ($row['target_per_shift'] ?? 0));
+                $planInput = (int)($row['plan'] ?? 0);
                 if ($planInput < 0) $planInput = 0;
                 if ($planInput > 1200) $planInput = 1200;
-                if ($planInput <= 0) continue;
 
-                if (!$this->validateProductHasFlow($db, $productId, $processIdMC)) continue;
+                if (!$this->validateProductHasFlow($db, $productId, $processIdMC)) {
+                    throw new \Exception("Product ID {$productId} tidak punya flow Machining aktif.");
+                }
 
-                $product = $db->table('products')
-                    ->select('cycle_time, cavity, efficiency_rate')
-                    ->where('id', $productId)
-                    ->get()
-                    ->getRowArray();
-                if (!$product) continue;
-
-                $cycle  = (int)($product['cycle_time'] ?? 0);
-                $cavity = (int)($product['cavity'] ?? 0);
-                if ($cycle <= 0 || $cavity <= 0) continue;
-
-                $effRaw = (float)($product['efficiency_rate'] ?? 100.0);
-                $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
-
-                $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
-
-                // ===== DAILY SCHEDULE HEADER =====
+                // header schedule
                 $schedule = $db->table('daily_schedules')
                     ->where([
                         'schedule_date' => $date,
@@ -601,27 +475,16 @@ class DailyScheduleController extends BaseController
                         'is_completed'  => 0,
                         'created_at'    => $now
                     ];
-                    if ($db->fieldExists('process_id', 'daily_schedules')) {
-                        $insertHeader['process_id'] = $processIdMC;
-                    }
-                    if ($db->fieldExists('updated_at', 'daily_schedules')) {
-                        $insertHeader['updated_at'] = $now;
-                    }
+                    if ($db->fieldExists('process_id', 'daily_schedules')) $insertHeader['process_id'] = $processIdMC;
+                    if ($db->fieldExists('updated_at', 'daily_schedules')) $insertHeader['updated_at'] = $now;
 
                     $db->table('daily_schedules')->insert($insertHeader);
                     $scheduleId = (int)$db->insertID();
                 } else {
                     $scheduleId = (int)$schedule['id'];
-
-                    // optional: pastikan process_id terisi
-                    if ($db->fieldExists('process_id', 'daily_schedules') && empty($schedule['process_id'])) {
-                        $upd = ['process_id' => $processIdMC];
-                        if ($db->fieldExists('updated_at', 'daily_schedules')) $upd['updated_at'] = $now;
-                        $db->table('daily_schedules')->where('id', $scheduleId)->update($upd);
-                    }
                 }
 
-                // ===== DAILY SCHEDULE ITEM UPSERT =====
+                // item lama (delta)
                 $existItem = $db->table('daily_schedule_items')
                     ->where([
                         'daily_schedule_id' => $scheduleId,
@@ -630,6 +493,43 @@ class DailyScheduleController extends BaseController
                     ->get()
                     ->getRowArray();
 
+                $oldProductId = $existItem ? (int)($existItem['product_id'] ?? 0) : 0;
+                $oldPlan      = $existItem ? (int)($existItem['target_per_shift'] ?? 0) : 0;
+
+                $prevProcessIdNew = $this->resolvePrevProcessByFlow($db, $productId, $processIdMC);
+
+                // release jika product diganti
+                if ($existItem && $oldProductId > 0 && $oldProductId !== $productId) {
+                    $prevOld = $this->resolvePrevProcessByFlow($db, $oldProductId, $processIdMC);
+
+                    if ($prevOld && $oldPlan > 0) {
+                        $this->applyPrevReserveToNext($db, $date, $oldProductId, $prevOld, -$oldPlan);
+                        $this->upsertIncomingWipMachining($db, $date, $oldProductId, $prevOld, $processIdMC, (int)$existItem['id'], -$oldPlan);
+                    }
+
+                    $oldPlan = 0;
+                }
+
+                // CT machining
+                $product = $db->table('products')
+                    ->select($hasCtMach ? 'cycle_time_machining as ct, cavity, efficiency_rate' : 'cycle_time as ct, cavity, efficiency_rate')
+                    ->where('id', $productId)
+                    ->get()
+                    ->getRowArray();
+
+                if (!$product) throw new \Exception("Product ID {$productId} tidak ditemukan.");
+
+                $cycle  = (int)($product['ct'] ?? 0);
+                $cavity = (int)($product['cavity'] ?? 0);
+                if ($cycle <= 0 || $cavity <= 0) {
+                    throw new \Exception("Cycle time machining / cavity belum valid untuk Product ID {$productId}.");
+                }
+
+                $effRaw = (float)($product['efficiency_rate'] ?? 100.0);
+                $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
+                $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
+
+                // upsert schedule item
                 $dataItem = [
                     'daily_schedule_id' => $scheduleId,
                     'shift_id'          => $shiftId,
@@ -639,44 +539,46 @@ class DailyScheduleController extends BaseController
                     'cavity'            => $cavity,
                     'target_per_hour'   => $targetPerHour,
                     'target_per_shift'  => $planInput,
-                    'is_selected'       => 1
+                    'is_selected'       => ($planInput > 0) ? 1 : 0
                 ];
 
                 if ($existItem) {
-                    $db->table('daily_schedule_items')
-                        ->where('id', (int)$existItem['id'])
-                        ->update($dataItem);
+                    $db->table('daily_schedule_items')->where('id', (int)$existItem['id'])->update($dataItem);
                     $itemId = (int)$existItem['id'];
                 } else {
+                    if ($planInput <= 0) continue;
                     $db->table('daily_schedule_items')->insert($dataItem);
                     $itemId = (int)$db->insertID();
                 }
 
-                /**
-                 * WIP incoming: prev -> Machining (qty_in = plan)
-                 */
-                $prevProcessId = $this->resolvePrevProcessByFlow($db, $productId, $processIdMC);
-                if ($prevProcessId) {
-                    $this->upsertIncomingWipSchedule(
-                        $db,
-                        $date,
-                        $productId,
-                        $prevProcessId,
-                        $processIdMC,
-                        $itemId,
-                        $planInput
-                    );
+                // validasi & apply delta
+                if ($prevProcessIdNew) {
+                    $delta = $planInput - $oldPlan;
+
+                    if ($delta > 0) {
+                        $stockPrev = $this->getPrevProcessStock($db, $date, $productId, $prevProcessIdNew);
+
+                        if ($stockPrev <= 0) {
+                            throw new \Exception("Stock kosong pada proses sebelumnya (prev) untuk Product ID {$productId}. Tidak bisa scheduling.");
+                        }
+                        if ($delta > $stockPrev) {
+                            throw new \Exception("Scheduling tambahan ({$delta}) tidak boleh melebihi stock tersedia ({$stockPrev}) untuk Product ID {$productId}.");
+                        }
+                    }
+
+                    if ($delta !== 0) {
+                        $this->applyPrevReserveToNext($db, $date, $productId, $prevProcessIdNew, $delta);
+                        $this->upsertIncomingWipMachining($db, $date, $productId, $prevProcessIdNew, $processIdMC, $itemId, $delta);
+                    }
                 }
             }
 
-            if ($db->transStatus() === false) {
-                throw new \Exception('DB error');
-            }
-
+            if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
+
             return redirect()->back()->with(
                 'success',
-                'Schedule Machining tersimpan.'
+                'Schedule tersimpan. Stock prev berkurang + transfer tercatat + qty_in Machining bertambah (stock Machining tetap 0).'
             );
 
         } catch (\Throwable $e) {
@@ -684,5 +586,4 @@ class DailyScheduleController extends BaseController
             return redirect()->back()->with('error', $e->getMessage());
         }
     }
-
 }

@@ -3,279 +3,222 @@
 
 <style>
   :root{
-    --w-time: 140px;
-    --w-part: 280px;
-    --w-sch: 170px;
-    --w-sub: 95px;
+    --border:#e5e7eb;
+    --text:#0f172a;
 
-    --border: #e5e7eb;
-    --head: #f8fafc;
-    --subhead: #f1f5f9;
-    --stock: #FEF3C7;
-    --active: #dcfce7;
+    --head:#f1f5f9;
+    --head-border:#cbd5e1;
+
+    --wipakhir:#fff7cc;
+    --stock:#dcfce7;
+
+    --row-hover:#f8fafc;
   }
 
-  .page-head{ display:flex; gap:12px; align-items:flex-end; margin-bottom:14px; flex-wrap:wrap; }
-  .page-head .box{ border:1px solid var(--border); border-radius:10px; background:#fff; padding:10px 12px; min-width:180px; }
-  .page-head .box.highlight{ background: var(--stock); }
-  .page-head .label{ font-size:12px; font-weight:800; color:#64748b; text-transform:uppercase; letter-spacing:.3px; }
-  .page-head .value{ font-size:16px; font-weight:900; margin-top:2px; }
-
-  .sections-row{ display:flex; gap:14px; overflow:auto; padding-bottom:10px; }
-  .section-col{ min-width: 1050px; flex: 0 0 auto; } /* sedikit dilebarkan karena tambah kolom */
-
-  .section-card{ border:1px solid var(--border); border-radius:12px; background:#fff; overflow:hidden; }
-  .section-head{
-    padding:10px 12px; border-bottom:1px solid var(--border); background:#fff;
-    display:flex; align-items:center; justify-content:space-between; gap:10px;
+  .page-head{
+    display:flex;
+    gap:12px;
+    align-items:flex-end;
+    flex-wrap:wrap;
+    margin-bottom:12px;
   }
-  .section-head .title{ font-weight:900; text-transform:uppercase; letter-spacing:.3px; }
-  .section-head .meta{ font-size:12px; font-weight:800; color:#64748b; }
-
-  .shift-card{ border-top:1px solid var(--border); }
-  .shift-title{
-    padding:10px 12px; background:#fff; border-bottom:1px solid var(--border);
-    font-weight:900; text-transform:uppercase; letter-spacing:.3px;
+  .page-head .title{
+    font-weight:900;
+    font-size:18px;
+    letter-spacing:.2px;
+    color:var(--text);
+  }
+  .page-head form{
+    margin-left:auto;
+    display:flex;
+    gap:10px;
+    align-items:flex-end;
   }
 
-  .table-scroll{ overflow:auto; }
+  .excel-wrap{
+    background:#fff;
+    border:1px solid var(--border);
+    border-radius:12px;
+    overflow:hidden;
+  }
 
-  table.wip{ width:max-content; border-collapse:separate; border-spacing:0; table-layout:fixed; font-size:13px; }
-  table.wip th, table.wip td{
-    border-right:1px solid var(--border);
-    border-bottom:1px solid var(--border);
-    padding:6px 8px;
-    white-space:nowrap;
-    vertical-align:middle;
-    text-align:center;
+  .excel-scroll{
+    overflow:auto;
     background:#fff;
   }
 
-  table.wip thead tr.row-1 th{
-    position:sticky; top:0; z-index:30;
-    background:var(--head);
-    font-weight:900;
-    height:38px;
+  table.excel{
+    border-collapse:separate;
+    border-spacing:0;
+    width:max-content;
+    min-width:1200px;
+    font-size:13px;
+    color:var(--text);
   }
-  table.wip thead tr.row-2 th{
-    position:sticky; top:38px; z-index:29;
-    background:var(--subhead);
-    font-weight:900;
+
+  table.excel thead th{
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--head);
+    color: #0f172a;
+    font-weight: 800;
+    text-align: center;
+    border-bottom: 1px solid var(--head-border);
+    padding: 10px 10px;
+    white-space: nowrap;
+  }
+
+  table.excel th, table.excel td{
+    border-right:1px solid var(--border);
+    border-bottom:1px solid var(--border);
+    padding:10px 10px;
+    vertical-align:middle;
+    white-space:nowrap;
+    background:#fff;
+  }
+  table.excel tr > *:first-child{ border-left:1px solid var(--border); }
+  table.excel thead tr:first-child > *{ border-top:1px solid var(--border); }
+
+  table.excel tbody tr:hover td{
+    background: var(--row-hover);
+  }
+
+  .num{
+    text-align:right;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .station{
+    font-weight:800;
+    letter-spacing:.2px;
+  }
+  .part{
+    font-weight:800;
+    line-height:1.2;
+  }
+  .muted{
+    color:#64748b;
+    font-weight:600;
     font-size:12px;
-    height:34px;
+    margin-top:2px;
+    line-height:1.2;
   }
 
-  .sticky-1{ position:sticky; left:0; z-index:40; background:#fff; }
-  .sticky-2{ position:sticky; left:var(--w-time); z-index:40; background:#fff; }
-  .sticky-3{ position:sticky; left:calc(var(--w-time) + var(--w-part)); z-index:40; background:#fff; }
-  thead .sticky-1, thead .sticky-2, thead .sticky-3{ z-index:60 !important; background:var(--head) !important; }
-
-  .col-time{ width:var(--w-time); }
-  .col-part{ width:var(--w-part); text-align:left !important; }
-  .col-sch{ width:var(--w-sch); text-align:left !important; }
-  .col-sub{ width:var(--w-sub); }
-
-  .prod-title{ font-weight:900; line-height:1.05; }
-  .prod-sub{ font-size:12px; color:#64748b; line-height:1.1; }
-
-  .sch-box{ font-weight:900; line-height:1.35; }
-  .sch-line{ display:flex; justify-content:space-between; gap:12px; }
-  .sch-line span:first-child{ color:#64748b; font-weight:800; }
-
-  .row-active td{ background: var(--active); }
-
-  .stock-cell{
+  td.wipakhir{
+    background: var(--wipakhir) !important;
+    font-weight:900;
+  }
+  td.stock{
     background: var(--stock) !important;
     font-weight:900;
-    vertical-align: middle !important;
-    text-align: center !important;
-  }
-  .stock-box{
-    height:100%;
-    display:flex;
-    align-items:center;
-    justify-content:center;
-  }
-  .stock-line{
-    display:flex;
-    gap:10px;
-    align-items:center;
-    justify-content:center;
-  }
-  .stock-line span:first-child{
-    color:#64748b;
-    font-weight:800;
-    text-transform:lowercase;
   }
 
-  /* transfer cell (warna netral) */
-  .transfer-cell{
-    font-weight:900;
-    vertical-align: middle !important;
-    text-align: center !important;
+  tr.sep td{
+    height:10px;
+    padding:0 !important;
     background:#fff !important;
+    border:0 !important;
   }
 
-  .spacer-row td{ background:#f8fafc; height:10px; padding:0; }
+  .sticky-1{ position: sticky; left: 0; z-index: 4; background:#fff; }
+  .sticky-2{ position: sticky; left: 90px; z-index: 4; background:#fff; }
+  .sticky-3{ position: sticky; left: 260px; z-index: 4; background:#fff; }
+
+  thead .sticky-1, thead .sticky-2, thead .sticky-3{
+    z-index: 6;
+    background: var(--head) !important;
+  }
+
+  .w-date{ min-width:90px; }
+  .w-station{ min-width:170px; }
+  .w-part{ min-width:360px; }
+  .w-col{ min-width:130px; }
+  .w-col-sm{ min-width:110px; }
 </style>
 
-<h4 class="mb-2">
-  <i class="bi bi-box-seam me-2"></i> WIP – PER TIME SLOT
-</h4>
-
 <div class="page-head">
-  <div class="box highlight">
-    <div class="label">date</div>
-    <div class="value"><?= esc($date) ?></div>
-  </div>
-  <div class="box highlight" style="min-width:140px">
-    <div class="label">time</div>
-    <div class="value"><?= esc($nowTime) ?></div>
+  <div>
+    <div class="title"><?= esc($titleDate) ?> WIP</div>
+    <div class="text-muted small">Rekap harian dari hasil produksi</div>
   </div>
 
-  <form method="get" class="ms-auto d-flex gap-2 align-items-end">
-    <div>
-      <div class="label mb-1">filter date</div>
-      <input type="date" name="date" value="<?= esc($date) ?>" class="form-control">
-    </div>
-    <div>
-      <button class="btn btn-primary"><i class="bi bi-funnel"></i> Filter</button>
-    </div>
-  </form>
+  <?php if (!empty($isAdmin) && $isAdmin): ?>
+    <form method="get">
+      <div>
+        <label class="form-label mb-1 small">Date</label>
+        <input type="date" name="date" value="<?= esc($date) ?>" class="form-control form-control-sm">
+      </div>
+      <div>
+        <button class="btn btn-primary btn-sm"><i class="bi bi-funnel"></i> Filter</button>
+      </div>
+    </form>
+  <?php endif; ?>
 </div>
 
-<?php if (empty($sections)): ?>
-  <div class="alert alert-warning">Tidak ada data.</div>
-<?php else: ?>
+<div class="excel-wrap">
+  <div class="excel-scroll">
+    <table class="excel">
+      <thead>
+        <tr>
+          <th class="w-date sticky-1">Date</th>
+          <th class="w-station sticky-2">Station</th>
+          <th class="w-part sticky-3">Part</th>
 
-  <div class="sections-row">
-    <?php foreach ($sections as $sec): ?>
-      <?php
-        $procLabel = $sec['process_label'] ?? 'SECTION';
-        $shiftBlocks = $sec['shifts'] ?? [];
-      ?>
+          <th class="w-col">Qty WIP Awal</th>
+          <th class="w-col">Qty Masuk (In)</th>
+          <th class="w-col">Qty Selesai (Out)</th>
+          <th class="w-col-sm">Qty NG</th>
+          <th class="w-col">Qty WIP Akhir</th>
 
-      <div class="section-col">
-        <div class="section-card">
-          <div class="section-head">
-            <div class="title"><?= esc($procLabel) ?></div>
-            <div class="meta">Current = WIP per slot • Transfer = qty_out (Finish Shift 3)</div>
-          </div>
+          <th class="w-col-sm">Stock</th>
+          <th class="w-col-sm">Transfer</th>
+        </tr>
+      </thead>
 
-          <?php foreach ($shiftBlocks as $sh): ?>
+      <tbody>
+        <?php if (empty($rows)): ?>
+          <tr>
+            <td colspan="10" class="text-center text-muted py-4">Tidak ada data untuk tanggal ini.</td>
+          </tr>
+        <?php else: ?>
+
+          <?php $lastStation = null; ?>
+          <?php foreach ($rows as $r): ?>
             <?php
-              $shiftName = $sh['shift_name'] ?? 'SHIFT';
-              $products  = $sh['products'] ?? [];
-              $slots     = $sh['slots'] ?? [];
+              if ($lastStation !== null && $lastStation !== $r['station']) {
+                echo '<tr class="sep"><td colspan="10"></td></tr>';
+              }
+              $lastStation = $r['station'];
+              $dmy = date('d/m', strtotime($r['date']));
             ?>
 
-            <div class="shift-card">
-              <div class="shift-title"><?= esc($shiftName) ?></div>
+            <tr>
+              <td class="sticky-1"><?= esc($dmy) ?></td>
+              <td class="station sticky-2"><?= esc($r['station']) ?></td>
 
-              <div class="table-scroll">
-                <table class="wip">
-                  <thead>
-                    <tr class="row-1">
-                      <th class="col-time sticky-1" rowspan="2">Time</th>
-                      <th class="col-part sticky-2" rowspan="2">Part</th>
-                      <th class="col-sch  sticky-3" rowspan="2">Schedule</th>
-                      <!-- ✅ colspan jadi 4 -->
-                      <th class="col-sub" colspan="4"><?= esc($procLabel) ?></th>
-                    </tr>
-                    <tr class="row-2">
-                      <th class="col-sub">Current</th>
-                      <th class="col-sub">WIP</th>
-                      <th class="col-sub stock-cell">Stock</th>
-                      <th class="col-sub">Transfer</th>
-                    </tr>
-                  </thead>
+              <td class="sticky-3">
+                <div class="part"><?= esc($r['part_no']) ?></div>
+                <?php if (!empty($r['part_name'])): ?>
+                  <div class="muted"><?= esc($r['part_name']) ?></div>
+                <?php endif; ?>
+              </td>
 
-                  <tbody>
-                    <?php if (empty($products) || empty($slots)): ?>
-                      <tr>
-                        <td class="sticky-1">-</td>
-                        <td class="sticky-2 col-part">-</td>
-                        <td class="sticky-3 col-sch">-</td>
-                        <td>0</td><td>0</td><td class="stock-cell">0</td><td>0</td>
-                      </tr>
-                    <?php else: ?>
+              <td class="num"><?= number_format((int)$r['wip_awal']) ?></td>
+              <td class="num"><?= number_format((int)$r['qty_in']) ?></td>
+              <td class="num"><?= number_format((int)$r['qty_out']) ?></td>
+              <td class="num"><?= number_format((int)$r['qty_ng']) ?></td>
 
-                      <?php foreach ($products as $p): ?>
-                        <?php
-                          $rows = $p['rows'] ?? [];
-                          $rowspan = count($rows);
-                          if ($rowspan <= 0) continue;
-
-                          $activeRowIdx = -1;
-                          foreach ($rows as $idx => $r) {
-                            $parts = explode('-', (string)($r['time_label'] ?? ''));
-                            $start = trim($parts[0] ?? '');
-                            $end   = trim($parts[1] ?? '');
-                            if ($start && $end && $nowTime >= $start && $nowTime <= $end) { $activeRowIdx = $idx; break; }
-                          }
-
-                          $stockTotal    = (int)($p['stock_total'] ?? 0);
-                          $transferTotal = (int)($p['transfer_total'] ?? 0); // ✅ dari controller
-                        ?>
-
-                        <?php foreach ($rows as $i => $r): ?>
-                          <?php
-                            $isActive = ($i === $activeRowIdx);
-                            $cur = (int)($r['current'] ?? 0);
-                            $wip = (int)($r['wip'] ?? 0);
-                          ?>
-                          <tr class="<?= $isActive ? 'row-active' : '' ?>">
-                            <td class="col-time sticky-1"><?= esc($r['time_label'] ?? '-') ?></td>
-
-                            <?php if ($i === 0): ?>
-                              <td class="col-part sticky-2" rowspan="<?= $rowspan ?>">
-                                <div class="prod-title"><?= esc($p['part_no'] ?? '-') ?></div>
-                                <div class="prod-sub"><?= esc($p['part_name'] ?? '') ?></div>
-                              </td>
-
-                              <td class="col-sch sticky-3" rowspan="<?= $rowspan ?>">
-                                <div class="sch-box">
-                                  <div class="sch-line"><span>hour</span><span><?= number_format((int)($p['target_per_hour'] ?? 0)) ?></span></div>
-                                  <div class="sch-line"><span>shift</span><span><?= number_format((int)($p['target_per_shift'] ?? 0)) ?></span></div>
-                                </div>
-                              </td>
-                            <?php endif; ?>
-
-                            <td><?= number_format($cur) ?></td>
-                            <td><?= number_format($wip) ?></td>
-
-                            <?php if ($i === 0): ?>
-                              <td class="stock-cell" rowspan="<?= $rowspan ?>">
-                                <div class="stock-box">
-                                  <div class="stock-line">
-                                    <span>total</span>
-                                    <span><?= number_format($stockTotal) ?></span>
-                                  </div>
-                                </div>
-                              </td>
-
-                              <!-- ✅ TRANSFER rowspan juga -->
-                              <td class="transfer-cell" rowspan="<?= $rowspan ?>">
-                                <?= number_format($transferTotal) ?>
-                              </td>
-                            <?php endif; ?>
-                          </tr>
-                        <?php endforeach; ?>
-
-                        <tr class="spacer-row"><td colspan="999"></td></tr>
-                      <?php endforeach; ?>
-
-                    <?php endif; ?>
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
+              <td class="num wipakhir"><?= number_format((int)$r['wip_akhir']) ?></td>
+              <td class="num stock"><?= number_format((int)$r['stock']) ?></td>
+              <td class="num"><?= number_format((int)$r['transfer']) ?></td>
+            </tr>
           <?php endforeach; ?>
-        </div>
-      </div>
-    <?php endforeach; ?>
+
+        <?php endif; ?>
+      </tbody>
+    </table>
   </div>
-<?php endif; ?>
+</div>
 
 <?= $this->endSection() ?>

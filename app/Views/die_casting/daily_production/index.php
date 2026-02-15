@@ -19,9 +19,6 @@
 </form>
 
 <style>
-/* =========================
-   LAYOUT TABLE BIAR RAPI
-========================= */
 .table-scroll{
   overflow:auto;
   position:relative;
@@ -29,10 +26,8 @@
   border:1px solid #e5e7eb;
   border-radius:12px;
   background:#fff;
-  padding:10px;              /* biar gak mepet */
+  padding:10px;
 }
-
-/* table: gunakan separate agar sticky aman */
 .production-table{
   width:max-content;
   min-width:2600px;
@@ -40,12 +35,10 @@
   border-spacing:0 !important;
   table-layout:fixed;
 }
-
-/* spacing cell */
 .production-table th,
 .production-table td{
   font-size:13px;
-  padding:10px 10px;        /* lebih lega */
+  padding:10px 10px;
   white-space:nowrap;
   text-align:center;
   vertical-align:middle;
@@ -53,109 +46,105 @@
   line-height:1.2;
   background:#fff;
 }
-
-/* border */
 .production-table th,
 .production-table td{
   border-right:1px solid #e5e7eb;
   border-bottom:1px solid #e5e7eb;
 }
-.production-table tr > *:first-child{
-  border-left:1px solid #e5e7eb;
-}
-.production-table thead tr:first-child > *{
-  border-top:1px solid #e5e7eb;
-}
+.production-table tr > *:first-child{ border-left:1px solid #e5e7eb; }
+.production-table thead tr:first-child > *{ border-top:1px solid #e5e7eb; }
 
-/* sticky header (2 row) */
 .production-table thead tr.thead-row-1 th{
-  position:sticky;
-  top:0;
-  z-index:30;
-  background:#f8fafc;
-  font-weight:900;
-  height:44px;
+  position:sticky; top:0; z-index:30;
+  background:#f8fafc; font-weight:900; height:44px;
 }
 .production-table thead tr.thead-row-2 th{
-  position:sticky;
-  top:44px;
-  z-index:29;
-  background:#f1f5f9;
-  font-weight:900;
-  height:44px;
-  font-size:12px;
+  position:sticky; top:44px; z-index:29;
+  background:#f1f5f9; font-weight:900; height:44px; font-size:12px;
 }
 
-/* kolom kiri */
 .col-machine{ width:120px; min-width:120px; max-width:120px; }
 .col-part{ width:320px; min-width:320px; max-width:320px; }
 .col-target-shift{ width:140px; min-width:140px; max-width:140px; }
 
-/* slot column */
 .col-slot-target{ width:90px; min-width:90px; }
 .col-slot-fg{ width:90px; min-width:90px; }
 .col-slot-ng{ width:90px; min-width:90px; }
-.col-slot-remark{ width:260px; min-width:260px; }
+.col-slot-remark{ width:320px; min-width:320px; } /* agak lebar karena ada tabel NG */
 
-/* sticky left */
 .sticky-left{ position:sticky; left:0; z-index:40; background:#fff; }
 .sticky-left-2{ position:sticky; left:120px; z-index:40; background:#fff; }
-.sticky-left-3{ position:sticky; left:440px; z-index:40; background:#fff; } /* 120 + 320 */
+.sticky-left-3{ position:sticky; left:440px; z-index:40; background:#fff; }
 
-/* sticky th left lebih tinggi z */
-.th-sticky-left{
-  z-index:60 !important;
-  background:#f8fafc !important;
-}
+.th-sticky-left{ z-index:60 !important; background:#f8fafc !important; }
 
-/* highlight slot aktif */
 .slot-active{ background:#dcfce7 !important; }
 .slot-header-active{ background:#fde68a !important; }
 
-/* input dan select biar enak */
 .production-table input.form-control,
 .production-table select.form-select{
   min-width:80px;
   padding:6px 8px;
 }
 
-/* NG cell layout */
-.ng-box{
+/* ===== NG INLINE TABLE (tanpa badge) ===== */
+.ng-inline{
   display:flex;
   flex-direction:column;
   gap:8px;
 }
-.ng-chips{
+.ng-inline-head{
   display:flex;
-  flex-wrap:wrap;
-  gap:6px;
-}
-.ng-chips .badge{
-  font-weight:800;
-  padding:6px 8px;
-  border-radius:999px;
-}
-.ng-box .btn{
-  width:fit-content;
-}
-
-/* FINISH BAR */
-.shift-headbar{
-  display:flex;
-  align-items:center;
   justify-content:space-between;
-  gap:10px;
+  align-items:center;
+  gap:8px;
 }
-.finish-meta{
+.ng-inline-head .meta{
   font-size:12px;
   color:#64748b;
   font-weight:700;
 }
+.ng-mini-table{
+  width:100%;
+  border-collapse:separate;
+  border-spacing:0;
+}
+.ng-mini-table th, .ng-mini-table td{
+  border:1px solid #e5e7eb;
+  padding:6px 6px;
+  font-size:12px;
+  text-align:left;
+  background:#fff;
+}
+.ng-mini-table th{
+  background:#f8fafc;
+  font-weight:900;
+  text-align:center;
+}
+.ng-mini-table td.ng-no{
+  width:60px;
+  text-align:center;
+  font-weight:900;
+}
+.ng-mini-table td.ng-qty{
+  width:110px;
+}
+.ng-mini-table td.ng-act{
+  width:70px;
+  text-align:center;
+}
+.ng-empty{
+  font-size:12px;
+  color:#64748b;
+  font-weight:700;
+  text-align:center;
+  padding:8px 0;
+  border:1px dashed #cbd5e1;
+  border-radius:8px;
+}
 
 /* slot terkunci */
-.slot-locked{
-  opacity:.55;
-}
+.slot-locked{ opacity:.55; }
 </style>
 
 <form method="post" action="/die-casting/daily-production/store" id="mainForm">
@@ -168,10 +157,10 @@
       $finishAllowed = (bool)($shift['finish_allowed'] ?? false);
     ?>
 
-    <div class="shift-headbar mt-4 mb-2">
+    <div class="d-flex align-items-center justify-content-between gap-2 mt-4 mb-2">
       <h5 class="m-0"><?= esc($shift['shift_name']) ?></h5>
 
-      <div class="d-flex align-items-center gap-3">
+      <!-- <div class="d-flex align-items-center gap-3">
         <button type="button"
                 class="btn <?= $finishAllowed ? 'btn-warning' : 'btn-secondary' ?>"
                 data-shift-id="<?= $shiftId ?>"
@@ -181,13 +170,13 @@
           <i class="bi bi-send"></i> Finish Shift <?= $shiftCode ?>
         </button>
 
-        <div class="finish-meta">
+        <div class="small text-muted fw-bold">
           <?php if (!$isAdmin): ?>
             Aktif ±15 menit sebelum shift selesai
           <?php else: ?>
             Admin override (bebas finish kapan saja)
           <?php endif; ?>
-        </div>
+        </div> -->
       </div>
     </div>
 
@@ -222,17 +211,17 @@
         <tbody class="shift-body">
           <?php foreach ($shift['items'] as $item): ?>
             <tr>
-              <td class="sticky-left fw-bold text-center td-sticky-left">
+              <td class="sticky-left fw-bold text-center">
                 <?= esc($item['machine_code']) ?>
               </td>
 
-              <td class="sticky-left-2 text-start fw-bold td-sticky-left">
+              <td class="sticky-left-2 text-start fw-bold">
                 <?= esc(($item['part_prod'] ?? '')) ?>
                 <?php if (!empty($item['part_prod']) && !empty($item['part_name'])): ?>&nbsp;-&nbsp;<?php endif; ?>
                 <?= esc(($item['part_name'] ?? '')) ?>
               </td>
 
-              <td class="sticky-left-3 fw-bold text-center target-shift td-sticky-left">
+              <td class="sticky-left-3 fw-bold text-center target-shift">
                 <?= (int)$item['qty_p'] ?>
               </td>
 
@@ -270,34 +259,53 @@
                 </td>
 
                 <td>
+                  <!-- total NG slot (auto update dari table NG inline) -->
                   <input type="number"
                          class="form-control form-control-sm slot-input ng"
                          readonly
+                         id="ngTotalInput_<?= esc($key) ?>"
                          value="<?= (int)($exist['qty_ng'] ?? 0) ?>"
                          name="items[<?= esc($key) ?>][ng]">
                 </td>
 
                 <td class="text-start">
-                  <div class="ng-box" data-key="<?= esc($key) ?>">
-                    <div class="ng-chips">
-                      <?php if (empty($ngDetail)): ?>
-                        <span class="badge bg-secondary">-</span>
-                      <?php else: ?>
-                        <?php foreach ($ngDetail as $d): ?>
-                          <span class="badge bg-primary">
-                            <?= esc($d['ng_code']) ?> <?= esc($d['ng_name']) ?>: <?= (int)$d['qty'] ?>
-                          </span>
-                        <?php endforeach; ?>
-                      <?php endif; ?>
+                  <div class="ng-inline" data-key="<?= esc($key) ?>">
+                    <div class="ng-inline-head">
+                      <div class="meta">
+                        Total NG: <span class="fw-bold" id="ngTotalBadge_<?= esc($key) ?>">0</span>
+                      </div>
+                      <button type="button"
+                              class="btn btn-sm btn-outline-primary ng-add-btn"
+                              onclick="addNgRowInline('<?= esc($key) ?>')"
+                              data-start="<?= esc($slot['time_start']) ?>"
+                              data-end="<?= esc($slot['time_end']) ?>">
+                        + Add NG
+                      </button>
                     </div>
 
-                    <button type="button"
-                            class="btn btn-sm btn-outline-primary ng-edit-btn"
-                            data-start="<?= esc($slot['time_start']) ?>"
-                            data-end="<?= esc($slot['time_end']) ?>"
-                            onclick="openNgEditor('<?= esc($key) ?>')">
-                      Edit NG
-                    </button>
+                    <div class="table-responsive">
+                      <table class="ng-mini-table">
+                        <thead>
+                          <tr>
+                            <th style="width:60px">NG</th>
+                            <th>Category</th>
+                            <th style="width:110px">Qty</th>
+                            <th style="width:70px"></th>
+                          </tr>
+                        </thead>
+                        <tbody id="ngBody_<?= esc($key) ?>">
+                          <!-- di-render JS dari hidden -->
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+
+                  <!-- hidden untuk submit (dipakai controller) -->
+                  <div class="ng-hidden d-none" id="ngHidden_<?= esc($key) ?>">
+                    <?php foreach ($ngDetail as $idx => $d): ?>
+                      <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][ng_category_id]" value="<?= (int)$d['ng_category_id'] ?>">
+                      <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][qty]" value="<?= (int)$d['qty'] ?>">
+                    <?php endforeach; ?>
                   </div>
 
                   <input type="hidden" name="items[<?= esc($key) ?>][date]" value="<?= esc($date) ?>">
@@ -305,13 +313,6 @@
                   <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$item['machine_id'] ?>">
                   <input type="hidden" name="items[<?= esc($key) ?>][product_id]" value="<?= (int)$item['product_id'] ?>">
                   <input type="hidden" name="items[<?= esc($key) ?>][time_slot_id]" value="<?= (int)$slot['id'] ?>">
-
-                  <div class="ng-hidden" id="ngHidden_<?= esc($key) ?>">
-                    <?php foreach ($ngDetail as $idx => $d): ?>
-                      <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][ng_category_id]" value="<?= (int)$d['ng_category_id'] ?>">
-                      <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][qty]" value="<?= (int)$d['qty'] ?>">
-                    <?php endforeach; ?>
-                  </div>
                 </td>
 
               <?php endforeach ?>
@@ -320,20 +321,20 @@
         </tbody>
 
         <tfoot>
-          <tr class="total-slot-row fw-bold">
-            <td colspan="3" class="text-end td-sticky-left">TOTAL / JAM</td>
+          <tr class="fw-bold">
+            <td colspan="3" class="text-end">TOTAL / JAM</td>
             <?php foreach ($shift['slots'] as $slot): ?>
-              <td class="total-slot-target text-center">0</td>
-              <td class="total-slot-fg text-center">0</td>
-              <td class="total-slot-ng text-center">0</td>
-              <td class="total-slot-eff text-center"></td>
+              <td class="text-center">0</td>
+              <td class="text-center">0</td>
+              <td class="text-center">0</td>
+              <td class="text-center"></td>
             <?php endforeach ?>
           </tr>
         </tfoot>
       </table>
     </div>
 
-    <div class="shift-summary mt-2 mb-4 p-3 border rounded bg-light">
+    <div class="mt-2 mb-4 p-3 border rounded bg-light">
       <strong>SUMMARY <?= esc($shift['shift_name']) ?> :</strong>
       <span class="ms-3">FG: <span class="total-fg">0</span></span>
       <span class="ms-3">NG: <span class="total-ng">0</span></span>
@@ -349,52 +350,6 @@
   </div>
 </form>
 
-<!-- ✅ Modal NG Editor -->
-<div class="modal fade" id="ngModal" tabindex="-1" aria-hidden="true">
-  <div class="modal-dialog modal-lg">
-    <div class="modal-content">
-      <div class="modal-header">
-        <h5 class="modal-title">NG Editor</h5>
-        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-      </div>
-
-      <div class="modal-body">
-        <input type="hidden" id="ngModalKey" value="">
-
-        <div class="d-flex justify-content-between align-items-center mb-2">
-          <div class="text-muted">Tambah/hapus kategori NG + qty</div>
-          <button type="button" class="btn btn-sm btn-primary" onclick="addNgRow()">
-            + Add Row
-          </button>
-        </div>
-
-        <div class="table-responsive">
-          <table class="table table-sm table-bordered align-middle">
-            <thead class="table-light">
-              <tr>
-                <th style="width:70px">NG</th>
-                <th>NG Category</th>
-                <th style="width:140px">Qty</th>
-                <th style="width:90px"></th>
-              </tr>
-            </thead>
-            <tbody id="ngRows"></tbody>
-          </table>
-        </div>
-
-        <div class="mt-2">
-          <strong>Total NG:</strong> <span id="ngTotal">0</span>
-        </div>
-      </div>
-
-      <div class="modal-footer">
-        <button class="btn btn-secondary" data-bs-dismiss="modal">Cancel</button>
-        <button class="btn btn-success" onclick="applyNgEditor()">Apply</button>
-      </div>
-    </div>
-  </div>
-</div>
-
 <script>
 const NG_CATEGORIES = <?= json_encode(array_map(fn($x)=>[
   'id'=>(int)$x['id'],
@@ -402,9 +357,211 @@ const NG_CATEGORIES = <?= json_encode(array_map(fn($x)=>[
   'ng_name'=>(string)$x['ng_name']
 ], $ngCategories)) ?>;
 
-let ngModal;
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function buildNgSelectOptions(selectedId){
+  let html = `<option value="0">-- pilih --</option>`;
+  NG_CATEGORIES.forEach(c=>{
+    const sel = (parseInt(selectedId||0,10) === c.id) ? 'selected' : '';
+    html += `<option value="${c.id}" ${sel}>${c.ng_code} - ${escapeHtml(c.ng_name)}</option>`;
+  });
+  return html;
+}
+
+function readNgHidden(key){
+  const hidden = document.getElementById('ngHidden_'+key);
+  const rows = [];
+  if(!hidden) return rows;
+
+  const inputs = hidden.querySelectorAll('input');
+  const map = {};
+  inputs.forEach(inp=>{
+    const m = inp.name.match(/\[ng_details\]\[(\d+)\]\[(ng_category_id|qty)\]/);
+    if(!m) return;
+    const idx = m[1];
+    const field = m[2];
+    map[idx] = map[idx] || {};
+    map[idx][field] = inp.value;
+  });
+
+  Object.keys(map)
+    .sort((a,b)=>parseInt(a,10)-parseInt(b,10))
+    .forEach(k=>{
+      rows.push({
+        ng_category_id: parseInt(map[k].ng_category_id || '0',10),
+        qty: parseInt(map[k].qty || '0',10),
+      });
+    });
+
+  return rows;
+}
+
+/* ✅ FIX UTAMA: jangan buang row 0/0 */
+function writeNgHiddenFromRows(key, rows){
+  const hidden = document.getElementById('ngHidden_'+key);
+  if(!hidden) return;
+  hidden.innerHTML = '';
+
+  rows.forEach((r,i)=>{
+    const ngId = parseInt(r.ng_category_id || 0, 10);
+    const qty  = parseInt(r.qty || 0, 10);
+
+    const a = document.createElement('input');
+    a.type='hidden';
+    a.name=`items[${key}][ng_details][${i}][ng_category_id]`;
+    a.value=String(isNaN(ngId)?0:ngId);
+    hidden.appendChild(a);
+
+    const b = document.createElement('input');
+    b.type='hidden';
+    b.name=`items[${key}][ng_details][${i}][qty]`;
+    b.value=String(isNaN(qty)?0:qty);
+    hidden.appendChild(b);
+  });
+}
+
+function calcTotalNg(rows){
+  return rows.reduce((s,r)=>{
+    const ngId = parseInt(r.ng_category_id||0,10);
+    const qty  = parseInt(r.qty||0,10);
+    if(ngId>0 && qty>0) return s + qty;
+    return s;
+  },0);
+}
+
+function updateNgTotalUI(key, total){
+  const badge = document.getElementById('ngTotalBadge_'+key);
+  if(badge) badge.textContent = String(total);
+
+  const ngInp = document.getElementById('ngTotalInput_'+key);
+  if(ngInp) ngInp.value = String(total);
+}
+
+function renderNgTable(key){
+  const tbody = document.getElementById('ngBody_'+key);
+  if(!tbody) return;
+
+  const rows = readNgHidden(key);
+
+  tbody.innerHTML = '';
+
+  if(rows.length === 0){
+    tbody.innerHTML = `<tr><td colspan="4"><div class="ng-empty">Belum ada NG</div></td></tr>`;
+    updateNgTotalUI(key, 0);
+    return;
+  }
+
+  rows.forEach((r, idx)=>{
+    const cat = NG_CATEGORIES.find(x=>x.id === (parseInt(r.ng_category_id||0,10))) || null;
+    const code = cat ? cat.ng_code : '-';
+
+    const tr = document.createElement('tr');
+    tr.innerHTML = `
+      <td class="ng-no">${escapeHtml(code)}</td>
+      <td>
+        <select class="form-select form-select-sm ngSel"
+                data-key="${escapeHtml(key)}"
+                data-idx="${idx}">
+          ${buildNgSelectOptions(r.ng_category_id)}
+        </select>
+      </td>
+      <td class="ng-qty">
+        <input type="number"
+               class="form-control form-control-sm ngQty"
+               min="0"
+               data-key="${escapeHtml(key)}"
+               data-idx="${idx}"
+               value="${parseInt(r.qty||0,10)}">
+      </td>
+      <td class="ng-act">
+        <button type="button"
+                class="btn btn-sm btn-danger"
+                onclick="deleteNgRowInline('${escapeHtml(key)}', ${idx})">
+          Del
+        </button>
+      </td>
+    `;
+    tbody.appendChild(tr);
+  });
+
+  updateNgTotalUI(key, calcTotalNg(rows));
+}
+
+function addNgRowInline(key){
+  const rows = readNgHidden(key);
+  rows.push({ ng_category_id: 0, qty: 0 }); // ✅ row kosong tetap disimpan
+  writeNgHiddenFromRows(key, rows);
+  renderNgTable(key);
+}
+
+function deleteNgRowInline(key, idx){
+  const rows = readNgHidden(key);
+  rows.splice(idx, 1);
+  writeNgHiddenFromRows(key, rows);
+  renderNgTable(key);
+}
+
+document.addEventListener('change', function(e){
+  const sel = e.target.closest('.ngSel');
+  if(!sel) return;
+
+  const key = sel.dataset.key;
+  const idx = parseInt(sel.dataset.idx||'0',10);
+
+  const rows = readNgHidden(key);
+  if(!rows[idx]) return;
+
+  rows[idx].ng_category_id = parseInt(sel.value||'0',10);
+  writeNgHiddenFromRows(key, rows);
+
+  const cat = NG_CATEGORIES.find(x=>x.id === rows[idx].ng_category_id) || null;
+  const tr = sel.closest('tr');
+  const codeTd = tr ? tr.querySelector('.ng-no') : null;
+  if(codeTd) codeTd.textContent = cat ? cat.ng_code : '-';
+
+  updateNgTotalUI(key, calcTotalNg(rows));
+});
+
+document.addEventListener('input', function(e){
+  const inp = e.target.closest('.ngQty');
+  if(!inp) return;
+
+  const key = inp.dataset.key;
+  const idx = parseInt(inp.dataset.idx||'0',10);
+
+  let v = parseInt(inp.value||'0',10);
+  if(isNaN(v) || v < 0) v = 0;
+  inp.value = String(v);
+
+  const rows = readNgHidden(key);
+  if(!rows[idx]) return;
+
+  rows[idx].qty = v;
+  writeNgHiddenFromRows(key, rows);
+
+  updateNgTotalUI(key, calcTotalNg(rows));
+});
+
+/* init semua slot NG */
+document.querySelectorAll('.ng-inline[data-key]').forEach(box=>{
+  const key = box.getAttribute('data-key');
+  renderNgTable(key);
+});
 
 /* ===== finish shift ===== */
+function getCsrfPair() {
+  const input = document.querySelector('#mainForm input[type="hidden"][name]');
+  if (!input) return null;
+  return { name: input.name, value: input.value, el: input };
+}
+
 function finishShiftPerShift(btn){
   const shiftId = parseInt(btn.dataset.shiftId || '0', 10);
   const shiftCode = parseInt(btn.dataset.shiftCode || '0', 10);
@@ -433,179 +590,7 @@ function finishShiftPerShift(btn){
   .catch(()=> alert('Network error'));
 }
 
-/* ============ NG MODAL ============ */
-function openNgEditor(key){
-  // kalau tombol disabled, stop
-  const btn = document.querySelector(`.ng-box[data-key="${CSS.escape(key)}"] .ng-edit-btn`);
-  if(btn && btn.disabled) return;
-
-  if(!ngModal){
-    ngModal = new bootstrap.Modal(document.getElementById('ngModal'));
-  }
-  document.getElementById('ngModalKey').value = key;
-
-  const hidden = document.getElementById('ngHidden_'+key);
-  const rows = [];
-  if(hidden){
-    const inputs = hidden.querySelectorAll('input');
-    const map = {};
-    inputs.forEach(inp=>{
-      const m = inp.name.match(/\[ng_details\]\[(\d+)\]\[(ng_category_id|qty)\]/);
-      if(!m) return;
-      const idx = m[1];
-      const field = m[2];
-      map[idx] = map[idx] || {};
-      map[idx][field] = inp.value;
-    });
-    Object.keys(map).forEach(k=>{
-      rows.push({
-        ng_category_id: parseInt(map[k].ng_category_id || '0',10),
-        qty: parseInt(map[k].qty || '0',10)
-      });
-    });
-  }
-
-  renderNgRows(rows);
-  calcNgTotal();
-  ngModal.show();
-}
-
-function renderNgRows(rows){
-  const tbody = document.getElementById('ngRows');
-  tbody.innerHTML = '';
-  if(!rows || rows.length===0){
-    rows = [{ng_category_id: 0, qty: 0}];
-  }
-  rows.forEach(r=> appendNgRow(r.ng_category_id, r.qty));
-}
-
-function addNgRow(){ appendNgRow(0,0); }
-
-function appendNgRow(selectedId, qty){
-  const tbody = document.getElementById('ngRows');
-  const tr = document.createElement('tr');
-
-  const ngCell = document.createElement('td');
-  ngCell.className = 'text-center fw-bold ngCodeCell';
-  ngCell.textContent = '-';
-
-  const catCell = document.createElement('td');
-  const sel = document.createElement('select');
-  sel.className = 'form-select form-select-sm ngCatSel';
-  const opt0 = document.createElement('option');
-  opt0.value = '0'; opt0.textContent='-- pilih --';
-  sel.appendChild(opt0);
-  NG_CATEGORIES.forEach(c=>{
-    const o = document.createElement('option');
-    o.value = c.id;
-    o.textContent = `${c.ng_code} - ${c.ng_name}`;
-    if(c.id === selectedId) o.selected = true;
-    sel.appendChild(o);
-  });
-  sel.addEventListener('change', ()=>{
-    const v = parseInt(sel.value||'0',10);
-    const c = NG_CATEGORIES.find(x=>x.id===v);
-    ngCell.textContent = c ? c.ng_code : '-';
-    calcNgTotal();
-  });
-  catCell.appendChild(sel);
-
-  const qtyCell = document.createElement('td');
-  const inp = document.createElement('input');
-  inp.type='number';
-  inp.className='form-control form-control-sm ngQtyInp';
-  inp.value = qty || 0;
-  inp.addEventListener('input', calcNgTotal);
-  qtyCell.appendChild(inp);
-
-  const actCell = document.createElement('td');
-  const del = document.createElement('button');
-  del.type='button';
-  del.className='btn btn-sm btn-danger';
-  del.textContent='Hapus';
-  del.onclick=()=>{ tr.remove(); calcNgTotal(); };
-  actCell.appendChild(del);
-
-  tr.appendChild(ngCell);
-  tr.appendChild(catCell);
-  tr.appendChild(qtyCell);
-  tr.appendChild(actCell);
-  tbody.appendChild(tr);
-
-  const initId = parseInt(sel.value||'0',10);
-  const initCat = NG_CATEGORIES.find(x=>x.id===initId);
-  ngCell.textContent = initCat ? initCat.ng_code : '-';
-}
-
-function calcNgTotal(){
-  let total = 0;
-  document.querySelectorAll('#ngRows tr').forEach(tr=>{
-    const qty = parseInt(tr.querySelector('.ngQtyInp')?.value || '0',10);
-    total += qty > 0 ? qty : 0;
-  });
-  document.getElementById('ngTotal').textContent = total;
-}
-
-function applyNgEditor(){
-  const key = document.getElementById('ngModalKey').value;
-  if(!key) return;
-
-  const details = [];
-  document.querySelectorAll('#ngRows tr').forEach(tr=>{
-    const ngId = parseInt(tr.querySelector('.ngCatSel')?.value || '0',10);
-    const qty  = parseInt(tr.querySelector('.ngQtyInp')?.value || '0',10);
-    if(ngId>0 && qty>0) details.push({ng_category_id: ngId, qty});
-  });
-
-  const hidden = document.getElementById('ngHidden_'+key);
-  hidden.innerHTML = '';
-  details.forEach((d,i)=>{
-    const a = document.createElement('input');
-    a.type='hidden';
-    a.name=`items[${key}][ng_details][${i}][ng_category_id]`;
-    a.value=d.ng_category_id;
-    hidden.appendChild(a);
-
-    const b = document.createElement('input');
-    b.type='hidden';
-    b.name=`items[${key}][ng_details][${i}][qty]`;
-    b.value=d.qty;
-    hidden.appendChild(b);
-  });
-
-  const box = document.querySelector(`.ng-box[data-key="${CSS.escape(key)}"] .ng-chips`);
-  box.innerHTML = '';
-  if(details.length===0){
-    const span = document.createElement('span');
-    span.className='badge bg-secondary';
-    span.textContent='-';
-    box.appendChild(span);
-  }else{
-    details.forEach(d=>{
-      const c = NG_CATEGORIES.find(x=>x.id===d.ng_category_id);
-      const span = document.createElement('span');
-      span.className='badge bg-primary';
-      span.textContent = `${c?.ng_code || '-'} ${c?.ng_name || ''}: ${d.qty}`;
-      box.appendChild(span);
-    });
-  }
-
-  const total = details.reduce((s,x)=>s+(x.qty||0),0);
-  const ngInput = document.querySelector(`input[name="items[${CSS.escape(key)}][ng]"]`);
-  if(ngInput) ngInput.value = total;
-
-  ngModal.hide();
-}
-
-/* ===== helper csrf ===== */
-function getCsrfPair() {
-  const input = document.querySelector('#mainForm input[type="hidden"][name]');
-  if (!input) return null;
-  return { name: input.name, value: input.value, el: input };
-}
-
-/* ========= TIME SLOT LOCK (FG/NG editor hanya aktif di slot berjalan) ========= */
-function pad2(n){ return String(n).padStart(2,'0'); }
+/* ========= TIME SLOT LOCK (FG + Add NG hanya aktif di slot berjalan) ========= */
 function parseTimeOnDate(dateISO, hhmmss){
   const t = String(hhmmss || '').slice(0,5);
   return new Date(`${dateISO}T${t}:00`);
@@ -614,21 +599,16 @@ function isSlotActive(prodDateISO, start, end){
   const now = new Date();
   let s = parseTimeOnDate(prodDateISO, start);
   let e = parseTimeOnDate(prodDateISO, end);
-  if (e <= s) e.setDate(e.getDate() + 1); // handle lewat midnight
+  if (e <= s) e.setDate(e.getDate() + 1);
   return now >= s && now <= e;
 }
 
 function applySlotLock(){
   const prodDateISO = "<?= esc($date) ?>";
 
-  // FG input hanya aktif di slot berjalan
   document.querySelectorAll('input.fg.slot-input').forEach(inp=>{
-    const start = inp.dataset.start;
-    const end = inp.dataset.end;
-    const active = isSlotActive(prodDateISO, start, end);
-
+    const active = isSlotActive(prodDateISO, inp.dataset.start, inp.dataset.end);
     inp.disabled = !active;
-
     const td = inp.closest('td');
     if(td){
       td.classList.toggle('slot-active', active);
@@ -636,25 +616,15 @@ function applySlotLock(){
     }
   });
 
-  // tombol NG editor hanya aktif di slot berjalan
-  document.querySelectorAll('.ng-edit-btn').forEach(btn=>{
-    const start = btn.dataset.start;
-    const end = btn.dataset.end;
-    const active = isSlotActive(prodDateISO, start, end);
-
+  document.querySelectorAll('.ng-add-btn').forEach(btn=>{
+    const active = isSlotActive(prodDateISO, btn.dataset.start, btn.dataset.end);
     btn.disabled = !active;
-
     const td = btn.closest('td');
-    if(td){
-      td.classList.toggle('slot-locked', !active);
-    }
+    if(td) td.classList.toggle('slot-locked', !active);
   });
 
-  // header slot highlight
   document.querySelectorAll('th.slot-header').forEach(th=>{
-    const start = th.dataset.start;
-    const end = th.dataset.end;
-    th.classList.toggle('slot-header-active', isSlotActive(prodDateISO, start, end));
+    th.classList.toggle('slot-header-active', isSlotActive(prodDateISO, th.dataset.start, th.dataset.end));
   });
 }
 

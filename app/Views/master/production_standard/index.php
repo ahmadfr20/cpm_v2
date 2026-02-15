@@ -2,19 +2,15 @@
 <?= $this->section('content') ?>
 
 <style>
-/* ✅ agar modal tidak ketutup navbar */
 .modal-dialog { margin-top: 90px !important; }
 @media (max-width: 768px){ .modal-dialog { margin-top: 70px !important; } }
 .table td, .table th { vertical-align: middle; }
-
-/* ✅ rapihin select2 biar mirip bootstrap */
 .select2-container .select2-selection--single{ height: 38px; }
 .select2-container--default .select2-selection--single .select2-selection__rendered{ line-height: 38px; }
 .select2-container--default .select2-selection--single .select2-selection__arrow{ height: 38px; }
 .select2-container{ width:100% !important; }
 </style>
 
-<!-- Select2 -->
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
@@ -59,10 +55,13 @@
         <th width="40" class="text-center"><input type="checkbox" id="checkAll"></th>
         <th width="50" class="text-center">No</th>
         <th>Machine</th>
+
         <th class="text-end" style="width:140px;">CT Mesin (sec)</th>
+        <th class="text-end" style="width:140px;">CT Produk DC (sec)</th>
+        <th class="text-end" style="width:160px;">CT Produk Machining (sec)</th>
+
         <th>Product</th>
 
-        <!-- ✅ tambahan weight -->
         <th class="text-end" style="width:120px;">Ascas (gr)</th>
         <th class="text-end" style="width:120px;">Runner (gr)</th>
         <th class="text-end" style="width:150px;">Die Casting (gr)</th>
@@ -90,7 +89,11 @@
 
           <td class="text-center"><?= $no++ ?></td>
           <td><?= esc($s['machine_code'] ?? '-') ?></td>
-          <td class="text-end"><?= esc($s['cycle_time_sec'] ?? 0) ?></td>
+
+          <td class="text-end"><?= (int)($s['cycle_time_sec'] ?? 0) ?></td>
+          <td class="text-end"><?= (int)($s['cycle_time_die_casting_sec'] ?? 0) ?></td>
+          <td class="text-end"><?= (int)($s['cycle_time_machining_sec'] ?? 0) ?></td>
+
           <td><?= esc($s['part_no'] ?? '-') ?> - <?= esc($s['part_name'] ?? '-') ?></td>
 
           <td class="text-end"><?= number_format((float)($s['weight_ascas'] ?? 0), 0) ?></td>
@@ -120,7 +123,7 @@
       <?php endforeach ?>
     <?php else: ?>
       <tr>
-        <td colspan="10" class="text-center text-muted">Tidak ada data</td>
+        <td colspan="12" class="text-center text-muted">Tidak ada data</td>
       </tr>
     <?php endif ?>
     </tbody>
@@ -131,6 +134,17 @@
   <?= $pager->links('standards', 'bootstrap_pagination') ?>
 </div>
 
+<?php
+// Buat HTML option product dengan data CT
+$productOptionsHtml = '';
+foreach ($products as $p) {
+  $pid = (int)$p['id'];
+  $ctDc = (int)($p['cycle_time'] ?? 0);
+  $ctMc = (int)($p['cycle_time_machining'] ?? 0);
+  $label = esc(($p['part_no'] ?? '-') . ' - ' . ($p['part_name'] ?? '-'), 'attr');
+  $productOptionsHtml .= "<option value=\"{$pid}\" data-ct-dc=\"{$ctDc}\" data-ct-mc=\"{$ctMc}\">{$label}</option>";
+}
+?>
 
 <!-- ===================== MODAL ADD SINGLE ===================== -->
 <div class="modal fade" id="modalAddStandard" tabindex="-1" aria-hidden="true">
@@ -166,7 +180,9 @@
                 <tr>
                   <th style="width:60px;" class="text-center">No</th>
                   <th>Product</th>
-                  <th style="width:220px;" class="text-end">Cycle Time Mesin (sec)</th>
+                  <th style="width:180px;" class="text-end">CT Produk DC</th>
+                  <th style="width:200px;" class="text-end">CT Produk Machining</th>
+                  <th style="width:220px;" class="text-end">CT Mesin (sec)</th>
                 </tr>
               </thead>
               <tbody>
@@ -175,13 +191,18 @@
                   <td>
                     <select name="product_id" id="add_product_id" class="form-select js-product" required>
                       <option value="">-- pilih product --</option>
-                      <?php foreach ($products as $p): ?>
-                        <option value="<?= (int)$p['id'] ?>">
-                          <?= esc($p['part_no'] ?? '-') ?> - <?= esc($p['part_name'] ?? '-') ?>
-                        </option>
-                      <?php endforeach; ?>
+                      <?= $productOptionsHtml ?>
                     </select>
                   </td>
+
+                  <td>
+                    <input type="number" id="add_ct_dc" class="form-control text-end bg-light" readonly value="0">
+                  </td>
+
+                  <td>
+                    <input type="number" id="add_ct_mc" class="form-control text-end bg-light" readonly value="0">
+                  </td>
+
                   <td>
                     <input type="number" name="cycle_time_sec" id="add_cycle_time_sec"
                            class="form-control text-end" min="0" value="0">
@@ -193,7 +214,7 @@
           </div>
 
           <small class="text-muted d-block mt-2">
-            Produk tetap memakai cycle time dari master product. Standard menyimpan cycle time mesin.
+            CT Produk (DC & Machining) otomatis dari master product. Standard menyimpan CT mesin + snapshot CT produk.
           </small>
         </div>
 
@@ -205,7 +226,6 @@
     </div>
   </div>
 </div>
-
 
 <!-- ===================== MODAL EDIT SINGLE ===================== -->
 <div class="modal fade" id="modalEditStandard" tabindex="-1" aria-hidden="true">
@@ -241,7 +261,9 @@
                 <tr>
                   <th style="width:60px;" class="text-center">No</th>
                   <th>Product</th>
-                  <th style="width:220px;" class="text-end">Cycle Time Mesin (sec)</th>
+                  <th style="width:180px;" class="text-end">CT Produk DC</th>
+                  <th style="width:200px;" class="text-end">CT Produk Machining</th>
+                  <th style="width:220px;" class="text-end">CT Mesin (sec)</th>
                 </tr>
               </thead>
               <tbody>
@@ -250,13 +272,18 @@
                   <td>
                     <select name="product_id" id="edit_product_id" class="form-select js-product" required>
                       <option value="">-- pilih product --</option>
-                      <?php foreach ($products as $p): ?>
-                        <option value="<?= (int)$p['id'] ?>">
-                          <?= esc($p['part_no'] ?? '-') ?> - <?= esc($p['part_name'] ?? '-') ?>
-                        </option>
-                      <?php endforeach; ?>
+                      <?= $productOptionsHtml ?>
                     </select>
                   </td>
+
+                  <td>
+                    <input type="number" id="edit_ct_dc" class="form-control text-end bg-light" readonly value="0">
+                  </td>
+
+                  <td>
+                    <input type="number" id="edit_ct_mc" class="form-control text-end bg-light" readonly value="0">
+                  </td>
+
                   <td>
                     <input type="number" name="cycle_time_sec" id="edit_cycle_time_sec"
                            class="form-control text-end" min="0" value="0">
@@ -268,9 +295,8 @@
           </div>
 
           <small class="text-muted d-block mt-2">
-            Cycle time = cycle time mesin. Produk tetap memakai cycle time dari master product.
+            CT Produk otomatis dari master product (akan tersimpan sebagai snapshot saat update).
           </small>
-
         </div>
 
         <div class="modal-footer">
@@ -281,7 +307,6 @@
     </div>
   </div>
 </div>
-
 
 <!-- ===================== MODAL BULK ADD ===================== -->
 <div class="modal fade" id="modalBulkStandard" tabindex="-1" aria-hidden="true">
@@ -321,7 +346,9 @@
                 <tr>
                   <th width="50" class="text-center">No</th>
                   <th>Product</th>
-                  <th width="220" class="text-end">Cycle Time Mesin (sec)</th>
+                  <th width="160" class="text-end">CT Produk DC</th>
+                  <th width="190" class="text-end">CT Produk Machining</th>
+                  <th width="220" class="text-end">CT Mesin (sec)</th>
                   <th width="80" class="text-center">Aksi</th>
                 </tr>
               </thead>
@@ -330,7 +357,7 @@
           </div>
 
           <small class="text-muted">
-            Cycle time = cycle time mesin. Jika machine Die Casting → auto 0 (readonly).
+            CT Produk otomatis dari master product. CT mesin: Die Casting auto 0 (readonly), Machining wajib >0.
           </small>
         </div>
 
@@ -342,7 +369,6 @@
     </div>
   </div>
 </div>
-
 
 <!-- ===================== MODAL BULK EDIT ===================== -->
 <div class="modal fade" id="modalBulkEdit" tabindex="-1" aria-hidden="true">
@@ -378,15 +404,15 @@
             </div>
 
             <div class="col-md-12">
-              <label class="form-label">Set Cycle Time Mesin (sec) (optional)</label>
+              <label class="form-label">Set CT Mesin (sec) (optional)</label>
               <input type="number" name="cycle_time_sec" id="bulk_edit_cycle"
-                     class="form-control" min="0" placeholder="Kosongkan jika tidak ubah cycle time mesin">
+                     class="form-control" min="0" placeholder="Kosongkan jika tidak ubah CT mesin">
               <small class="text-muted" id="bulk_edit_ct_hint"></small>
             </div>
           </div>
 
           <small class="text-muted d-block mt-3">
-            Cycle time = cycle time mesin. Produk tetap memakai cycle time dari master product.
+            Bulk edit ini fokus CT mesin / pindah machine. CT produk akan direfresh dari master product.
           </small>
         </div>
 
@@ -398,7 +424,6 @@
     </div>
   </div>
 </div>
-
 
 <!-- ===================== MODAL BULK DELETE ===================== -->
 <div class="modal fade" id="modalBulkDelete" tabindex="-1" aria-hidden="true">
@@ -425,13 +450,24 @@
   </div>
 </div>
 
-
 <script>
 (function(){
   function isDieCastingFromSelect(selectEl){
     const opt = selectEl?.options?.[selectEl.selectedIndex];
     const line = (opt?.dataset?.line || '').toLowerCase().trim();
     return line === 'die casting';
+  }
+
+  function getSelectedOption(selectEl){
+    return selectEl?.options?.[selectEl.selectedIndex] || null;
+  }
+
+  function applyProductCycleToFields(selectEl, ctDcEl, ctMcEl){
+    const opt = getSelectedOption(selectEl);
+    const dc = parseInt(opt?.dataset?.ctDc || '0', 10) || 0;
+    const mc = parseInt(opt?.dataset?.ctMc || '0', 10) || 0;
+    if (ctDcEl) ctDcEl.value = dc;
+    if (ctMcEl) ctMcEl.value = mc;
   }
 
   function initSelect2InModal(modalEl){
@@ -458,7 +494,6 @@
     rowChecks().forEach(ch=>{ if(ch.checked) ids.push(parseInt(ch.value,10)); });
     return ids.filter(Boolean);
   }
-
   function syncSelectionUI(){
     const ids = getSelectedIds();
     selectedCountEl.textContent = ids.length;
@@ -472,7 +507,6 @@
       checkAll.indeterminate = (checked > 0 && checked < total);
     }
   }
-
   if(checkAll){
     checkAll.addEventListener('change', ()=>{
       rowChecks().forEach(ch=> ch.checked = checkAll.checked);
@@ -488,6 +522,10 @@
   const addCtHint = document.getElementById('add_ct_hint');
   const addMachineHint = document.getElementById('add_machine_hint');
 
+  const addProduct = document.getElementById('add_product_id');
+  const addCtDc = document.getElementById('add_ct_dc');
+  const addCtMc = document.getElementById('add_ct_mc');
+
   function syncAddCt(){
     if(!addMachine || !addCt) return;
     const isDC = isDieCastingFromSelect(addMachine);
@@ -500,15 +538,19 @@
       addCt.value = 0;
       addCt.readOnly = true;
       addCt.classList.add('bg-light');
-      addCtHint.textContent = 'Die Casting: cycle time mesin tidak dipakai (auto 0).';
-    }else{
+      addCtHint.textContent = 'Die Casting: CT mesin auto 0.';
+    } else {
       addCt.readOnly = false;
       addCt.classList.remove('bg-light');
-      addCtHint.textContent = 'Machining: isi cycle time mesin (>0).';
+      addCtHint.textContent = 'Machining: isi CT mesin (>0).';
     }
   }
+
   addMachine?.addEventListener('change', syncAddCt);
   syncAddCt();
+
+  addProduct?.addEventListener('change', ()=> applyProductCycleToFields(addProduct, addCtDc, addCtMc));
+  applyProductCycleToFields(addProduct, addCtDc, addCtMc);
 
   // ===== EDIT fill =====
   const editForm = document.getElementById('formEditStandard');
@@ -516,7 +558,10 @@
   const editCt = document.getElementById('edit_cycle_time_sec');
   const editCtHint = document.getElementById('edit_ct_hint');
   const editMachineHint = document.getElementById('edit_machine_hint');
+
   const editProduct = document.getElementById('edit_product_id');
+  const editCtDc = document.getElementById('edit_ct_dc');
+  const editCtMc = document.getElementById('edit_ct_mc');
 
   function syncEditCt(){
     if(!editMachine || !editCt) return;
@@ -530,14 +575,16 @@
       editCt.value = 0;
       editCt.readOnly = true;
       editCt.classList.add('bg-light');
-      editCtHint.textContent = 'Die Casting: cycle time mesin tidak dipakai (auto 0).';
-    }else{
+      editCtHint.textContent = 'Die Casting: CT mesin auto 0.';
+    } else {
       editCt.readOnly = false;
       editCt.classList.remove('bg-light');
-      editCtHint.textContent = 'Machining: isi cycle time mesin (>0).';
+      editCtHint.textContent = 'Machining: isi CT mesin (>0).';
     }
   }
+
   editMachine?.addEventListener('change', syncEditCt);
+  editProduct?.addEventListener('change', ()=> applyProductCycleToFields(editProduct, editCtDc, editCtMc));
 
   document.querySelectorAll('.btnEdit').forEach(btn=>{
     btn.addEventListener('click', function(){
@@ -547,6 +594,7 @@
       const ct  = this.dataset.cycle;
 
       editForm.action = '/master/production-standard/update/' + id;
+
       editMachine.value = mid || '';
       editCt.value = ct || 0;
 
@@ -554,6 +602,7 @@
       $(editProduct).trigger('change');
 
       syncEditCt();
+      applyProductCycleToFields(editProduct, editCtDc, editCtMc);
     });
   });
 
@@ -567,42 +616,21 @@
       bulkMachineHint.textContent = isDC ? 'Die Casting dipilih.' : 'Machining dipilih.';
     }
 
-    document.querySelectorAll('.bulk-ct').forEach(inp=>{
+    document.querySelectorAll('.bulk-ct-machine').forEach(inp=>{
       if (isDC){
         inp.value = 0;
         inp.readOnly = true;
         inp.classList.add('bg-light');
-        inp.dataset.hint = 'Die Casting: auto 0';
       } else {
         inp.readOnly = false;
         inp.classList.remove('bg-light');
-        inp.dataset.hint = 'Machining: isi CT';
       }
-    });
-
-    document.querySelectorAll('.bulk-ct-hint').forEach(el=>{
-      const inp = el.closest('tr')?.querySelector('.bulk-ct');
-      el.textContent = inp?.dataset?.hint || '';
     });
   }
   bulkMachine?.addEventListener('change', syncBulkRowCtReadOnly);
 
   const bulkTbody = document.querySelector('#bulkTable tbody');
   const btnAddRow = document.getElementById('btnAddBulkRow');
-
-  const productOptionsHtml = `<?php foreach ($products as $p): ?>
-    <option value="<?= (int)$p['id'] ?>"><?= esc($p['part_no'] ?? '-') ?> - <?= esc($p['part_name'] ?? '-') ?></option>
-  <?php endforeach; ?>`;
-
-  function renumberRows(){
-    [...bulkTbody.querySelectorAll('tr')].forEach((tr, idx)=>{
-      tr.querySelector('.row-no').textContent = idx+1;
-      const sel = tr.querySelector('select');
-      const ct  = tr.querySelector('input.bulk-ct');
-      if(sel) sel.name = `rows[${idx}][product_id]`;
-      if(ct)  ct.name  = `rows[${idx}][cycle_time_sec]`;
-    });
-  }
 
   function initSelect2ForBulkRow(selectEl){
     $(selectEl).select2({
@@ -613,19 +641,36 @@
     });
   }
 
+  function renumberRows(){
+    [...bulkTbody.querySelectorAll('tr')].forEach((tr, idx)=>{
+      tr.querySelector('.row-no').textContent = idx+1;
+
+      const sel = tr.querySelector('select.bulk-product');
+      const ctMachine = tr.querySelector('input.bulk-ct-machine');
+
+      if(sel) sel.name = `rows[${idx}][product_id]`;
+      if(ctMachine) ctMachine.name  = `cycle_time_sec`; // 1 CT mesin untuk semua row (sesuai backend)
+    });
+  }
+
   function addBulkRow(){
     const tr = document.createElement('tr');
     tr.innerHTML = `
       <td class="text-center row-no">1</td>
       <td>
-        <select class="form-select form-select-sm js-product-bulk" required>
+        <select class="form-select form-select-sm bulk-product js-product-bulk" required>
           <option value="">-- pilih product --</option>
-          ${productOptionsHtml}
+          <?= $productOptionsHtml ?>
         </select>
       </td>
       <td>
-        <input type="number" class="form-control form-control-sm text-end bulk-ct" min="0" value="0">
-        <small class="text-muted d-block mt-1 bulk-ct-hint"></small>
+        <input type="number" class="form-control form-control-sm text-end bg-light bulk-ct-dc" readonly value="0">
+      </td>
+      <td>
+        <input type="number" class="form-control form-control-sm text-end bg-light bulk-ct-mc" readonly value="0">
+      </td>
+      <td>
+        <input type="number" class="form-control form-control-sm text-end bulk-ct-machine" min="0" value="0">
       </td>
       <td class="text-center">
         <button type="button" class="btn btn-sm btn-danger btnDelRow">Hapus</button>
@@ -633,10 +678,13 @@
     `;
     bulkTbody.appendChild(tr);
 
-    renumberRows();
+    const sel = tr.querySelector('select.bulk-product');
+    const ctDc = tr.querySelector('.bulk-ct-dc');
+    const ctMc = tr.querySelector('.bulk-ct-mc');
 
-    const sel = tr.querySelector('.js-product-bulk');
     initSelect2ForBulkRow(sel);
+
+    sel.addEventListener('change', ()=> applyProductCycleToFields(sel, ctDc, ctMc));
 
     tr.querySelector('.btnDelRow').addEventListener('click', ()=>{
       $(sel).select2('destroy');
@@ -644,6 +692,7 @@
       renumberRows();
     });
 
+    renumberRows();
     syncBulkRowCtReadOnly();
   }
 

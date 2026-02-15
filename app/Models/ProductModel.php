@@ -14,13 +14,17 @@ class ProductModel extends Model
         'part_name',
         'part_prod',
         'customer_id',
-        'cycle_time',
+
+        // ✅ cycle time
+        'cycle_time',            // CT die casting (existing)
+        'cycle_time_machining',  // ✅ baru: CT machining
+
         'cavity',
         'efficiency_rate',
+
+        // ✅ weight
         'weight_ascas',
         'weight_runner',
-
-        // ✅ tambahan baru
         'weight_die_casting', // auto dari ascas + runner
         'weight_machining',   // input user
 
@@ -43,6 +47,7 @@ class ProductModel extends Model
             $builder->groupStart()
                 ->like('products.part_no', $keyword)
                 ->orLike('products.part_name', $keyword)
+                ->orLike('products.part_prod', $keyword) // ✅ bonus: cari juga part_prod
                 ->groupEnd();
         }
 
@@ -57,7 +62,7 @@ class ProductModel extends Model
 
     /**
      * PRODUCT BY MACHINE (UNTUK DAILY SCHEDULE)
-     * ✅ ditambah field baru biar konsisten dipakai di schedule (kalau perlu)
+     * ✅ ditambah CT machining biar bisa dipakai schedule juga
      */
     public function getByMachine($machineId)
     {
@@ -65,12 +70,17 @@ class ProductModel extends Model
             ->select('
                 p.id,
                 p.part_no,
+                p.part_prod,
                 p.part_name,
+
                 p.weight_ascas,
                 p.weight_runner,
                 p.weight_die_casting,
                 p.weight_machining,
+
                 p.cycle_time,
+                p.cycle_time_machining,
+
                 p.cavity,
                 p.efficiency_rate
             ')
@@ -83,6 +93,9 @@ class ProductModel extends Model
             ->getResultArray();
     }
 
+    /**
+     * GET 1 PRODUCT + CUSTOMER
+     */
     public function getOneWithCustomer($id)
     {
         return $this->select('products.*, customers.customer_name')

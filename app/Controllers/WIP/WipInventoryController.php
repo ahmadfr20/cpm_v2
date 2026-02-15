@@ -14,6 +14,14 @@ class WipInventoryController extends BaseController
         throw new \Exception('Tabel production_wip tidak punya kolom tanggal (production_date / schedule_date / wip_date).');
     }
 
+    private function detectColumn($db, string $table, array $candidates): ?string
+    {
+        foreach ($candidates as $col) {
+            if ($db->fieldExists($col, $table)) return $col;
+        }
+        return null;
+    }
+
     private function findProcessIdByCandidates($db, array $candidates): ?int
     {
         foreach ($candidates as $name) {
@@ -34,18 +42,8 @@ class WipInventoryController extends BaseController
         return $this->findProcessIdByCandidates($db, ['Die Casting', 'DIE CASTING', 'DIE CAST', 'DC']);
     }
 
-    private function getShiftSlots($db, int $shiftId): array
-    {
-        return $db->table('shift_time_slots sts')
-            ->select('t.id as time_slot_id, t.time_start, t.time_end')
-            ->join('time_slots t', 't.id = sts.time_slot_id', 'inner')
-            ->where('sts.shift_id', $shiftId)
-            ->orderBy('t.time_start', 'ASC')
-            ->get()->getResultArray() ?: [];
-    }
-
     /**
-     * process_id -> hourly table & qty field (WIP per slot)
+     * process_id -> hourly table & qty field (OUT harian)
      */
     private function buildHourlySources($db): array
     {
@@ -68,49 +66,202 @@ class WipInventoryController extends BaseController
     }
 
     /**
-     * ✅ NEW: map shift completed untuk date
-     * Prioritas: daily_schedules.is_completed (kalau ada)
-     * Fallback: die_casting_production.is_completed (khusus DC)
-     *
-     * return: [process_id][shift_id] => true/false
+     * ✅ OUT harian dari hourly (akumulasi output per jam)
+     * return map: [process_id][product_id] => qty_out
      */
-    private function buildCompletedShiftMap($db, string $date): array
+    private function buildHourlyOutMap($db, string $date, array $productIds): array
     {
-        $map = [];
+        $hourlySources = $this->buildHourlySources($db);
+        $outMap = [];
 
-        // 1) daily_schedules.is_completed
-        if ($db->tableExists('daily_schedules') && $db->fieldExists('is_completed', 'daily_schedules')) {
-            $rows = $db->table('daily_schedules')
-                ->select('process_id, shift_id, is_completed')
-                ->where('schedule_date', $date)
-                ->get()->getResultArray();
+        foreach ($hourlySources as $procId => $src) {
+            $table = $src['table'];
+            $qtyField = $src['qty_field'];
 
+            if (!$db->tableExists($table) || !$db->fieldExists('production_date', $table)) continue;
+
+            $q = $db->table($table)
+                ->select("product_id, SUM(COALESCE($qtyField,0)) as qty_sum")
+                ->where('production_date', $date);
+
+            if (!empty($productIds) && $db->fieldExists('product_id', $table)) {
+                $q->whereIn('product_id', $productIds);
+            }
+
+            $rows = $q->groupBy('product_id')->get()->getResultArray();
             foreach ($rows as $r) {
-                $proc = (int)($r['process_id'] ?? 0);
-                $sid  = (int)($r['shift_id'] ?? 0);
-                $done = (int)($r['is_completed'] ?? 0) === 1;
-                if ($proc > 0 && $sid > 0 && $done) {
-                    $map[$proc][$sid] = true;
-                }
+                $pid = (int)($r['product_id'] ?? 0);
+                $val = (int)($r['qty_sum'] ?? 0);
+                if ($pid > 0) $outMap[(int)$procId][$pid] = ($outMap[(int)$procId][$pid] ?? 0) + $val;
             }
         }
 
-        // 2) fallback khusus DC: die_casting_production.is_completed
-        $dcId = $this->getDieCastProcessId($db);
-        if ($dcId && $db->tableExists('die_casting_production') && $db->fieldExists('is_completed', 'die_casting_production')) {
-            $rows = $db->table('die_casting_production')
-                ->select('shift_id, is_completed')
-                ->where('production_date', $date)
-                ->where('is_completed', 1)
-                ->groupBy('shift_id, is_completed')
-                ->get()->getResultArray();
+        return $outMap;
+    }
 
-            foreach ($rows as $r) {
-                $sid = (int)($r['shift_id'] ?? 0);
-                if ($sid > 0) {
-                    $map[(int)$dcId][$sid] = true;
-                }
-            }
+    /**
+     * ✅ IN harian dari DAILY SCHEDULE (TOTAL SHIFT)
+     * return map: [process_id][product_id] => qty_in_total
+     */
+    private function buildScheduleInMap($db, string $date): array
+    {
+        $map = [];
+
+        if (!$db->tableExists('daily_schedules') || !$db->tableExists('daily_schedule_items')) {
+            return $map;
+        }
+
+        $dateCol = $db->fieldExists('schedule_date', 'daily_schedules') ? 'schedule_date' : null;
+        if (!$dateCol) return $map;
+
+        $targetCol = $db->fieldExists('target_per_shift', 'daily_schedule_items') ? 'target_per_shift' : null;
+        if (!$targetCol) return $map;
+
+        // process_id WAJIB ada agar mapping benar
+        if (!$db->fieldExists('process_id', 'daily_schedules')) return $map;
+
+        $rows = $db->table('daily_schedules ds')
+            ->select("
+                ds.process_id,
+                dsi.product_id,
+                SUM(COALESCE(dsi.$targetCol,0)) as qty_in
+            ")
+            ->join('daily_schedule_items dsi', 'dsi.daily_schedule_id = ds.id', 'inner')
+            ->where("ds.$dateCol", $date)
+            ->groupBy('ds.process_id, dsi.product_id')
+            ->get()->getResultArray();
+
+        foreach ($rows as $r) {
+            $procId = (int)($r['process_id'] ?? 0);
+            $pid    = (int)($r['product_id'] ?? 0);
+            $qtyIn  = (int)($r['qty_in'] ?? 0);
+            if ($procId > 0 && $pid > 0) $map[$procId][$pid] = $qtyIn;
+        }
+
+        return $map;
+    }
+
+    /**
+     * ✅ ambil durasi detik time slot PERTAMA untuk tiap shift
+     * return: [shift_id] => seconds_first_slot
+     */
+    private function getFirstSlotSecondsByShift($db): array
+    {
+        $map = [];
+        if (!$db->tableExists('shift_time_slots') || !$db->tableExists('time_slots')) return $map;
+
+        // Ambil slot paling awal per shift berdasarkan time_start
+        // NOTE: kalau time_start format "HH:MM:SS"
+        $rows = $db->table('shift_time_slots sts')
+            ->select('sts.shift_id, ts.time_start, ts.time_end')
+            ->join('time_slots ts', 'ts.id = sts.time_slot_id', 'inner')
+            ->orderBy('sts.shift_id', 'ASC')
+            ->orderBy('ts.time_start', 'ASC')
+            ->get()->getResultArray();
+
+        $picked = [];
+        foreach ($rows as $r) {
+            $sid = (int)($r['shift_id'] ?? 0);
+            if ($sid <= 0) continue;
+            if (isset($picked[$sid])) continue; // sudah ambil first slot
+
+            $start = strtotime($r['time_start']);
+            $end   = strtotime($r['time_end']);
+            if ($start === false || $end === false) continue;
+
+            if ($end <= $start) $end += 86400; // cross midnight
+            $sec = (int)max(0, $end - $start);
+
+            $picked[$sid] = true;
+            $map[$sid] = $sec;
+        }
+
+        return $map;
+    }
+
+    /**
+     * ✅ WIP Awal = target jam pertama (first time slot) per product per shift
+     * rumus: qty_first_slot = floor(target_per_hour * (slot_seconds/3600))
+     * return map: [process_id][product_id] => qty_wip_awal
+     */
+    private function buildWipAwalFromFirstSlotMap($db, string $date): array
+    {
+        $map = [];
+
+        if (
+            !$db->tableExists('daily_schedules') ||
+            !$db->tableExists('daily_schedule_items') ||
+            !$db->fieldExists('process_id', 'daily_schedules')
+        ) return $map;
+
+        $dateCol = $db->fieldExists('schedule_date', 'daily_schedules') ? 'schedule_date' : null;
+        if (!$dateCol) return $map;
+
+        // butuh target_per_hour
+        $tphCol = $db->fieldExists('target_per_hour', 'daily_schedule_items') ? 'target_per_hour' : null;
+        if (!$tphCol) return $map;
+
+        $firstSlotSec = $this->getFirstSlotSecondsByShift($db);
+        if (empty($firstSlotSec)) return $map;
+
+        // Ambil per shift-process-product (karena first slot durasi tergantung shift)
+        $rows = $db->table('daily_schedules ds')
+            ->select("
+                ds.process_id,
+                ds.shift_id,
+                dsi.product_id,
+                SUM(COALESCE(dsi.$tphCol,0)) as tph_sum
+            ")
+            ->join('daily_schedule_items dsi', 'dsi.daily_schedule_id = ds.id', 'inner')
+            ->where("ds.$dateCol", $date)
+            ->groupBy('ds.process_id, ds.shift_id, dsi.product_id')
+            ->get()->getResultArray();
+
+        foreach ($rows as $r) {
+            $procId = (int)($r['process_id'] ?? 0);
+            $shiftId = (int)($r['shift_id'] ?? 0);
+            $pid    = (int)($r['product_id'] ?? 0);
+            $tph    = (int)($r['tph_sum'] ?? 0);
+
+            if ($procId <= 0 || $shiftId <= 0 || $pid <= 0) continue;
+            if ($tph <= 0) continue;
+
+            $sec = (int)($firstSlotSec[$shiftId] ?? 0);
+            if ($sec <= 0) continue;
+
+            // qty jam pertama sesuai durasi slot pertama
+            $qtyFirst = (int)floor($tph * ($sec / 3600));
+            if ($qtyFirst < 0) $qtyFirst = 0;
+
+            $map[$procId][$pid] = ($map[$procId][$pid] ?? 0) + $qtyFirst;
+        }
+
+        return $map;
+    }
+
+    /**
+     * ✅ Transfer map dari production_wip di tanggal terpilih
+     * return map: [process_id][product_id] => transfer_sum
+     */
+    private function buildTransferMap($db, string $wipDateCol, string $date, array $processIds, array $productIds): array
+    {
+        $map = [];
+        if (!$db->tableExists('production_wip')) return $map;
+        if (!$db->fieldExists('transfer', 'production_wip')) return $map;
+
+        $rows = $db->table('production_wip w')
+            ->select("w.to_process_id as process_id, w.product_id, SUM(COALESCE(w.transfer,0)) as transfer_sum")
+            ->where("w.$wipDateCol", $date)
+            ->whereIn('w.to_process_id', $processIds)
+            ->whereIn('w.product_id', $productIds)
+            ->groupBy('w.to_process_id, w.product_id')
+            ->get()->getResultArray();
+
+        foreach ($rows as $r) {
+            $procId = (int)($r['process_id'] ?? 0);
+            $pid    = (int)($r['product_id'] ?? 0);
+            $val    = (int)($r['transfer_sum'] ?? 0);
+            if ($procId > 0 && $pid > 0) $map[$procId][$pid] = $val;
         }
 
         return $map;
@@ -118,283 +269,200 @@ class WipInventoryController extends BaseController
 
     public function index()
     {
-        $db   = db_connect();
-        $date = $this->request->getGet('date') ?? date('Y-m-d');
-        $nowTime = date('H:i');
+        $db = db_connect();
 
+        // ✅ hanya ADMIN boleh pilih tanggal
+        $role = session()->get('role') ?? '';
+        $isAdmin = ($role === 'ADMIN');
+
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        if (!$isAdmin) {
+            $date = date('Y-m-d');
+        }
+
+        $tbl = 'production_wip';
         $wipDateCol = $this->detectWipDateColumn($db);
 
-        // shifts master (buat label)
-        $shiftMasterRows = $db->table('shifts')
-            ->select('id, shift_code, shift_name, is_active')
-            ->where('is_active', 1)
-            ->orderBy('id', 'ASC')
-            ->get()->getResultArray();
+        $colNg    = $this->detectColumn($db, $tbl, ['qty_ng', 'qty_reject', 'qty_scrap', 'ng_qty']);
+        $colStock = $this->detectColumn($db, $tbl, ['stock', 'stock_qty', 'qty_stock']);
 
-        $shiftMaster = [];
-        foreach ($shiftMasterRows as $s) {
-            $sid = (int)$s['id'];
-            $shiftMaster[$sid] = [
-                'shift_id'   => $sid,
-                'shift_code' => (string)($s['shift_code'] ?? ''),
-                'shift_name' => (string)($s['shift_name'] ?? ''),
-                'slots'      => $this->getShiftSlots($db, $sid),
-            ];
-        }
+        // ✅ TOTAL IN dari schedule
+        $scheduleInMap = $this->buildScheduleInMap($db, $date);
 
-        $dieCastId = $this->getDieCastProcessId($db);
-        $hourlySources = $this->buildHourlySources($db);
+        // ✅ WIP Awal dari target jam pertama (first time slot)
+        $wipAwalMap = $this->buildWipAwalFromFirstSlotMap($db, $date);
 
-        // ✅ NEW: completed map
-        $completedMap = $this->buildCompletedShiftMap($db, $date);
-
-        /**
-         * Ambil schedule per PROCESS + SHIFT
-         */
-        $scheduleAgg = $db->table('daily_schedules ds')
-            ->select('
-                ds.process_id,
-                ds.shift_id,
-                dsi.product_id,
-                p.part_no,
-                p.part_name,
-                SUM(dsi.target_per_hour)  as target_per_hour,
-                SUM(dsi.target_per_shift) as target_per_shift
-            ')
-            ->join('daily_schedule_items dsi', 'dsi.daily_schedule_id = ds.id', 'inner')
-            ->join('products p', 'p.id = dsi.product_id', 'inner')
-            ->where('ds.schedule_date', $date)
-            ->groupBy('ds.process_id, ds.shift_id, dsi.product_id, p.part_no, p.part_name')
-            ->orderBy('ds.process_id', 'ASC')
-            ->orderBy('ds.shift_id', 'ASC')
-            ->orderBy('p.part_no', 'ASC')
-            ->get()->getResultArray();
-
-        $allProductIds = [];
-        $sections = [];
-
-        foreach ($scheduleAgg as $r) {
-            $procId = (int)$r['process_id'];
-            $sid    = (int)$r['shift_id'];
-            $pid    = (int)$r['product_id'];
-
-            $allProductIds[$pid] = true;
-
-            if (!isset($sections[$procId])) $sections[$procId] = [];
-            if (!isset($sections[$procId][$sid])) $sections[$procId][$sid] = [];
-
-            $sections[$procId][$sid][$pid] = [
-                'product_id' => $pid,
-                'part_no'    => (string)$r['part_no'],
-                'part_name'  => (string)$r['part_name'],
-                'target_per_hour'  => (int)($r['target_per_hour'] ?? 0),
-                'target_per_shift' => (int)($r['target_per_shift'] ?? 0),
-            ];
-        }
-
-        // label process
-        $processRows = $db->table('production_processes')
-            ->select('id, process_name')
-            ->orderBy('id', 'ASC')
-            ->get()->getResultArray();
-
-        $processNameMap = [];
-        foreach ($processRows as $p) $processNameMap[(int)$p['id']] = strtoupper((string)$p['process_name']);
-
-        // kalau schedule kosong: buat section dummy dari hourlySources
-        if (empty($sections)) {
-            foreach ($hourlySources as $procId => $src) {
-                $sections[(int)$procId] = [];
+        // ✅ pasangan process/product dari schedule + production_wip hari ini
+        $pairs = [];
+        foreach ($scheduleInMap as $procId => $pids) {
+            foreach ($pids as $pid => $qtyIn) {
+                $pairs[$procId.'|'.$pid] = ['process_id' => (int)$procId, 'product_id' => (int)$pid];
             }
         }
 
-        $allProductIdList = array_keys($allProductIds);
-
-        // build sectionsData
-        $sectionsData = [];
-
-        foreach ($sections as $procId => $shiftMap) {
-            $procId = (int)$procId;
-            $procLabel = $processNameMap[$procId] ?? ('PROCESS '.$procId);
-
-            $shiftBlocks = [];
-
-            foreach ($shiftMap as $sid => $productsMap) {
-                $sid = (int)$sid;
-                $shiftMeta = $shiftMaster[$sid] ?? [
-                    'shift_id' => $sid,
-                    'shift_name' => 'SHIFT '.$sid,
-                    'slots' => [],
-                ];
-                $slotList = $shiftMeta['slots'] ?? [];
-
-                $productBlocks = [];
-                foreach ($productsMap as $pid => $pinfo) {
-                    $pid = (int)$pid;
-
-                    $rows = [];
-                    foreach ($slotList as $ts) {
-                        $tsId = (int)$ts['time_slot_id'];
-                        $label = substr((string)$ts['time_start'], 0, 5) . ' - ' . substr((string)$ts['time_end'], 0, 5);
-
-                        $rows[$tsId] = [
-                            'time_slot_id' => $tsId,
-                            'time_label'   => $label,
-                            'current'      => 0,
-                            'wip'          => 0,
-                        ];
-                    }
-
-                    $productBlocks[] = [
-                        'product_id' => $pid,
-                        'part_no'    => (string)($pinfo['part_no'] ?? '-'),
-                        'part_name'  => (string)($pinfo['part_name'] ?? ''),
-                        'target_per_hour'  => (int)($pinfo['target_per_hour'] ?? 0),
-                        'target_per_shift' => (int)($pinfo['target_per_shift'] ?? 0),
-                        'rows'       => $rows,
-                        'stock_total'=> 0,
-                    ];
-                }
-
-                $shiftBlocks[] = [
-                    'shift_id'   => $sid,
-                    'shift_name' => (string)($shiftMeta['shift_name'] ?? ('SHIFT '.$sid)),
-                    'slots'      => $slotList,
-                    'products'   => $productBlocks,
-                ];
-            }
-
-            if (empty($shiftBlocks)) {
-                $shiftBlocks[] = [
-                    'shift_id'   => 0,
-                    'shift_name' => 'NO SHIFT SCHEDULE',
-                    'slots'      => [],
-                    'products'   => [],
-                ];
-            }
-
-            $sectionsData[] = [
-                'process_id'    => $procId,
-                'process_label' => $procLabel,
-                'shifts'        => $shiftBlocks,
-            ];
-        }
-
-        /**
-         * ✅ Fill WIP per slot dari hourly table
-         * ✅ NEW: kalau shift completed => tidak boleh ada angka (force tetap 0)
-         */
-        if (!empty($sectionsData)) {
-            foreach ($sectionsData as $secIdx => $sec) {
-                $procId = (int)$sec['process_id'];
-
-                if (!isset($hourlySources[$procId])) continue;
-
-                $table = $hourlySources[$procId]['table'];
-                $qtyField = $hourlySources[$procId]['qty_field'];
-                if (!$db->tableExists($table)) continue;
-
-                // shift ids yang ada di section ini
-                $shiftIds = [];
-                foreach (($sec['shifts'] ?? []) as $sh) {
-                    $sid = (int)($sh['shift_id'] ?? 0);
-                    if ($sid > 0) $shiftIds[$sid] = true;
-                }
-                $shiftIds = array_keys($shiftIds);
-                if (empty($shiftIds)) continue;
-
-                $rowsQ = $db->table($table)
-                    ->select("shift_id, time_slot_id, product_id, SUM(COALESCE($qtyField,0)) as qty_sum")
-                    ->where('production_date', $date)
-                    ->whereIn('shift_id', $shiftIds);
-
-                if (!empty($allProductIdList)) $rowsQ->whereIn('product_id', $allProductIdList);
-
-                $rows = $rowsQ->groupBy('shift_id, time_slot_id, product_id')->get()->getResultArray();
-
-                foreach ($rows as $r) {
-                    $sid = (int)$r['shift_id'];
-
-                    // ✅ guard: shift completed => skip (biar tetap 0)
-                    if (!empty($completedMap[$procId][$sid])) {
-                        continue;
-                    }
-
-                    $ts  = (int)$r['time_slot_id'];
-                    $pid = (int)$r['product_id'];
-                    $val = (int)$r['qty_sum'];
-
-                    foreach ($sectionsData[$secIdx]['shifts'] as $shIdx => $sh) {
-                        if ((int)$sh['shift_id'] !== $sid) continue;
-
-                        foreach ($sh['products'] as $pIdx => $pb) {
-                            if ((int)$pb['product_id'] !== $pid) continue;
-                            if (!isset($pb['rows'][$ts])) continue;
-
-                            $sectionsData[$secIdx]['shifts'][$shIdx]['products'][$pIdx]['rows'][$ts]['wip'] = $val;
-                            $sectionsData[$secIdx]['shifts'][$shIdx]['products'][$pIdx]['rows'][$ts]['current'] = $val;
-                        }
-                    }
-                }
-            }
-        }
-
-        /**
-         * Fill STOCK total dari production_wip.stock (per process+product)
-         */
-        if (!empty($sectionsData) && !empty($allProductIdList)) {
-            $stockRows = $db->table('production_wip')
-                ->select("to_process_id as process_id, product_id, MAX(COALESCE(stock,0)) as stock_val")
-                ->where($w_attach = $wipDateCol, $date)
-                ->whereIn('product_id', $allProductIdList)
-                ->groupBy("to_process_id, product_id")
+        if ($db->tableExists($tbl)) {
+            $wipPairs = $db->table("$tbl w")
+                ->select("w.to_process_id as process_id, w.product_id")
+                ->where("w.$wipDateCol", $date)
+                ->groupBy("w.to_process_id, w.product_id")
                 ->get()->getResultArray();
 
-            $stockMap = [];
-            foreach ($stockRows as $r) {
-                $prc = (int)$r['process_id'];
-                $pid = (int)$r['product_id'];
-                $stockMap[$prc][$pid] = (int)$r['stock_val'];
-            }
-
-            foreach ($sectionsData as $secIdx => $sec) {
-                $procId = (int)$sec['process_id'];
-                foreach ($sec['shifts'] as $shIdx => $sh) {
-                    foreach ($sh['products'] as $pIdx => $pb) {
-                        $pid = (int)$pb['product_id'];
-                        $sectionsData[$secIdx]['shifts'][$shIdx]['products'][$pIdx]['stock_total'] =
-                            (int)($stockMap[$procId][$pid] ?? 0);
-                    }
+            foreach ($wipPairs as $p) {
+                $procId = (int)($p['process_id'] ?? 0);
+                $pid    = (int)($p['product_id'] ?? 0);
+                if ($procId > 0 && $pid > 0) {
+                    $pairs[$procId.'|'.$pid] = ['process_id' => $procId, 'product_id' => $pid];
                 }
             }
         }
 
-        /**
-         * finalize row ordering per shift slot list
-         */
-        foreach ($sectionsData as $secIdx => $sec) {
-            foreach ($sec['shifts'] as $shIdx => $sh) {
-                $slotList = $sh['slots'] ?? [];
-                foreach ($sh['products'] as $pIdx => $pb) {
-                    $ordered = [];
-                    foreach ($slotList as $ts) {
-                        $tsId = (int)$ts['time_slot_id'];
-                        if (isset($pb['rows'][$tsId])) $ordered[] = $pb['rows'][$tsId];
-                    }
-                    $sectionsData[$secIdx]['shifts'][$shIdx]['products'][$pIdx]['rows'] = $ordered;
-                }
+        // ✅ juga tambahkan pasangan dari wipAwalMap (kalau scheduleInMap kosong tapi ada tph)
+        foreach ($wipAwalMap as $procId => $pids) {
+            foreach ($pids as $pid => $val) {
+                $pairs[$procId.'|'.$pid] = ['process_id' => (int)$procId, 'product_id' => (int)$pid];
             }
         }
 
-        // sort section
-        usort($sectionsData, function($a, $b){
-            return strcmp((string)$a['process_label'], (string)$b['process_label']);
+        $pairs = array_values($pairs);
+
+        if (empty($pairs)) {
+            return view('wip/inventory/index', [
+                'date' => $date,
+                'rows' => [],
+                'titleDate' => $this->formatTitleDate($date),
+                'isAdmin' => $isAdmin,
+            ]);
+        }
+
+        $processIds = [];
+        $productIds = [];
+        foreach ($pairs as $p) {
+            $processIds[(int)$p['process_id']] = true;
+            $productIds[(int)$p['product_id']] = true;
+        }
+        $processIds = array_keys($processIds);
+        $productIds = array_keys($productIds);
+
+        // label process
+        $processMap = [];
+        if (!empty($processIds)) {
+            $prows = $db->table('production_processes')
+                ->select('id, process_name')
+                ->whereIn('id', $processIds)
+                ->get()->getResultArray();
+            foreach ($prows as $r) $processMap[(int)$r['id']] = (string)($r['process_name'] ?? '');
+        }
+
+        // label product
+        $productMap = [];
+        if (!empty($productIds)) {
+            $prows = $db->table('products')
+                ->select('id, part_no, part_name')
+                ->whereIn('id', $productIds)
+                ->get()->getResultArray();
+            foreach ($prows as $r) {
+                $productMap[(int)$r['id']] = [
+                    'part_no' => (string)($r['part_no'] ?? ''),
+                    'part_name' => (string)($r['part_name'] ?? ''),
+                ];
+            }
+        }
+
+        // OUT hourly
+        $hourlyOutMap = $this->buildHourlyOutMap($db, $date, $productIds);
+
+        // NG + stock today (production_wip hari ini)
+        $ngMap = [];
+        $stockTodayMap = [];
+
+        if ($db->tableExists($tbl)) {
+            $sel = [
+                "to_process_id as process_id",
+                "product_id",
+            ];
+            if ($colNg)    $sel[] = "SUM(COALESCE($colNg,0)) as qty_ng";
+            else           $sel[] = "0 as qty_ng";
+            if ($colStock) $sel[] = "MAX(COALESCE($colStock,0)) as stock_today";
+            else           $sel[] = "0 as stock_today";
+
+            $rowsToday = $db->table($tbl)
+                ->select(implode(",\n", $sel))
+                ->where($wipDateCol, $date)
+                ->whereIn('to_process_id', $processIds)
+                ->whereIn('product_id', $productIds)
+                ->groupBy('to_process_id, product_id')
+                ->get()->getResultArray();
+
+            foreach ($rowsToday as $r) {
+                $procId = (int)($r['process_id'] ?? 0);
+                $pid    = (int)($r['product_id'] ?? 0);
+                $ngMap[$procId][$pid] = (int)($r['qty_ng'] ?? 0);
+                $stockTodayMap[$procId][$pid] = (int)($r['stock_today'] ?? 0);
+            }
+        }
+
+        // ✅ Transfer map
+        $transferMap = $this->buildTransferMap($db, $wipDateCol, $date, $processIds, $productIds);
+
+        // Final rows
+        $rows = [];
+        foreach ($pairs as $p) {
+            $procId = (int)$p['process_id'];
+            $pid    = (int)$p['product_id'];
+
+            $station = $processMap[$procId] ?? ('PROCESS '.$procId);
+            $pinfo   = $productMap[$pid] ?? ['part_no' => '', 'part_name' => ''];
+
+            $totalScheduleIn = (int)($scheduleInMap[$procId][$pid] ?? 0); // TOTAL target per shift
+            $wipAwal = (int)($wipAwalMap[$procId][$pid] ?? 0);             // target jam pertama
+
+            // ✅ qty_in = sisa schedule setelah jam pertama
+            // jaga supaya tidak minus
+            if ($wipAwal > $totalScheduleIn) $wipAwal = $totalScheduleIn;
+            $qtyIn = max(0, $totalScheduleIn - $wipAwal);
+
+            $qtyOut = (int)($hourlyOutMap[$procId][$pid] ?? 0);
+            $qtyNg  = (int)($ngMap[$procId][$pid] ?? 0);
+
+            $wipAkhir = max(0, $wipAwal + $qtyIn - $qtyOut - $qtyNg);
+
+            $stock = $colStock ? (int)($stockTodayMap[$procId][$pid] ?? $wipAkhir) : $wipAkhir;
+
+            $transfer = (int)($transferMap[$procId][$pid] ?? 0);
+
+            $rows[] = [
+                'date' => $date,
+                'station' => $station,
+                'part_no' => $pinfo['part_no'],
+                'part_name' => $pinfo['part_name'],
+                'wip_awal' => $wipAwal,
+                'qty_in' => $qtyIn,
+                'qty_out' => $qtyOut,
+                'qty_ng' => $qtyNg,
+                'wip_akhir' => $wipAkhir,
+                'stock' => $stock,
+                'transfer' => $transfer,
+            ];
+        }
+
+        usort($rows, function($a, $b){
+            $s = strcmp($a['station'], $b['station']);
+            if ($s !== 0) return $s;
+            return strcmp($a['part_no'], $b['part_no']);
         });
 
         return view('wip/inventory/index', [
-            'date'     => $date,
-            'nowTime'  => $nowTime,
-            'sections' => $sectionsData,
+            'date' => $date,
+            'rows' => $rows,
+            'titleDate' => $this->formatTitleDate($date),
+            'isAdmin' => $isAdmin,
         ]);
+    }
+
+    private function formatTitleDate(string $date): string
+    {
+        $ts = strtotime($date);
+        if (!$ts) return $date;
+        return date('d M Y', $ts);
     }
 }
