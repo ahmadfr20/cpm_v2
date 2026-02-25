@@ -86,15 +86,10 @@ function isActive($path, $currentUrl)
 <li><a class="nav-link" href="/machining/assy-shaft/schedule">Daily Schedule</a></li>
 
 <li class="text-secondary small mt-2">Shotblast</li>
-<li><a class="nav-link" href="/shotblast/daily-schedule">Daily Schedule</a></li>
-<li><a class="nav-link" href="/shotblast/delivery-external">Delivery to External</a></li>
-<li><a class="nav-link" href="/shotblast/receive-external">Receiving from External</a></li>
+<li><a class="nav-link" href="/shot-blasting/schedule">Daily Schedule</a></li>
 
 <li class="text-secondary small mt-2">Baritori</li>
-<li><a class="nav-link" href="/baritori/daily-schedule">Daily Schedule</a></li>
-<li><a class="nav-link" href="/baritori/delivery-external">Delivery to External</a></li>
-<li><a class="nav-link" href="/baritori/receive-external">Receiving from External</a></li>
-<li><a class="nav-link" href="/baritori/internal">Internal Schedule</a></li>
+<li><a class="nav-link" href="/baritori/schedule">Daily Schedule</a></li>
 
 <li class="text-secondary small mt-2">Painting</li>
 <li><a class="nav-link" href="/painting/daily-schedule">Daily Schedule</a></li>

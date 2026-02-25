@@ -36,7 +36,6 @@
   <?= csrf_field() ?>
 
 <style>
-/* ===== Excel-like ===== */
 .table-excel { white-space: nowrap; font-size: 12px; }
 .table-excel th, .table-excel td { vertical-align: middle; padding: 6px 8px; }
 
@@ -60,7 +59,6 @@ thead .sticky-col-action { z-index: 11; }
 
 .flow-cell { text-align: center; min-width: 110px; }
 
-/* checkbox look nicer */
 .flow-check{
   width: 18px;
   height: 18px;
@@ -75,10 +73,7 @@ thead .sticky-col-action { z-index: 11; }
 </style>
 
 <?php
-  /**
-   * ✅ Susun ulang kolom proses:
-   * RAW MATERIAL -> DIE CASTING -> BURRYTORY -> SAND BLASTING -> MACHINING -> (sisanya tetap urutan awal)
-   */
+  // reorder proses tetap seperti sebelumnya
   $wantedNames = [
     'RAW MATERIAL',
     'DIE CASTING',
@@ -99,8 +94,6 @@ thead .sticky-col-action { z-index: 11; }
   }
 
   $orderedProcesses = [];
-
-  // ambil yang diinginkan sesuai urutan baru
   foreach ($wantedNames as $nm) {
     $key = $normalize($nm);
     if (isset($byName[$key])) {
@@ -108,8 +101,6 @@ thead .sticky-col-action { z-index: 11; }
       unset($byName[$key]);
     }
   }
-
-  // sisanya, append sesuai urutan awal dari DB (tidak diacak)
   foreach (($processes ?? []) as $pr) {
     $key = $normalize($pr['process_name'] ?? '');
     if (isset($byName[$key])) {
@@ -117,8 +108,6 @@ thead .sticky-col-action { z-index: 11; }
       unset($byName[$key]);
     }
   }
-
-  // pakai urutan baru untuk table render
   $processes = $orderedProcesses;
 ?>
 
@@ -142,7 +131,7 @@ thead .sticky-col-action { z-index: 11; }
     <tbody>
       <?php $no=1; foreach (($products ?? []) as $p): ?>
         <?php
-          $pid = (int)$p['id'];
+          $pid = (int)($p['id'] ?? 0);
           $selectedOrder = $flowOrder[$pid] ?? [];
         ?>
 
@@ -156,14 +145,14 @@ thead .sticky-col-action { z-index: 11; }
           </td>
 
           <td class="sticky-col-prod text-start">
-            <div class="fw-bold"><?= esc($p['part_no']) ?></div>
-            <div class="small text-muted"><?= esc($p['part_name']) ?></div>
+            <div class="fw-bold"><?= esc($p['part_no'] ?? '') ?></div>
+            <div class="small text-muted"><?= esc($p['part_name'] ?? '') ?></div>
             <div class="small mt-1" id="status_<?= $pid ?>"></div>
           </td>
 
           <?php foreach (($processes ?? []) as $pr): ?>
             <?php
-              $procId = (int)$pr['id'];
+              $procId = (int)($pr['id'] ?? 0);
               $isChecked = isset($flowMap[$pid][$procId]);
               $cbId = "cb_{$pid}_{$procId}";
             ?>
@@ -177,7 +166,7 @@ thead .sticky-col-action { z-index: 11; }
                 data-product="<?= $pid ?>"
                 data-process="<?= $procId ?>"
                 <?= $isChecked ? 'checked' : '' ?>
-                title="<?= esc($pr['process_name']) ?>"
+                title="<?= esc($pr['process_name'] ?? '') ?>"
               >
             </td>
           <?php endforeach; ?>

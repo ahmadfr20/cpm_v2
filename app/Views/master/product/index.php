@@ -192,7 +192,7 @@
         <thead>
           <tr>
             <th style="width:70px;" class="ctr">No</th>
-            <th style="width:140px;">Part No</th>
+            <th style="width:140px;">Part No (Accurate)</th>
             <th class="prod-col">Part Prod</th>
             <th class="name-col">Product Name</th>
             <th class="cust-col">Customer</th>

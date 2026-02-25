@@ -19,8 +19,10 @@ $routes->group('dashboard', ['filter' => 'auth'], function ($routes) {
     $routes->get('inventory', 'Dashboard\InventoryController::index');
 
     // kalau dashboard ini mengarah ke WIP, batasi PPIC
-    $routes->get('wip/inventory', 'WIP\WipInventoryController::index', ['filter' => 'auth:PPIC']);
+    
 });
+
+$routes->get('wip/inventory', 'WIP\WipInventoryController::index');
 
 /**
  * MASTER: Admin only
@@ -196,9 +198,13 @@ $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
 /**
  * SHOT BLASTING: OPERATOR process_code = SB
  */
-$routes->group('shot-blasting', ['filter' => 'auth:OPERATOR,SB'], function ($routes) {
+$routes->group('shot-blasting', ['filter' => 'auth:OPERATOR,SB,PPIC'], function ($routes) {
     $routes->get('delivery', 'ShotBlasting\DeliveryController::index');
     $routes->post('delivery/store', 'ShotBlasting\DeliveryController::store');
+
+    $routes->get('schedule', 'ShotBlasting\ScheduleController::index', ['filter' => 'auth:PPIC']);
+    $routes->post('schedule/store', 'ShotBlasting\ScheduleController::store', ['filter' => 'auth:PPIC']);
+
 
     $routes->get('receiving', 'ShotBlasting\ReceivingController::index');
     $routes->post('receiving/store', 'ShotBlasting\ReceivingController::store');
@@ -207,9 +213,9 @@ $routes->group('shot-blasting', ['filter' => 'auth:OPERATOR,SB'], function ($rou
 /**
  * BARITORI: OPERATOR process_code = BT
  */
-$routes->group('baritori', ['filter' => 'auth:OPERATOR,BT'], function ($routes) {
-    $routes->get('schedule', 'Baritori\ScheduleController::index');
-    $routes->post('schedule/store', 'Baritori\ScheduleController::store');
+$routes->group('baritori', ['filter' => 'auth:OPERATOR,BT,PPIC'], function ($routes) {
+    $routes->get('schedule', 'Baritori\ScheduleController::index', ['filter' => 'auth:PPIC']);
+    $routes->post('schedule/store', 'Baritori\ScheduleController::store', ['filter' => 'auth:PPIC']);
 
     $routes->get('send-external', 'Baritori\SendExternalController::index');
     $routes->post('send-external/store', 'Baritori\SendExternalController::store');

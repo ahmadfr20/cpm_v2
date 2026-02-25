@@ -292,7 +292,7 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
       <i class="bi bi-save"></i> Simpan
     </button>
 
-    <button class="btn btn-warning" type="submit"
+    <!-- <button class="btn btn-warning" type="submit"
             formaction="/machining/assy-bushing/hourly/finish-shift"
             onclick="return confirm('Finish Shift? Total OK Assy Bushing akan dikirim ke proses berikutnya sesuai flow.')"
             <?= (!$canFinishUI) ? 'disabled' : '' ?>
@@ -306,7 +306,7 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
     <div class="text-muted mt-2" style="font-size:13px">
       Finish Shift aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?> WIB)
     </div>
-  <?php endif; ?>
+  <?php endif; ?> -->
 </form>
 
 <script>

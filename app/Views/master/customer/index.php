@@ -107,8 +107,9 @@
         <thead class="table-light">
           <tr>
             <th style="width: 70px;">No</th>
-            <th style="width: 200px;">Customer Code (Accurate)</th>
             <th style="width: 170px;">Customer Code App</th>
+            <th style="width: 200px;">Customer Code (Accurate)</th>
+            
             <th>Customer Name</th>
             <th style="width: 140px;">Status</th>
             <th style="width: 190px;" class="text-end">Aksi</th>
@@ -128,8 +129,9 @@
             <?php foreach ($customers as $c): ?>
               <tr>
                 <td><?= $no++ ?></td>
-                <td class="fw-semibold"><?= esc($c['customer_code'] ?? '-') ?></td>
                 <td class="fw-semibold"><?= esc($c['customer_code_app'] ?? '-') ?></td>
+                <td class="fw-semibold"><?= esc($c['customer_code'] ?? '-') ?></td>
+                
                 <td><?= esc($c['customer_name']) ?></td>
                 <td>
                   <?php if ((int)($c['is_active'] ?? 1) === 1): ?>

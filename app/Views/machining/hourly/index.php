@@ -268,7 +268,7 @@
     <i class="bi bi-save"></i> Simpan
   </button>
 
-  <?php if (!empty($isAdmin) || !empty($canFinish)): ?>
+  <!-- <?php if (!empty($isAdmin) || !empty($canFinish)): ?>
     <button class="btn btn-warning mt-3 ms-2" type="submit" formaction="/machining/hourly/finish-shift"
             onclick="return confirm('Finish Shift? Total FG Machining akan dikirim ke proses berikutnya sesuai flow.')">
       <i class="bi bi-send-check"></i>
@@ -291,7 +291,7 @@
       <div class="text-muted mt-2" style="font-size:13px">
         Finish Shift aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?> WIB)
       </div>
-    <?php endif; ?>
+    <?php endif; ?> -->
   <?php endif; ?>
 
 </form>

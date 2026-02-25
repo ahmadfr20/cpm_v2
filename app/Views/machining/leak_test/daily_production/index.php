@@ -299,7 +299,7 @@
   </button>
 </form>
 
-<form method="post"
+<!-- <form method="post"
       action="/machining/leak-test/hourly/finish-shift"
       id="formFinishShift"
       class="mt-2"
@@ -317,7 +317,7 @@
     <?= $isAdmin
       ? 'ADMIN: Finish Shift bisa dilakukan kapan saja (override waktu).'
       : 'Finish Shift aktif setelah slot terakhir shift berakhir.' ?>
-  </div>
+  </div> -->
 </form>
 
 <script>
