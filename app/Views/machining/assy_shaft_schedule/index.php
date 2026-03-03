@@ -36,7 +36,12 @@
   .incoming-mini { font-size: 12px; color: #6c757d; }
 </style>
 
-<h4 class="mb-3">DAILY PRODUCTION SCHEDULE – ASSY SHAFT</h4>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">DAILY PRODUCTION SCHEDULE – ASSY SHAFT</h4>
+  <a href="<?= base_url('machining/assy-shaft/schedule/inventory?date='.$date) ?>" class="btn btn-outline-primary fw-bold btn-sm">
+    <i class="bi bi-box-seam me-1"></i> Lihat Stock Assy Shaft
+  </a>
+</div>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
@@ -45,7 +50,6 @@
   <div class="alert alert-danger"><?= esc(session()->getFlashdata('error')) ?></div>
 <?php endif ?>
 
-<!-- ✅ optional: alert awaiting incoming (tetap) -->
 <div class="alert alert-warning d-none align-items-center justify-content-between gap-2"
      id="awaitingWipAsAlert"
      role="alert">
@@ -179,9 +183,6 @@
   </form>
 <?php endforeach ?>
 
-<!-- =========================
- * MODAL INCOMING (TABLE) - Assy Shaft (tetap)
- * ========================= -->
 <div class="modal fade" id="assignIncomingAssyShaftModal" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-xl">
     <div class="modal-content">
@@ -256,7 +257,6 @@
 const productUrl   = "/machining/assy-shaft/schedule/product-target";
 const scheduleDate = "<?= esc($date) ?>";
 
-/** init select2 */
 function initSelect2(selectEl) {
   const $el = $(selectEl);
   if ($el.data('select2')) return;
@@ -269,7 +269,6 @@ function initSelect2(selectEl) {
   });
 }
 
-/** update badge stock */
 function setStockBadge(row, stockVal){
   const badge = row.querySelector('.stock-badge');
   const v = parseInt(stockVal || '0', 10);
@@ -278,7 +277,6 @@ function setStockBadge(row, stockVal){
   badge.classList.toggle('zero', v <= 0);
 }
 
-/** load options per select */
 async function loadProducts(selectEl) {
   const machineId  = selectEl.dataset.machine;
   const shiftId    = selectEl.dataset.shift;
@@ -295,13 +293,8 @@ async function loadProducts(selectEl) {
       opt.value = p.id;
       opt.textContent = `${p.part_no} - ${p.part_name}`;
 
-      // ✅ ct yg dipakai controller
       opt.dataset.ct = p.cycle_time_used || '';
-
-      // target default
       opt.dataset.targetShift = p.target_per_shift || 0;
-
-      // ✅ stock prev + prev process
       opt.dataset.stockPrev = p.stock_prev || 0;
       opt.dataset.prevProcessId = p.prev_process_id || 0;
 
@@ -322,7 +315,6 @@ async function loadProducts(selectEl) {
   }
 }
 
-/** validasi plan tidak boleh > stock prev */
 function validatePlanAgainstStock(row, showAlert = true) {
   const selectEl = row.querySelector('.product-select');
   const planEl   = row.querySelector('.plan-input');
@@ -349,7 +341,6 @@ function validatePlanAgainstStock(row, showAlert = true) {
   return true;
 }
 
-/** on change product */
 $(document).on('change', '.product-select', function() {
   const selectEl = this;
   const opt = selectEl.selectedOptions[0];
@@ -358,7 +349,6 @@ $(document).on('change', '.product-select', function() {
   const ctEl   = row.querySelector('.cycle-time');
   const planEl = row.querySelector('.plan-input');
 
-  // clear
   if (!opt || !selectEl.value) {
     if (ctEl) ctEl.value = '';
     if (planEl) planEl.removeAttribute('data-stock-prev');
@@ -366,39 +356,30 @@ $(document).on('change', '.product-select', function() {
     return;
   }
 
-  // set CT
   ctEl.value = opt.dataset.ct || '';
 
-  // set stock prev into plan
   const stockPrev = parseInt(opt.dataset.stockPrev || '0', 10);
   planEl.dataset.stockPrev = String(stockPrev);
-
-  // show stock badge
   setStockBadge(row, stockPrev);
 
-  // stock kosong
   if (stockPrev <= 0) {
     alert('Stock kosong pada proses sebelumnya. Tidak bisa scheduling product ini.');
     planEl.value = 0;
     return;
   }
 
-  // default plan kalau kosong
   if (!planEl.value || planEl.value == 0) {
     planEl.value = parseInt(opt.dataset.targetShift || '0', 10);
   }
 
-  // cap kalau melebihi stock
   validatePlanAgainstStock(row, true);
 });
 
-/** on input plan */
 $(document).on('input', '.plan-input', function() {
   const row = this.closest('tr');
   validatePlanAgainstStock(row, true);
 });
 
-/** validasi sebelum submit */
 $(document).on('submit', '.as-form', function(e){
   const rows = this.querySelectorAll('tbody tr');
   for (const row of rows) {
@@ -411,18 +392,13 @@ $(document).on('submit', '.as-form', function(e){
   return true;
 });
 
-// init all selects
 document.querySelectorAll('.product-select').forEach(selectEl => {
   initSelect2(selectEl);
   loadProducts(selectEl);
 });
 
-/* =========================
- * MODAL INCOMING (TABLE) - Assy Shaft
- * ========================= */
 let __incomingAssyShaft = [];
 
-// pakai mesin yang sama (list dari PHP machines)
 const __machinesAssyShaft = <?= json_encode(array_map(fn($m) => [
   'id'   => (int)$m['id'],
   'code' => (string)$m['machine_code'],
@@ -457,7 +433,7 @@ function renderMachineOptionsAssyShaft(selectedId = '') {
 
 async function openAssignIncomingAssyShaftModal() {
   if (typeof bootstrap === 'undefined') {
-    alert('Bootstrap JS belum ter-load. Pastikan layout/layout include bootstrap.bundle.min.js');
+    alert('Bootstrap JS belum ter-load.');
     return;
   }
 
@@ -493,34 +469,28 @@ async function openAssignIncomingAssyShaftModal() {
           <td class="text-center">
             <input type="checkbox" class="form-check-input as-inc-check" checked>
           </td>
-
           <td class="text-center">
             <span class="badge bg-secondary">${escapeHtml(p.wip_id)}</span>
             <input type="hidden" class="as-inc-wip-id" value="${escapeHtml(p.wip_id)}">
             <input type="hidden" class="as-inc-product-id" value="${escapeHtml(p.product_id)}">
           </td>
-
           <td class="text-start">
             <div><strong>${escapeHtml(p.part_no)}</strong> - ${escapeHtml(p.part_name)}</div>
             <div class="incoming-mini">Product ID: ${escapeHtml(p.product_id)}</div>
           </td>
-
           <td class="text-center">
             <span class="badge bg-info text-dark">${avail}</span>
             <input type="hidden" class="as-inc-avail" value="${avail}">
           </td>
-
           <td>
             <select class="form-select form-select-sm as-inc-machine">
               ${renderMachineOptionsAssyShaft('')}
             </select>
           </td>
-
           <td>
             <input type="number" class="form-control form-control-sm as-inc-qty"
                    min="1" max="${avail}" value="${avail}">
           </td>
-
           <td class="text-center">
             <button type="button" class="btn btn-success btn-sm" onclick="submitAssignIncomingAssyShaftRow('${rowId}')">
               Assign
@@ -619,9 +589,6 @@ async function submitAssignIncomingAssyShaftBulk() {
   alert('Proses assign selected selesai. (Baris sukses akan berwarna hijau)');
 }
 
-/* =========================
- * ✅ ALERT CHECKER (Awaiting WIP Assy Shaft)
- * ========================= */
 async function checkAwaitingWipAssyShaft() {
   const date = scheduleDate;
   const alertEl = document.getElementById('awaitingWipAsAlert');

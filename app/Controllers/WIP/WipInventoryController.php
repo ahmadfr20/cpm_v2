@@ -139,7 +139,6 @@ class WipInventoryController extends BaseController
     {
         $ngMap = [];
 
-        // prefer NG details
         $ngSources = $this->buildNgDetailSources($db);
         foreach ($ngSources as $procId => $src) {
             $table = $src['table'];
@@ -168,7 +167,6 @@ class WipInventoryController extends BaseController
             }
         }
 
-        // fallback: hourly table punya qty_ng
         $hourlySources = $this->buildHourlySources($db);
         foreach ($hourlySources as $procId => $src) {
             $procId = (int)$procId;
@@ -245,16 +243,12 @@ class WipInventoryController extends BaseController
      * PREV PROCESS MAP (UNTUK WIP AWAL = TRANSFER PREV)
      * ===================================================== */
 
-    /**
-     * return: [product_id][process_id] => prev_process_id
-     */
     private function buildPrevProcessMap($db, array $productIds): array
     {
         $map = [];
         if (empty($productIds)) return $map;
         if (!$db->tableExists('product_process_flows')) return $map;
 
-        // Ambil semua flow aktif untuk productIds
         $rows = $db->table('product_process_flows')
             ->select('product_id, process_id, sequence')
             ->whereIn('product_id', $productIds)
@@ -274,7 +268,6 @@ class WipInventoryController extends BaseController
         }
 
         foreach ($byProduct as $pid => $list) {
-            // sudah terurut sequence
             $procs = array_map(fn($x) => (int)$x['process_id'], $list);
             $n = count($procs);
             for ($i = 0; $i < $n; $i++) {
@@ -298,7 +291,6 @@ class WipInventoryController extends BaseController
         $map = [];
         if (!$db->tableExists('production_wip')) return $map;
 
-        // deteksi kolom transfer/buffer
         $transferCol = $this->detectColumn($db, 'production_wip', ['transfer', 'qty_transfer', 'transfer_qty', 'buffer', 'buffer_qty']);
         if (!$transferCol) return $map;
 
@@ -337,10 +329,8 @@ class WipInventoryController extends BaseController
         $tbl = 'production_wip';
         $wipDateCol = $this->detectWipDateColumn($db);
 
-        // ✅ Qty Masuk (per SHIFT) dari schedule
         $scheduleInMap = $this->buildScheduleInMap($db, $date);
 
-        // ✅ pairs HANYA dari schedule (biar tidak ada shift '-')
         $pairs = [];
         if (!empty($scheduleInMap)) {
             foreach ($scheduleInMap as $procId => $shifts) {
@@ -367,7 +357,6 @@ class WipInventoryController extends BaseController
             ]);
         }
 
-        // unique ids
         $processIds = [];
         $productIds = [];
         $shiftIds   = [];
@@ -381,7 +370,6 @@ class WipInventoryController extends BaseController
         $productIds = array_keys($productIds);
         $shiftIds   = array_keys($shiftIds);
 
-        // process label
         $processMap = [];
         $prows = $db->table('production_processes')
             ->select('id, process_name')
@@ -389,7 +377,6 @@ class WipInventoryController extends BaseController
             ->get()->getResultArray();
         foreach ($prows as $r) $processMap[(int)$r['id']] = (string)($r['process_name'] ?? '');
 
-        // shift label
         $shiftMap = [];
         if (!empty($shiftIds) && $db->tableExists('shifts')) {
             $srows = $db->table('shifts')
@@ -405,7 +392,6 @@ class WipInventoryController extends BaseController
             }
         }
 
-        // product label
         $productMap = [];
         $pRows = $db->table('products')
             ->select('id, part_no, part_name')
@@ -418,19 +404,11 @@ class WipInventoryController extends BaseController
             ];
         }
 
-        // OUT hourly (per SHIFT)
         $hourlyOutMap = $this->buildHourlyOutMap($db, $date, $productIds);
-
-        // NG hourly (per SHIFT)
         $hourlyNgMap = $this->buildHourlyNgMap($db, $date, $productIds);
-
-        // Transfer (tanpa shift)
         $transferMap = $this->buildTransferMap($db, $wipDateCol, $date, $processIds, $productIds);
-
-        // prev process map (per product)
         $prevMap = $this->buildPrevProcessMap($db, $productIds);
 
-        // Stock today (untuk display)
         $stockTodayMap = [];
         $colStock = $this->detectColumn($db, $tbl, ['stock', 'stock_qty', 'qty_stock']);
         if ($db->tableExists($tbl) && $colStock) {
@@ -449,7 +427,6 @@ class WipInventoryController extends BaseController
             }
         }
 
-        // Final rows
         $rows = [];
         foreach ($pairs as $p) {
             $procId  = (int)$p['process_id'];
@@ -460,23 +437,15 @@ class WipInventoryController extends BaseController
             $shiftLabel = $shiftMap[$shiftId] ?? ('Shift '.$shiftId);
             $pinfo   = $productMap[$pid] ?? ['part_no' => '', 'part_name' => ''];
 
-            // ✅ WIP Awal = TRANSFER dari process sebelumnya (tanpa shift, dipakai untuk semua shift)
             $prevProcId = (int)($prevMap[$pid][$procId] ?? 0);
             $wipAwal = ($prevProcId > 0) ? (int)($transferMap[$prevProcId][$pid] ?? 0) : 0;
 
-            // ✅ Qty Masuk (per shift) dari schedule
             $qtyIn = (int)($scheduleInMap[$procId][$shiftId][$pid] ?? 0);
-
-            // OUT & NG (per shift)
             $qtyOut = (int)($hourlyOutMap[$procId][$shiftId][$pid] ?? 0);
             $qtyNg  = (int)($hourlyNgMap[$procId][$shiftId][$pid] ?? 0);
 
-            // ✅ rumus tetap
             $wipAkhir = max(0, $wipAwal + $qtyIn - $qtyOut - $qtyNg);
-
             $stock = $colStock ? (int)($stockTodayMap[$procId][$pid] ?? $wipAkhir) : $wipAkhir;
-
-            // transfer tetap untuk process ini (tanpa shift)
             $transfer = (int)($transferMap[$procId][$pid] ?? 0);
 
             $rows[] = [
@@ -495,9 +464,8 @@ class WipInventoryController extends BaseController
                 'stock' => $stock,
                 'transfer' => $transfer,
 
-                // tooltip
                 'qty_in_schedule' => $qtyIn,
-                'qty_in_transfer' => $wipAwal, // ✅ sekarang wip_awal memang dari transfer prev
+                'qty_in_transfer' => $wipAwal,
             ];
         }
 
@@ -516,6 +484,85 @@ class WipInventoryController extends BaseController
             'rows' => $rows,
             'titleDate' => $this->formatTitleDate($date),
             'isAdmin' => $isAdmin,
+        ]);
+    }
+
+    /* =====================================================
+     * TOTAL STOCK ALL PRODUCTS
+     * ===================================================== */
+    public function totalStock()
+    {
+        $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+        if (!$isAdmin) $date = date('Y-m-d');
+
+        $wipDateCol = $this->detectWipDateColumn($db);
+        $tbl = 'production_wip';
+        $colStock = $this->detectColumn($db, $tbl, ['stock', 'stock_qty', 'qty_stock']);
+
+        $productData = [];
+
+        if ($db->tableExists($tbl) && $colStock) {
+            // Ambil semua max stock terakhir untuk setiap product dan setiap process
+            // Mengambil baris terakhir per product per process pada tanggal terpilih
+            $query = $db->table($tbl . ' w')
+                ->select('w.product_id, p.part_no, p.part_name, pr.process_name, w.'.$colStock.' as current_stock')
+                ->join('products p', 'p.id = w.product_id', 'inner')
+                ->join('production_processes pr', 'pr.id = w.to_process_id', 'left')
+                ->where("w.$wipDateCol <=", $date) // Ambil yang hari itu atau sebelum-sebelumnya
+                // Subquery untuk mendapatkan ID terakhir per process dan product
+                ->where('w.id IN (
+                    SELECT MAX(id) 
+                    FROM production_wip 
+                    WHERE '.$wipDateCol.' <= "'.$date.'" 
+                    GROUP BY to_process_id, product_id
+                )', null, false)
+                ->get()
+                ->getResultArray();
+
+            foreach ($query as $row) {
+                $pid = $row['product_id'];
+                
+                if (!isset($productData[$pid])) {
+                    $productData[$pid] = [
+                        'part_no' => $row['part_no'],
+                        'part_name' => $row['part_name'],
+                        'total_stock' => 0,
+                        'details' => []
+                    ];
+                }
+
+                $qty = (int)$row['current_stock'];
+                
+                // Skip jika stoknya 0 dan tidak ingin ditampilkan, tapi lebih baik tampilkan agar transparan
+                if($qty > 0) {
+                    $productData[$pid]['total_stock'] += $qty;
+                    $productData[$pid]['details'][] = [
+                        'process' => $row['process_name'] ?? 'Unknown Process',
+                        'qty' => $qty
+                    ];
+                }
+            }
+        }
+
+        // Hapus produk yang total stocknya 0 (Opsional)
+        $productData = array_filter($productData, function($item) {
+            return $item['total_stock'] > 0;
+        });
+
+        // Urutkan berdasarkan Part No
+        usort($productData, function($a, $b) {
+            return strcmp($a['part_no'], $b['part_no']);
+        });
+
+        return view('wip/inventory/total_stock', [
+            'date'        => $date,
+            'titleDate'   => $this->formatTitleDate($date),
+            'isAdmin'     => $isAdmin,
+            'productData' => $productData
         ]);
     }
 }

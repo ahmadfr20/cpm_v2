@@ -32,7 +32,12 @@
   }
 </style>
 
-<h4 class="mb-3">DAILY PRODUCTION SCHEDULE – ASSY BUSHING</h4>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">DAILY PRODUCTION SCHEDULE – ASSY BUSHING</h4>
+  <a href="<?= base_url('machining/assy-bushing/schedule/inventory?date='.$date) ?>" class="btn btn-outline-primary fw-bold btn-sm">
+    <i class="bi bi-box-seam me-1"></i> Lihat Stock Assy Bushing
+  </a>
+</div>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
@@ -114,7 +119,6 @@
           </td>
 
           <td>
-            <!-- ✅ sesuai controller store: target_per_shift -->
             <input type="number"
                    class="form-control form-control-sm text-center plan-input"
                    name="items[<?= $idx ?>][target_per_shift]"

@@ -32,7 +32,12 @@
   }
 </style>
 
-<h4 class="mb-3">DAILY PRODUCTION SCHEDULE – MACHINING</h4>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">DAILY PRODUCTION SCHEDULE – MACHINING</h4>
+  <a href="<?= base_url('machining/daily-schedule/inventory?date='.$date) ?>" class="btn btn-outline-primary fw-bold btn-sm">
+    <i class="bi bi-box-seam me-1"></i> Lihat Stock Machining
+  </a>
+</div>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
@@ -188,13 +193,8 @@ async function loadProducts(selectEl) {
       opt.value = p.id;
       opt.textContent = `${p.part_no} - ${p.part_name}`;
 
-      // ✅ CT machining yg dipakai
       opt.dataset.ct = p.cycle_time_used || '';
-
-      // target default
       opt.dataset.targetShift = p.target_per_shift || 0;
-
-      // ✅ stock prev + prev process
       opt.dataset.stockPrev = p.stock_prev || 0;
       opt.dataset.prevProcessId = p.prev_process_id || 0;
 
@@ -251,7 +251,6 @@ $(document).on('change', '.product-select', function() {
   const ctEl   = row.querySelector('.cycle-time');
   const planEl = row.querySelector('.plan-input');
 
-  // clear
   if (!opt || !selectEl.value) {
     if (ctEl) ctEl.value = '';
     if (planEl) planEl.removeAttribute('data-stock-prev');
@@ -259,39 +258,31 @@ $(document).on('change', '.product-select', function() {
     return;
   }
 
-  // set CT machining
   ctEl.value = opt.dataset.ct || '';
 
-  // set stock prev into plan
   const stockPrev = parseInt(opt.dataset.stockPrev || '0', 10);
   planEl.dataset.stockPrev = String(stockPrev);
 
-  // show stock badge
   setStockBadge(row, stockPrev);
 
-  // stock kosong
   if (stockPrev <= 0) {
     alert('Stock kosong pada proses sebelumnya. Tidak bisa scheduling product ini.');
     planEl.value = 0;
     return;
   }
 
-  // default plan kalau kosong
   if (!planEl.value || planEl.value == 0) {
     planEl.value = parseInt(opt.dataset.targetShift || '0', 10);
   }
 
-  // cap kalau melebihi stock
   validatePlanAgainstStock(row, true);
 });
 
-/** on input plan */
 $(document).on('input', '.plan-input', function() {
   const row = this.closest('tr');
   validatePlanAgainstStock(row, true);
 });
 
-/** validasi sebelum submit (server-side tetap ada, ini UX) */
 $(document).on('submit', '.mc-form', function(e){
   const rows = this.querySelectorAll('tbody tr');
   for (const row of rows) {

@@ -151,6 +151,11 @@
 <div class="page-head">
   <div>
     <div class="title"><?= esc($titleDate) ?> – Rekap WIP</div>
+    <div class="mt-2">
+       <a href="<?= base_url('wip/inventory/total-stock?date='.$date) ?>" class="btn btn-outline-success btn-sm fw-bold">
+           <i class="bi bi-box-seam me-1"></i> Lihat Total Stock per Product
+       </a>
+    </div>
   </div>
 
   <?php if (!empty($isAdmin) && $isAdmin): ?>
@@ -206,7 +211,6 @@
           <?php $lastKey = null; ?>
           <?php foreach ($rows as $r): ?>
             <?php
-              // pemisah jika ganti SHIFT atau Station
               $curKey = ($r['shift'] ?? '') . '|' . ($r['station'] ?? '');
               if ($lastKey !== null && $lastKey !== $curKey) {
                 echo '<tr class="sep"><td colspan="11"></td></tr>';

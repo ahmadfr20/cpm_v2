@@ -176,8 +176,6 @@ class AssyShaftDailyScheduleController extends BaseController
 
     /* =========================================================
      * RESERVE/RELEASE dari prev process untuk dikirim ke Assy Shaft
-     * - stock prev berkurang saat reserve
-     * - transfer prev bertambah saat reserve
      * ========================================================= */
     private function applyPrevReserveToNext(
         $db,
@@ -222,7 +220,7 @@ class AssyShaftDailyScheduleController extends BaseController
 
     /* =========================================================
      * Incoming Assy Shaft saat schedule:
-     * qty_in bertambah, stock tetap 0 (sama persis machining)
+     * qty_in bertambah, stock tetap 0 
      * ========================================================= */
     private function upsertIncomingWipAssyShaft(
         $db,
@@ -272,7 +270,6 @@ class AssyShaftDailyScheduleController extends BaseController
             if ($hasQty)    $upd['qty'] = $newQtyIn;
             if ($hasQtyOut) $upd['qty_out'] = (int)($exist['qty_out'] ?? 0);
 
-            // ✅ stock tetap 0
             if ($hasStock)  $upd['stock'] = 0;
 
             if ($hasUpdatedAt) $upd['updated_at'] = $now;
@@ -320,7 +317,6 @@ class AssyShaftDailyScheduleController extends BaseController
             ->get()
             ->getResultArray();
 
-        // mesin tetap ambil dari process Machining (sesuai file kamu sebelumnya)
         $machines = $db->table('machines m')
             ->select('m.id, m.machine_code, m.machine_name, m.line_position')
             ->join('production_processes pp', 'pp.id = m.process_id')
@@ -366,7 +362,7 @@ class AssyShaftDailyScheduleController extends BaseController
     }
 
     /* ============================================
-     * ✅ AJAX: PRODUCT + TARGET + STOCK PREV
+     * AJAX: PRODUCT + TARGET + STOCK PREV
      * ============================================ */
     public function getProductAndTarget()
     {
@@ -381,7 +377,6 @@ class AssyShaftDailyScheduleController extends BaseController
         $totalSecond = $this->getTotalSecondShift($db, $shiftId);
         if ($totalSecond <= 0) return $this->response->setJSON([]);
 
-        // opsional: kalau kamu punya CT khusus assy shaft
         $hasCtAS = $db->fieldExists('cycle_time_assy_shaft', 'products');
 
         $products = $db->table('product_process_flows ppf')
@@ -429,7 +424,7 @@ class AssyShaftDailyScheduleController extends BaseController
     }
 
     /* ============================================
-     * STORE (alur sama Machining biasa)
+     * STORE 
      * ============================================ */
     public function store()
     {
@@ -460,7 +455,6 @@ class AssyShaftDailyScheduleController extends BaseController
 
                 if ($shiftId <= 0 || $machineId <= 0 || $productId <= 0) continue;
 
-                // ✅ sama seperti machining biasa: plan diambil dari items[*][plan]
                 $planInput = (int)($row['plan'] ?? 0);
                 if ($planInput < 0) $planInput = 0;
                 if ($planInput > 1200) $planInput = 1200;
@@ -522,7 +516,7 @@ class AssyShaftDailyScheduleController extends BaseController
                     $oldPlan = 0;
                 }
 
-                // CT Assy Shaft (fallback ke cycle_time)
+                // CT Assy Shaft 
                 $product = $db->table('products')
                     ->select($hasCtAS ? 'cycle_time_assy_shaft as ct, cavity, efficiency_rate' : 'cycle_time as ct, cavity, efficiency_rate')
                     ->where('id', $productId)
@@ -563,7 +557,7 @@ class AssyShaftDailyScheduleController extends BaseController
                     $itemId = (int)$db->insertID();
                 }
 
-                // validasi & apply delta (sama persis machining biasa)
+                // validasi & apply delta
                 if ($prevProcessIdNew) {
                     $delta = $planInput - $oldPlan;
 
@@ -601,7 +595,6 @@ class AssyShaftDailyScheduleController extends BaseController
 
     /* =====================================================
      * INCOMING WIP (FOR MODAL)
-     * ✅ Sesuaikan agar avail pakai qty_in (bukan stock)
      * ===================================================== */
     public function incomingWip()
     {
@@ -627,7 +620,6 @@ class AssyShaftDailyScheduleController extends BaseController
                 return $this->response->setJSON(['status' => false, 'message' => 'Kolom qty_in/qty tidak ada di production_wip']);
             }
 
-            // ✅ incoming availability harus qty_in (machining-style)
             $availExpr = $hasQtyIn ? 'pw.qty_in' : 'pw.qty';
 
             $rows = $db->table('production_wip pw')
@@ -668,9 +660,6 @@ class AssyShaftDailyScheduleController extends BaseController
 
     /* =====================================================
      * ASSIGN INCOMING WIP (FOR MODAL)
-     * ✅ Sesuaikan avail pakai qty_in
-     * Catatan: ini hanya “alokasi” incoming ke schedule item,
-     * tidak mengubah stock prev (karena incoming sudah berasal dari prev).
      * ===================================================== */
     public function assignIncomingWip()
     {
@@ -725,7 +714,6 @@ class AssyShaftDailyScheduleController extends BaseController
             return $this->response->setJSON(['status' => false, 'message' => 'from_process_id kosong']);
         }
 
-        // ✅ avail = qty_in (machining-style)
         $avail = $hasQtyIn ? (int)($wip['qty_in'] ?? 0) : (int)($wip['qty'] ?? 0);
 
         if ($qtyAssign > $avail) {
@@ -734,12 +722,10 @@ class AssyShaftDailyScheduleController extends BaseController
 
         $qtyAssign = min($qtyAssign, 1200);
 
-        // pastikan product punya flow Assy Shaft
         if (!$this->validateProductHasFlow($db, $productId, $processIdAS)) {
             return $this->response->setJSON(['status' => false, 'message' => "Product {$productId} tidak punya flow Assy Shaft aktif"]);
         }
 
-        // ambil CT untuk schedule item
         $hasCtAS = $db->fieldExists('cycle_time_assy_shaft', 'products');
         $product = $db->table('products')
             ->select($hasCtAS ? 'cycle_time_assy_shaft as ct, cavity, efficiency_rate' : 'cycle_time as ct, cavity, efficiency_rate')
@@ -762,7 +748,6 @@ class AssyShaftDailyScheduleController extends BaseController
 
         $db->transBegin();
         try {
-            // header schedule
             $schedule = $db->table('daily_schedules')
                 ->where([
                     'schedule_date' => $date,
@@ -789,7 +774,6 @@ class AssyShaftDailyScheduleController extends BaseController
                 $scheduleId = (int)$schedule['id'];
             }
 
-            // upsert item per machine
             $existItem = $db->table('daily_schedule_items')
                 ->where([
                     'daily_schedule_id' => $scheduleId,
@@ -817,7 +801,6 @@ class AssyShaftDailyScheduleController extends BaseController
                 $itemId = (int)$db->insertID();
             }
 
-            // kurangi qty_in pada WIP incoming (alokasi)
             $remaining = $avail - $qtyAssign;
 
             $wipUpd = [
@@ -850,5 +833,79 @@ class AssyShaftDailyScheduleController extends BaseController
             $db->transRollback();
             return $this->response->setJSON(['status' => false, 'message' => $e->getMessage()]);
         }
+    }
+
+    /* =====================================================
+     * INVENTORY STOCK (Assy Shaft Only)
+     * ===================================================== */
+    public function inventory()
+    {
+        $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+        if (!$isAdmin) $date = date('Y-m-d');
+
+        $ts = strtotime($date);
+        $bulan = [1=>'Jan',2=>'Feb',3=>'Mar',4=>'Apr',5=>'Mei',6=>'Jun',7=>'Jul',8=>'Agu',9=>'Sep',10=>'Okt',11=>'Nov',12=>'Des'];
+        $m = (int)date('n', $ts);
+        $titleDate = date('d', $ts) . ' ' . ($bulan[$m] ?? date('M',$ts)) . ' ' . date('Y', $ts);
+
+        $processIdAS = $this->getProcessIdAssyShaft($db);
+
+        $tbl = 'production_wip';
+        $wipDateCol = $db->fieldExists('wip_date', $tbl) ? 'wip_date' : 
+                     ($db->fieldExists('schedule_date', $tbl) ? 'schedule_date' : 'production_date');
+        
+        $colStock = 'stock';
+        foreach (['stock', 'stock_qty', 'qty_stock'] as $col) {
+            if ($db->fieldExists($col, $tbl)) {
+                $colStock = $col; break;
+            }
+        }
+
+        $productData = [];
+
+        if ($db->tableExists($tbl)) {
+            // Ambil max stock terakhir khusus untuk process Assy Shaft
+            $query = $db->table($tbl . ' w')
+                ->select('w.product_id, p.part_no, p.part_name, w.'.$colStock.' as current_stock')
+                ->join('products p', 'p.id = w.product_id', 'inner')
+                ->where("w.$wipDateCol <=", $date)
+                ->where('w.to_process_id', $processIdAS)
+                ->where('w.id IN (
+                    SELECT MAX(id) 
+                    FROM production_wip 
+                    WHERE '.$wipDateCol.' <= "'.$date.'" 
+                    AND to_process_id = '.$processIdAS.'
+                    GROUP BY product_id
+                )', null, false)
+                ->get()
+                ->getResultArray();
+
+            foreach ($query as $row) {
+                $qty = (int)$row['current_stock'];
+                
+                if($qty > 0) {
+                    $productData[] = [
+                        'part_no'     => $row['part_no'],
+                        'part_name'   => $row['part_name'],
+                        'total_stock' => $qty,
+                    ];
+                }
+            }
+        }
+
+        usort($productData, function($a, $b) {
+            return strcmp($a['part_no'], $b['part_no']);
+        });
+
+        return view('machining/assy_shaft_schedule/inventory', [
+            'date'        => $date,
+            'titleDate'   => $titleDate,
+            'isAdmin'     => $isAdmin,
+            'productData' => $productData
+        ]);
     }
 }

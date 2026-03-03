@@ -264,7 +264,7 @@ class DailyScheduleController extends BaseController
             if ($hasQty)    $upd['qty'] = $newQtyIn;
             if ($hasQtyOut) $upd['qty_out'] = (int)($exist['qty_out'] ?? 0);
 
-            // ✅ stock tetap 0 (belum diproses)
+            // stock tetap 0 (belum diproses)
             if ($hasStock)  $upd['stock'] = 0;
 
             if ($hasUpdatedAt) $upd['updated_at'] = $now;
@@ -357,7 +357,7 @@ class DailyScheduleController extends BaseController
     }
 
     /* ============================================
-     * ✅ AJAX: PRODUCT + TARGET + STOCK PREV
+     * AJAX: PRODUCT + TARGET + STOCK PREV
      * Endpoint untuk select2 (productUrl)
      * ============================================ */
     public function getProductAndTarget()
@@ -585,5 +585,83 @@ class DailyScheduleController extends BaseController
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
         }
+    }
+
+    /* =====================================================
+     * INVENTORY STOCK (Machining Only)
+     * ===================================================== */
+    public function inventory()
+    {
+        $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+        if (!$isAdmin) $date = date('Y-m-d');
+
+        // Format tanggal
+        $ts = strtotime($date);
+        $bulan = [1=>'Jan',2=>'Feb',3=>'Mar',4=>'Apr',5=>'Mei',6=>'Jun',7=>'Jul',8=>'Agu',9=>'Sep',10=>'Okt',11=>'Nov',12=>'Des'];
+        $m = (int)date('n', $ts);
+        $titleDate = date('d', $ts) . ' ' . ($bulan[$m] ?? date('M',$ts)) . ' ' . date('Y', $ts);
+
+        $processIdMC = $this->getProcessIdMachining($db);
+
+        $tbl = 'production_wip';
+        $wipDateCol = $db->fieldExists('wip_date', $tbl) ? 'wip_date' : 
+                     ($db->fieldExists('schedule_date', $tbl) ? 'schedule_date' : 'production_date');
+        
+        $colStock = 'stock';
+        foreach (['stock', 'stock_qty', 'qty_stock'] as $col) {
+            if ($db->fieldExists($col, $tbl)) {
+                $colStock = $col; break;
+            }
+        }
+
+        $productData = [];
+
+        if ($db->tableExists($tbl)) {
+            // Ambil max stock terakhir khusus untuk process Machining
+            $query = $db->table($tbl . ' w')
+                ->select('w.product_id, p.part_no, p.part_name, w.'.$colStock.' as current_stock')
+                ->join('products p', 'p.id = w.product_id', 'inner')
+                ->where("w.$wipDateCol <=", $date)
+                ->where('w.to_process_id', $processIdMC)
+                // Subquery row terakhir (terbaru) per product
+                ->where('w.id IN (
+                    SELECT MAX(id) 
+                    FROM production_wip 
+                    WHERE '.$wipDateCol.' <= "'.$date.'" 
+                    AND to_process_id = '.$processIdMC.'
+                    GROUP BY product_id
+                )', null, false)
+                ->get()
+                ->getResultArray();
+
+            foreach ($query as $row) {
+                $qty = (int)$row['current_stock'];
+                
+                // Tampilkan hanya jika stok lebih dari 0
+                if($qty > 0) {
+                    $productData[] = [
+                        'part_no'     => $row['part_no'],
+                        'part_name'   => $row['part_name'],
+                        'total_stock' => $qty,
+                    ];
+                }
+            }
+        }
+
+        // Urutkan berdasarkan Part No
+        usort($productData, function($a, $b) {
+            return strcmp($a['part_no'], $b['part_no']);
+        });
+
+        return view('machining/schedule/inventory', [
+            'date'        => $date,
+            'titleDate'   => $titleDate,
+            'isAdmin'     => $isAdmin,
+            'productData' => $productData
+        ]);
     }
 }

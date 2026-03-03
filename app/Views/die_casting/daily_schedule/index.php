@@ -1,7 +1,12 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4>DIE CASTING – DAILY PRODUCTION SCHEDULE</h4>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">DIE CASTING – DAILY PRODUCTION SCHEDULE</h4>
+  <a href="<?= base_url('die-casting/daily-schedule/inventory?date='.$date) ?>" class="btn btn-outline-info fw-bold btn-sm">
+    <i class="bi bi-box-seam me-1"></i> Lihat Stock Die Casting
+  </a>
+</div>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
@@ -18,22 +23,14 @@
 <form method="post" action="<?= site_url('/die-casting/daily-schedule/store') ?>">
 <?= csrf_field() ?>
 
-<!-- Select2 (searchable dropdown) -->
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
 <style>
-  .select2-container .select2-selection--single{
-    height: 31px;
-  }
-  .select2-container--default .select2-selection--single .select2-selection__rendered{
-    line-height: 31px;
-    font-size: 12px;
-  }
-  .select2-container--default .select2-selection--single .select2-selection__arrow{
-    height: 31px;
-  }
+  .select2-container .select2-selection--single{ height: 31px; }
+  .select2-container--default .select2-selection--single .select2-selection__rendered{ line-height: 31px; font-size: 12px; }
+  .select2-container--default .select2-selection--single .select2-selection__arrow{ height: 31px; }
 </style>
 
 <?php foreach ($shifts as $shift): ?>
@@ -90,7 +87,6 @@
             <input type="hidden" class="wa" name="items[<?= esc($key) ?>][weight_ascas]" value="<?= (float)($p['weight_ascas'] ?? 0) ?>">
             <input type="hidden" class="wr" name="items[<?= esc($key) ?>][weight_runner]" value="<?= (float)($p['weight_runner'] ?? 0) ?>">
 
-
             <input type="hidden" class="qty-a" name="items[<?= esc($key) ?>][qty_a]" value="<?= (int)($p['qty_a'] ?? 0) ?>">
             <input type="hidden" class="qty-ng" name="items[<?= esc($key) ?>][qty_ng]" value="<?= (int)($p['qty_ng'] ?? 0) ?>">
           </td>
@@ -141,7 +137,7 @@
 
 <div class="mt-3 d-flex gap-2">
   <button class="btn btn-success" type="submit">💾 Simpan</button>
-  <a href="<?= site_url('/die-casting/daily-schedule/view?date=' . esc($date)) ?>"
+  <a href="<?= site_url('/die-casting/daily-schedule/inventory?date=' . esc($date)) ?>"
      class="btn btn-outline-primary">👁 View Result</a>
 </div>
 
@@ -165,7 +161,6 @@ function recalcShiftTotals(shiftId){
   if (r) r.innerText = totalRunner.toFixed(2);
 }
 
-
 function calculate(tr){
   const shiftId = tr.dataset.shift;
 
@@ -181,7 +176,6 @@ function calculate(tr){
   tr.querySelector('.ascas').innerText  = ascasKg.toFixed(2);
   tr.querySelector('.runner').innerText = runnerKg.toFixed(2);
 
-  // pastikan hidden qty_a / qty_ng ikut konsisten (buat controller)
   const hidA = tr.querySelector('.qty-a');
   if (hidA) hidA.value = qtyA;
 
@@ -200,7 +194,6 @@ function applySelectedOptionToRow(sel){
   tr.querySelector('.wa').value = opt.dataset.ascas || 0;
   tr.querySelector('.wr').value = opt.dataset.runner || 0;
 
-  // auto-fill plan kalau masih 0
   const qtyP = tr.querySelector('.qty-p');
   if (qtyP && (!qtyP.value || qtyP.value == 0)) {
     qtyP.value = opt.dataset.target || 0;
@@ -232,14 +225,12 @@ document.querySelectorAll('.product-select').forEach(sel => {
         sel.appendChild(opt);
       });
 
-      // ✅ init select2 (searchable)
       $(sel).select2({
         width: '100%',
         placeholder: '-- pilih --',
         allowClear: true
       });
 
-      // kalau sudah ada selected, set weight & hitung
       if (selected) {
         applySelectedOptionToRow(sel);
       } else {
@@ -247,23 +238,19 @@ document.querySelectorAll('.product-select').forEach(sel => {
       }
     })
     .catch(() => {
-      // kalau gagal fetch, tetap hitung biar total tidak kosong
       calculate(sel.closest('tr'));
     });
 });
 
-// Event select2 berubah
 $(document).on('change', '.product-select', function() {
   applySelectedOptionToRow(this);
 });
 
-// Saat plan berubah
 document.addEventListener('input', e => {
   if (!e.target.classList.contains('qty-p')) return;
   calculate(e.target.closest('tr'));
 });
 
-// Hitung awal untuk semua shift (jaga-jaga)
 document.querySelectorAll('tr[data-shift]').forEach(tr => calculate(tr));
 </script>
 

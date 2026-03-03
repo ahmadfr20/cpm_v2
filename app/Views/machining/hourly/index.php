@@ -5,7 +5,7 @@
 
 <div class="mb-3">
   <strong>Tanggal:</strong> <?= esc($date) ?><br>
-  <strong>Operator:</strong> <?= esc($operator) ?>
+  <strong>Operator:</strong> <?= esc($operator ?? 'Unknown') ?>
 </div>
 
 <form method="get" class="mb-3">
@@ -71,7 +71,7 @@
 .col-slot-target{ width:90px; min-width:90px; }
 .col-slot-fg{ width:90px; min-width:90px; }
 .col-slot-ng{ width:90px; min-width:90px; }
-.col-slot-remark{ width:360px; min-width:360px; } /* lebih lebar untuk inline NG */
+.col-slot-remark{ width:360px; min-width:360px; } 
 
 .sticky-left{ position:sticky; left:0; z-index:40; background:#fff; }
 .sticky-left-2{ position:sticky; left:90px; z-index:40; background:#fff; }
@@ -150,7 +150,7 @@
         <tbody class="shift-body">
         <?php foreach ($shift['items'] as $item): ?>
           <tr>
-            <td class="sticky-left fw-bold text-center"><?= esc($item['line_position']) ?></td>
+            <td class="sticky-left fw-bold text-center"><?= esc($item['line_position'] ?? '') ?></td>
             <td class="sticky-left-2 text-center fw-bold"><?= esc($item['machine_code']) ?></td>
             <td class="sticky-left-3 text-start fw-bold"><?= esc($item['part_no'].' - '.$item['part_name']) ?></td>
             <td class="sticky-left-4 fw-bold text-center target-shift"><?= (int)$item['target_per_shift'] ?></td>
@@ -162,7 +162,6 @@
 
               $exist = $shift['hourly_map'][(int)$item['machine_id']][(int)$item['product_id']][(int)$slot['id']] ?? null;
 
-              // ✅ ng_detail_map slot
               $ngDetail = $shift['ng_detail_map'][(int)$item['machine_id']][(int)$item['product_id']][(int)$slot['id']] ?? [];
 
               $key = $shiftId.'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
@@ -189,7 +188,7 @@
                        name="items[<?= esc($key) ?>][ng]">
               </td>
 
-              <td class="text-start">
+              <td class="text-start outer-td">
                 <div class="ng-inline" data-key="<?= esc($key) ?>">
                   <div class="ng-inline-head">
                     <div class="meta">
@@ -219,7 +218,6 @@
                   </div>
                 </div>
 
-                <!-- hidden submit -->
                 <div class="ng-hidden d-none" id="ngHidden_<?= esc($key) ?>">
                   <?php foreach ($ngDetail as $idx => $d): ?>
                     <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][ng_category_id]" value="<?= (int)$d['ng_category_id'] ?>">
@@ -227,7 +225,6 @@
                   <?php endforeach; ?>
                 </div>
 
-                <!-- meta submit -->
                 <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shiftId ?>">
                 <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$item['machine_id'] ?>">
                 <input type="hidden" name="items[<?= esc($key) ?>][product_id]" value="<?= (int)$item['product_id'] ?>">
@@ -251,7 +248,6 @@
             <?php endforeach ?>
           </tr>
         </tfoot>
-
       </table>
     </div>
 
@@ -268,40 +264,15 @@
     <i class="bi bi-save"></i> Simpan
   </button>
 
-  <!-- <?php if (!empty($isAdmin) || !empty($canFinish)): ?>
-    <button class="btn btn-warning mt-3 ms-2" type="submit" formaction="/machining/hourly/finish-shift"
-            onclick="return confirm('Finish Shift? Total FG Machining akan dikirim ke proses berikutnya sesuai flow.')">
-      <i class="bi bi-send-check"></i>
-      Finish Shift <?= !empty($isAdmin) ? '(ADMIN)' : '' ?>
-    </button>
-
-    <?php if (empty($isAdmin) && !empty($shift3EndAt)): ?>
-      <div class="text-muted mt-2" style="font-size:13px">
-        Finish Shift aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?> WIB)
-      </div>
-    <?php endif; ?>
-
-  <?php else: ?>
-    <button class="btn btn-warning mt-3 ms-2" type="button" disabled
-            title="<?= esc($finishError ?? 'Belum bisa Finish Shift') ?>">
-      <i class="bi bi-send-check"></i> Finish Shift (Kirim FG)
-    </button>
-
-    <?php if (!empty($shift3EndAt)): ?>
-      <div class="text-muted mt-2" style="font-size:13px">
-        Finish Shift aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?> WIB)
-      </div>
-    <?php endif; ?> -->
-  <?php endif; ?>
-
 </form>
 
 <script>
+// FIX 1: Bypass Fatal Error PHP ketika $ngCategories kosong/null.
 const NG_CATEGORIES = <?= json_encode(array_map(fn($x)=>[
-  'id'=>(int)$x['id'],
-  'ng_code'=>(int)$x['ng_code'],
-  'ng_name'=>(string)$x['ng_name']
-], $ngCategories ?? [])) ?>;
+  'id'=>(int)($x['id'] ?? 0),
+  'ng_code'=>(int)($x['ng_code'] ?? 0),
+  'ng_name'=>(string)($x['ng_name'] ?? '')
+], is_array($ngCategories ?? null) ? $ngCategories : [])) ?>;
 
 function escapeHtml(str) {
   return String(str ?? '')
@@ -443,6 +414,7 @@ function addNgRowInline(key){
   rows.push({ ng_category_id: 0, qty: 0 });
   writeNgHiddenFromRows(key, rows);
   renderNgTable(key);
+  applySlotLock(); 
 }
 
 function deleteNgRowInline(key, idx){
@@ -450,6 +422,7 @@ function deleteNgRowInline(key, idx){
   rows.splice(idx, 1);
   writeNgHiddenFromRows(key, rows);
   renderNgTable(key);
+  recalcAll();
 }
 
 document.addEventListener('change', function(e){
@@ -471,7 +444,7 @@ document.addEventListener('change', function(e){
   if(codeTd) codeTd.textContent = cat ? cat.ng_code : '-';
 
   updateNgTotalUI(key, calcTotalNg(rows));
-  recalcAll(); // update summary
+  recalcAll(); 
 });
 
 document.addEventListener('input', function(e){
@@ -492,7 +465,7 @@ document.addEventListener('input', function(e){
   writeNgHiddenFromRows(key, rows);
 
   updateNgTotalUI(key, calcTotalNg(rows));
-  recalcAll(); // update summary
+  recalcAll(); 
 });
 
 /* init semua slot NG */
@@ -527,21 +500,21 @@ function applySlotLock(){
     }
   });
 
-  // ✅ tombol Add NG ikut lock
+  // Lock tombol Add NG
   document.querySelectorAll('.ng-add-btn').forEach(btn=>{
     const active = isSlotActive(prodDateISO, btn.dataset.start, btn.dataset.end);
     btn.disabled = !active;
-    const td = btn.closest('td');
+    const td = btn.closest('td.outer-td'); // FIX 2: Cari parent terluar
     if(td) td.classList.toggle('slot-locked', !active);
   });
 
-  // ✅ select & qty NG ikut lock (disable)
-  document.querySelectorAll('.ngSel, .ngQty').forEach(el=>{
-    const wrap = el.closest('td');
-    const btn = wrap?.querySelector('.ng-add-btn');
-    // kalau tombol add di slot itu disabled berarti lock
-    const locked = btn ? btn.disabled : false;
-    el.disabled = locked;
+  // Lock select dan input qty NG jika tombol Add NG mati
+  document.querySelectorAll('.ngSel, .ngQty, .btn-danger').forEach(el=>{
+    const wrap = el.closest('td.outer-td'); 
+    if(wrap) {
+        const btn = wrap.querySelector('.ng-add-btn');
+        if(btn) el.disabled = btn.disabled;
+    }
   });
 
   document.querySelectorAll('th.slot-header').forEach(th=>{
@@ -557,7 +530,7 @@ function calcTotals(){
     t.querySelectorAll('.ng').forEach(i=>ng+=+i.value||0);
     t.querySelectorAll('.target-shift').forEach(td=>target+=+td.innerText||0);
 
-    const summary = t.closest('.table-scroll')?.nextElementSibling; // shift-summary
+    const summary = t.closest('.table-scroll')?.nextElementSibling;
     if (summary) {
       summary.querySelector('.total-fg').innerText = fg;
       summary.querySelector('.total-ng').innerText = ng;
@@ -568,36 +541,45 @@ function calcTotals(){
 
 function calcSlotTotals(){
   document.querySelectorAll('.production-table').forEach(t=>{
-    const rows=t.querySelectorAll('tbody tr');
-    const slots=t.querySelectorAll('.total-slot-target').length;
-    let tg=Array(slots).fill(0),fg=Array(slots).fill(0),ng=Array(slots).fill(0);
+    // FIX 3: Hanya ambil <tr> dari tabel utama, JANGAN masuk ke tabel NG dalam loop
+    const rows = t.querySelectorAll('tbody.shift-body > tr');
+    const slots = t.querySelectorAll('.total-slot-target').length;
+    let tg=Array(slots).fill(0), fg=Array(slots).fill(0), ng=Array(slots).fill(0);
 
     rows.forEach(r=>{
-      const cells=r.querySelectorAll('td');
-      for(let i=4;i<cells.length;i+=4){
-        const idx=(i-4)/4;
-        tg[idx]+=+cells[i].innerText||0;
-        fg[idx]+=+(cells[i+1].querySelector('.fg')?.value||0);
-        ng[idx]+=+(cells[i+2].querySelector('.ng')?.value||0);
+      const cells = r.children; // Menggunakan children agar hanya mengambil sel langsung
+      // Pola: 4 kolom fix (Line, Mesin, Part, Target)
+      // Lalu berulang 4 kolom per slot (Target Slot, FG, NG, Remark/Tabel NG)
+      for(let i=4; i<cells.length; i+=4){
+        const idx = (i-4)/4;
+        if(idx < slots) {
+            tg[idx] += +(cells[i].innerText) || 0;
+            fg[idx] += +(cells[i+1]?.querySelector('.fg')?.value) || 0;
+            ng[idx] += +(cells[i+2]?.querySelector('.ng')?.value) || 0;
+        }
       }
     });
 
     t.querySelectorAll('.total-slot-target').forEach((c,i)=>c.innerText=tg[i]);
     t.querySelectorAll('.total-slot-fg').forEach((c,i)=>c.innerText=fg[i]);
     t.querySelectorAll('.total-slot-ng').forEach((c,i)=>c.innerText=ng[i]);
-    // slot eff: FG/Target
     t.querySelectorAll('.total-slot-eff').forEach((c,i)=>{
-      c.innerText=tg[i]?((fg[i]/tg[i])*100).toFixed(1)+'%':'0%';
+      c.innerText = tg[i] ? ((fg[i]/tg[i])*100).toFixed(1)+'%' : '0%';
     });
   });
 }
 
-function recalcAll(){ calcTotals(); calcSlotTotals(); }
+function recalcAll(){ 
+    calcTotals(); 
+    calcSlotTotals(); 
+}
 
 applySlotLock();
 recalcAll();
 setInterval(applySlotLock, 30000);
+
 document.addEventListener('input', recalcAll);
+document.addEventListener('change', recalcAll);
 </script>
 
 <?= $this->endSection() ?>

@@ -6,46 +6,33 @@ use App\Controllers\BaseController;
 
 class ScheduleController extends BaseController
 {
-    /* ============================
-     * PROCESS HELPERS
-     * ============================ */
-
     private function findProcessId($db, array $codes = [], array $names = []): ?int
     {
         if (!$db->tableExists('production_processes')) return null;
 
         if (!empty($codes) && $db->fieldExists('process_code', 'production_processes')) {
             foreach ($codes as $code) {
-                $row = $db->table('production_processes')->select('id')
-                    ->where('process_code', $code)->get()->getRowArray();
+                $row = $db->table('production_processes')->select('id')->where('process_code', $code)->get()->getRowArray();
                 if ($row && !empty($row['id'])) return (int)$row['id'];
             }
         }
 
         if (!empty($names) && $db->fieldExists('process_name', 'production_processes')) {
             foreach ($names as $name) {
-                $row = $db->table('production_processes')->select('id')
-                    ->where('process_name', $name)->get()->getRowArray();
+                $row = $db->table('production_processes')->select('id')->where('process_name', $name)->get()->getRowArray();
                 if ($row && !empty($row['id'])) return (int)$row['id'];
             }
             foreach ($names as $name) {
-                $row = $db->table('production_processes')->select('id')
-                    ->like('process_name', $name)->get()->getRowArray();
+                $row = $db->table('production_processes')->select('id')->like('process_name', $name)->get()->getRowArray();
                 if ($row && !empty($row['id'])) return (int)$row['id'];
             }
         }
-
         return null;
     }
 
     private function getShotBlastProcessId($db): ?int
     {
-        // process_code SB, process_name SAND BLASTING
-        return $this->findProcessId(
-            $db,
-            ['SB'],
-            ['SAND BLASTING', 'Sand Blasting', 'SHOT BLASTING', 'Shot Blasting', 'Shot Blast']
-        );
+        return $this->findProcessId($db, ['SB'], ['SAND BLASTING', 'Sand Blasting', 'SHOT BLASTING', 'Shot Blasting', 'Shot Blast']);
     }
 
     private function getDieCastingProcessId($db): ?int
@@ -53,33 +40,19 @@ class ScheduleController extends BaseController
         return $this->findProcessId($db, ['DC'], ['Die Casting', 'DIE CASTING', 'DIE CAST']);
     }
 
-    /* ============================
-     * MACHINE AUTO
-     * ============================ */
-
     private function getAutoShotBlastMachineId($db): int
     {
         if (!$db->tableExists('machines')) return 0;
 
-        $rows = $db->table('machines')->select('id')
-            ->whereIn('production_line', ['Shot Blast', 'SHOT BLAST', 'Sand Blasting', 'SAND BLASTING', 'SB'])
-            ->get()->getResultArray();
-
+        $rows = $db->table('machines')->select('id')->whereIn('production_line', ['Shot Blast', 'SHOT BLAST', 'Sand Blasting', 'SAND BLASTING', 'SB'])->get()->getResultArray();
         if (!empty($rows)) return (int)($rows[array_rand($rows)]['id'] ?? 0);
 
-        $rows = $db->table('machines')->select('id')
-            ->whereIn('production_line', ['Die Casting', 'DIE CASTING', 'DC'])
-            ->get()->getResultArray();
-
+        $rows = $db->table('machines')->select('id')->whereIn('production_line', ['Die Casting', 'DIE CASTING', 'DC'])->get()->getResultArray();
         if (!empty($rows)) return (int)($rows[array_rand($rows)]['id'] ?? 0);
 
         $row = $db->table('machines')->select('id')->limit(1)->get()->getRowArray();
         return (int)($row['id'] ?? 0);
     }
-
-    /* ============================
-     * COLUMN DETECT
-     * ============================ */
 
     private function detectWipDateColumn($db): string
     {
@@ -121,20 +94,12 @@ class ScheduleController extends BaseController
         return $clean;
     }
 
-    /* ============================
-     * FLOW prev/next
-     * ============================ */
-
     private function getPrevNextProcessByFlow($db, int $productId, int $currentProcessId): array
     {
         if (!$db->tableExists('product_process_flows')) return ['prev' => null, 'next' => null];
 
-        $rows = $db->table('product_process_flows')
-            ->select('process_id, sequence')
-            ->where('product_id', $productId)
-            ->where('is_active', 1)
-            ->orderBy('sequence', 'ASC')
-            ->get()->getResultArray();
+        $rows = $db->table('product_process_flows')->select('process_id, sequence')
+            ->where('product_id', $productId)->where('is_active', 1)->orderBy('sequence', 'ASC')->get()->getResultArray();
 
         if (!$rows) return ['prev' => null, 'next' => null];
 
@@ -148,83 +113,55 @@ class ScheduleController extends BaseController
         ];
     }
 
-    /* ============================
-     * ✅ STOCK = dari kolom stock saja
-     * ============================ */
-
     private function getLatestStockOnly($db, string $date, int $processId, int $productId): int
     {
         if (!$db->tableExists('production_wip')) return 0;
-
         $wipDateCol = $this->detectWipDateColumn($db);
         $procCol    = $this->detectProcessColumn($db);
         $stockCol   = $this->detectStockColumn($db);
         if (!$stockCol) return 0;
 
-        $row = $db->table('production_wip')
-            ->select("COALESCE($stockCol,0) AS stock_val")
-            ->where($procCol, $processId)
-            ->where('product_id', $productId)
-            ->where("$wipDateCol <=", $date)
-            ->orderBy($wipDateCol, 'DESC')
-            ->orderBy('id', 'DESC')
-            ->limit(1)
-            ->get()->getRowArray();
+        $row = $db->table('production_wip')->select("COALESCE($stockCol,0) AS stock_val")
+            ->where($procCol, $processId)->where('product_id', $productId)->where("$wipDateCol <=", $date)
+            ->orderBy($wipDateCol, 'DESC')->orderBy('id', 'DESC')->limit(1)->get()->getRowArray();
 
         return (int)($row['stock_val'] ?? 0);
     }
 
-    /* ============================
-     * SHIFT DC (ambil dari daily_schedules DC)
-     * ============================ */
-
     private function getDcShifts($db, string $date): array
     {
         if (!$db->tableExists('shifts')) return [];
-
         $dcId = $this->getDieCastingProcessId($db);
-        if (!$dcId || !$db->tableExists('daily_schedules')) {
-            return $db->table('shifts')->get()->getResultArray();
-        }
+        if (!$dcId || !$db->tableExists('daily_schedules')) return $db->table('shifts')->get()->getResultArray();
 
         $dateCol = $db->fieldExists('schedule_date', 'daily_schedules') ? 'schedule_date' : null;
         if (!$dateCol) return $db->table('shifts')->get()->getResultArray();
 
-        $rows = $db->table('daily_schedules')
-            ->select('shift_id')
-            ->where('process_id', $dcId)
-            ->where($dateCol, $date)
-            ->groupBy('shift_id')
-            ->get()->getResultArray();
-
+        $rows = $db->table('daily_schedules')->select('shift_id')->where('process_id', $dcId)->where($dateCol, $date)->groupBy('shift_id')->get()->getResultArray();
         $ids = [];
         foreach ($rows as $r) {
             $sid = (int)($r['shift_id'] ?? 0);
             if ($sid > 0) $ids[] = $sid;
         }
 
-        return $ids ? $db->table('shifts')->whereIn('id', $ids)->get()->getResultArray()
-                    : $db->table('shifts')->get()->getResultArray();
+        return $ids ? $db->table('shifts')->whereIn('id', $ids)->get()->getResultArray() : $db->table('shifts')->get()->getResultArray();
     }
 
-    /* ============================
-     * DAILY SCHEDULES (HEADER + ITEM)
-     * ============================ */
+    private function getVendors($db): array
+    {
+        if (!$db->tableExists('vendors')) return [];
+        $q = $db->table('vendors')->select('id, vendor_code, vendor_code_app, vendor_name')->orderBy('vendor_name', 'ASC');
+        if ($db->fieldExists('is_active', 'vendors')) $q->where('is_active', 1);
+        return $q->get()->getResultArray();
+    }
 
     private function upsertDailyScheduleHeader($db, string $date, int $processId, int $shiftId, string $section): int
     {
         if (!$db->tableExists('daily_schedules')) return 0;
-
         $dateCol = $db->fieldExists('schedule_date', 'daily_schedules') ? 'schedule_date' : null;
         if (!$dateCol) return 0;
 
-        $where = [
-            $dateCol     => $date,
-            'process_id' => $processId,
-            'shift_id'   => $shiftId,
-            'section'    => $section,
-        ];
-
+        $where = [$dateCol => $date, 'process_id' => $processId, 'shift_id' => $shiftId, 'section' => $section];
         $exist = $db->table('daily_schedules')->where($where)->get()->getRowArray();
         $now   = date('Y-m-d H:i:s');
 
@@ -243,14 +180,11 @@ class ScheduleController extends BaseController
         return (int)$db->insertID();
     }
 
-    private function insertDailyScheduleItem($db, int $dailyScheduleId, int $shiftId, int $machineId, int $productId, int $targetShift, int $targetHour): int
+    private function insertDailyScheduleItem($db, int $dailyScheduleId, int $shiftId, int $machineId, int $productId, int $targetShift, int $targetHour, int $vendorId): int
     {
         if (!$db->tableExists('daily_schedule_items')) return 0;
 
-        $db->table('daily_schedule_items')
-            ->where('daily_schedule_id', $dailyScheduleId)
-            ->where('product_id', $productId)
-            ->delete();
+        $db->table('daily_schedule_items')->where('daily_schedule_id', $dailyScheduleId)->where('product_id', $productId)->delete();
 
         $payload = [
             'daily_schedule_id' => $dailyScheduleId,
@@ -264,14 +198,12 @@ class ScheduleController extends BaseController
             'is_selected'       => 1,
         ];
 
+        if ($db->fieldExists('vendor_id', 'daily_schedule_items')) $payload['vendor_id'] = $vendorId;
+
         $payload = $this->onlyExistingColumns($db, 'daily_schedule_items', $payload);
         $db->table('daily_schedule_items')->insert($payload);
         return (int)$db->insertID();
     }
-
-    /* ============================
-     * INDEX
-     * ============================ */
 
     public function index()
     {
@@ -281,20 +213,15 @@ class ScheduleController extends BaseController
         $sbId = $this->getShotBlastProcessId($db);
         if (!$sbId) {
             return view('shot_blasting/schedule/index', [
-                'date'          => $date,
-                'shifts'        => $this->getDcShifts($db, $date),
-                'productsAvail' => [],
-                'availableMap'  => [],
-                'schedules'     => [],
-                'processMap'    => [],
-                'errorMsg'      => 'Process Shot Blasting tidak ditemukan. Pastikan process_code SB ada di production_processes.',
+                'date' => $date, 'shifts' => [], 'productsAvail' => [], 'availableMap' => [], 'schedules' => [], 'processMap' => [], 'vendors' => [],
+                'errorMsg' => 'Process Shot Blasting tidak ditemukan.'
             ]);
         }
 
         $processMap = [];
         if ($db->tableExists('production_processes')) {
             foreach ($db->table('production_processes')->select('id, process_name')->get()->getResultArray() as $r) {
-                $processMap[(int)$r['id']] = (string)($r['process_name'] ?? '');
+                $processMap[(int)$r['id']] = (string)$r['process_name'];
             }
         }
 
@@ -302,13 +229,7 @@ class ScheduleController extends BaseController
         $productsAvail = [];
 
         if ($db->tableExists('product_process_flows') && $db->tableExists('products') && $db->tableExists('production_wip')) {
-            $rows = $db->table('product_process_flows')
-                ->select('product_id')
-                ->where('process_id', $sbId)
-                ->where('is_active', 1)
-                ->groupBy('product_id')
-                ->get()->getResultArray();
-
+            $rows = $db->table('product_process_flows')->select('product_id')->where('process_id', $sbId)->where('is_active', 1)->groupBy('product_id')->get()->getResultArray();
             $idsAvail = [];
             foreach ($rows as $r) {
                 $pid = (int)($r['product_id'] ?? 0);
@@ -321,19 +242,13 @@ class ScheduleController extends BaseController
 
                 $av = $this->getLatestStockOnly($db, $date, $prevId, $pid);
 
-                $availableMap[$pid] = [
-                    'available'       => $av,
-                    'prev_process_id' => $prevId,
-                    'next_process_id' => $nextId > 0 ? $nextId : null,
-                ];
-
+                $availableMap[$pid] = ['available' => $av, 'prev_process_id' => $prevId, 'next_process_id' => $nextId > 0 ? $nextId : null];
                 if ($av > 0) $idsAvail[] = $pid;
             }
 
             if ($idsAvail) {
                 $q = $db->table('products')->select('id, part_no, part_name');
                 if ($db->fieldExists('is_active', 'products')) $q->where('is_active', 1);
-
                 $productsAvail = $q->whereIn('id', $idsAvail)->orderBy('part_no', 'ASC')->get()->getResultArray();
             }
         }
@@ -342,16 +257,13 @@ class ScheduleController extends BaseController
         if ($db->tableExists('daily_schedules') && $db->tableExists('daily_schedule_items')) {
             $dateCol = $db->fieldExists('schedule_date', 'daily_schedules') ? 'schedule_date' : null;
             if ($dateCol) {
-                $schedules = $db->table('daily_schedule_items dsi')
-                    ->select("
-                        ds.id as daily_schedule_id,
-                        ds.$dateCol as schedule_date,
-                        ds.shift_id, s.shift_name,
-                        dsi.id as item_id,
-                        dsi.product_id, p.part_no, p.part_name,
-                        dsi.target_per_shift, dsi.target_per_hour
-                    ")
-                    ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id', 'inner')
+                $query = $db->table('daily_schedule_items dsi')
+                    ->select("ds.id as daily_schedule_id, ds.$dateCol as schedule_date, ds.shift_id, s.shift_name, dsi.id as item_id, dsi.product_id, p.part_no, p.part_name, dsi.target_per_shift, dsi.target_per_hour");
+                if ($db->fieldExists('vendor_id', 'daily_schedule_items')) {
+                    $query->select('v.vendor_name')->join('vendors v', 'v.id = dsi.vendor_id', 'left');
+                }
+                
+                $schedules = $query->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id', 'inner')
                     ->join('shifts s', 's.id = ds.shift_id', 'left')
                     ->join('products p', 'p.id = dsi.product_id', 'left')
                     ->where('ds.process_id', $sbId)
@@ -369,13 +281,10 @@ class ScheduleController extends BaseController
             'availableMap'  => $availableMap,
             'schedules'     => $schedules,
             'processMap'    => $processMap,
+            'vendors'       => $this->getVendors($db),
             'errorMsg'      => null,
         ]);
     }
-
-    /* ============================
-     * STORE (TANPA production_plans)
-     * ============================ */
 
     public function store()
     {
@@ -384,11 +293,13 @@ class ScheduleController extends BaseController
         $date      = (string)$this->request->getPost('date');
         $shiftId   = (int)$this->request->getPost('shift_id');
         $productId = (int)$this->request->getPost('product_id');
+        $vendorId  = (int)$this->request->getPost('vendor_id'); // VENDOR
         $qty       = (int)$this->request->getPost('target_shift');
         $targetHr  = (int)($this->request->getPost('target_hour') ?? 0);
         $sendNext  = (int)($this->request->getPost('send_next') ?? 0);
 
         if ($shiftId <= 0) return redirect()->back()->with('error', 'Shift wajib dipilih.');
+        if ($vendorId <= 0) return redirect()->back()->with('error', 'Vendor wajib dipilih.');
         if ($productId <= 0) return redirect()->back()->with('error', 'Product wajib dipilih.');
         if ($qty <= 0) return redirect()->back()->with('error', 'Qty harus > 0.');
 
@@ -402,15 +313,14 @@ class ScheduleController extends BaseController
         $prevId = (int)($flow['prev'] ?? 0);
         $nextId = (int)($flow['next'] ?? 0);
 
-        if ($prevId <= 0) return redirect()->back()->with('error', 'Flow sebelumnya untuk Shot Blasting tidak ditemukan.');
+        if ($prevId <= 0) return redirect()->back()->with('error', 'Flow sebelumnya tidak ditemukan.');
 
         $availablePrev = $this->getLatestStockOnly($db, $date, $prevId, $productId);
         if ($availablePrev <= 0) return redirect()->back()->with('error', 'Stock proses sebelumnya kosong (0).');
-        if ($qty > $availablePrev) return redirect()->back()->with('error', "Qty tidak boleh melebihi stock prev. Available: {$availablePrev}");
+        if ($qty > $availablePrev) return redirect()->back()->with('error', "Qty melebihi stock prev. Available: {$availablePrev}");
 
         $machineId = $this->getAutoShotBlastMachineId($db);
-        if ($machineId <= 0) return redirect()->back()->with('error', 'Tidak ada mesin untuk mengisi machine_id.');
-
+        
         $wipDateCol  = $this->detectWipDateColumn($db);
         $transferCol = $this->detectTransferColumn($db);
         $now         = date('Y-m-d H:i:s');
@@ -420,7 +330,7 @@ class ScheduleController extends BaseController
             $dailyId = $this->upsertDailyScheduleHeader($db, $date, $sbId, $shiftId, 'Shot Blasting');
             if ($dailyId <= 0) throw new \Exception('Gagal membuat daily_schedules.');
 
-            $itemId = $this->insertDailyScheduleItem($db, $dailyId, $shiftId, $machineId, $productId, $qty, $targetHr);
+            $itemId = $this->insertDailyScheduleItem($db, $dailyId, $shiftId, $machineId, $productId, $qty, $targetHr, $vendorId);
             if ($itemId <= 0) throw new \Exception('Gagal membuat daily_schedule_items.');
 
             // prev OUT (stock prev berkurang)
@@ -468,9 +378,7 @@ class ScheduleController extends BaseController
             if ($sendNext === 1) {
                 if ($nextId <= 0) throw new \Exception('Next process tidak ditemukan pada flow.');
 
-                // SB OUT
                 $sbAfter2 = max(0, $sbAfter - $qty);
-
                 $sbOut = [
                     $wipDateCol       => $date,
                     'product_id'      => $productId,
@@ -488,10 +396,8 @@ class ScheduleController extends BaseController
                 if ($transferCol) $sbOut[$transferCol] = $qty;
                 $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $sbOut));
 
-                // NEXT IN
                 $nextBefore = $this->getLatestStockOnly($db, $date, $nextId, $productId);
                 $nextAfter  = $nextBefore + $qty;
-
                 $nextIn = [
                     $wipDateCol       => $date,
                     'product_id'      => $productId,
@@ -513,10 +419,10 @@ class ScheduleController extends BaseController
             if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
 
-            return redirect()->back()->with('success', 'Schedule Shot Blasting berhasil disimpan (Daily Schedules + WIP update).');
+            return redirect()->back()->with('success', 'Schedule Shot Blasting berhasil disimpan.');
         } catch (\Throwable $e) {
             $db->transRollback();
-            return redirect()->back()->with('error', 'Gagal simpan Shot Blasting: ' . $e->getMessage());
+            return redirect()->back()->with('error', 'Gagal simpan: ' . $e->getMessage());
         }
     }
 }

@@ -123,13 +123,19 @@ $routes->group('master', ['filter' => 'auth:ADMIN'], function ($routes) {
 
     // Process
     $routes->get('process', 'Master\ProcessController::index');
+
+    $routes->get('downtime-categories', 'Master\DowntimeCategoryController::index');
+    $routes->post('downtime-categories/store', 'Master\DowntimeCategoryController::store');
+    $routes->post('downtime-categories/update/(:num)', 'Master\DowntimeCategoryController::update/$1');
+    $routes->post('downtime-categories/(:num)/delete', 'Master\DowntimeCategoryController::delete/$1');
 });
 
 /**
  * WIP: PPIC only
  */
-$routes->group('wip', ['filter' => 'auth:PPIC'], function ($routes) {
+$routes->group('wip', ['filter' => 'auth'], function ($routes) {
     $routes->get('inventory', 'WIP\WipInventoryController::index');
+    $routes->get('inventory/total-stock', 'WIP\WipInventoryController::totalStock');
 });
 
 /**
@@ -172,7 +178,7 @@ $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
 
     $routes->get('daily-schedule', 'DieCasting\DailyScheduleController::index', ['filter' => 'auth:PPIC']);
     $routes->post('daily-schedule/store', 'DieCasting\DailyScheduleController::store', ['filter' => 'auth:PPIC']);
-    $routes->get('daily-schedule/view', 'DieCasting\DailyScheduleController::view', ['filter' => 'auth:PPIC']);
+    $routes->get('daily-schedule/inventory', 'DieCasting\DailyScheduleController::inventory', ['filter' => 'auth:PPIC']);
     $routes->get('daily-schedule/products', 'DieCasting\DailyScheduleController::getProducts', ['filter' => 'auth:PPIC']);
     $routes->get('daily-schedule/getProductAndTarget', 'DieCasting\DailyScheduleController::getProductAndTarget', ['filter' => 'auth:PPIC']);
 
@@ -242,6 +248,7 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->post('daily-schedule/store', 'Machining\DailyScheduleController::store', ['filter' => 'auth:PPIC']);
     $routes->get('daily-schedule/product-target', 'Machining\DailyScheduleController::getProductAndTarget', ['filter' => 'auth:PPIC']);
     $routes->get('daily-schedule/result', 'Machining\DailyScheduleResultController::index', ['filter' => 'auth:PPIC']);
+    $routes->get('daily-schedule/inventory', 'Machining\DailyScheduleController::inventory');
 
     $routes->get('daily-schedule/incoming-wip', 'Machining\DailyScheduleController::incomingWip', ['filter' => 'auth:PPIC']);
     $routes->post('daily-schedule/assign-incoming-wip-bulk', 'Machining\DailyScheduleController::assignIncomingWipBulk', ['filter' => 'auth:PPIC']);
@@ -293,11 +300,13 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->post('leak-test/hourly/store', 'Machining\LeakTestDailyProductionController::store', ['filter' => 'auth:OPERATOR,LT']);
     $routes->post('leak-test/hourly/finish-shift', 'Machining\LeakTestDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,LT']);
     $routes->get('leak-test/production-shift', 'Machining\LeakTestProductionController::index', ['filter' => 'auth:OPERATOR,LT']);
+    $routes->get('leak-test/schedule/inventory', 'Machining\LeakTestDailyScheduleController::inventory');
 
     // ===== OPERATOR: ASSY BUSHING (AB) =====
     $routes->get('assy-bushing/hourly', 'Machining\AssyBushingDailyProductionController::index', ['filter' => 'auth:OPERATOR,AB']);
     $routes->post('assy-bushing/hourly/store', 'Machining\AssyBushingDailyProductionController::store', ['filter' => 'auth:OPERATOR,AB']);
     $routes->post('assy-bushing/hourly/finish-shift', 'Machining\AssyBushingDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,AB']);
+    $routes->get('assy-bushing/schedule/inventory', 'Machining\AssyBushingDailyScheduleController::inventory');
 
     $routes->get('assy-bushing/achievement', 'Machining\AssyBushingDailyProductionAchievementController::index', ['filter' => 'auth:OPERATOR,AB']);
     $routes->post('assy-bushing/achievement/store', 'Machining\AssyBushingDailyProductionAchievementController::store', ['filter' => 'auth:OPERATOR,AB']);
@@ -307,6 +316,7 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->post('assy-shaft/hourly/store', 'Machining\AssyShaftDailyProductionController::store', ['filter' => 'auth:OPERATOR,AS']);
     $routes->post('assy-shaft/hourly/finish-shift', 'Machining\AssyShaftDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,AS']);
     $routes->get('assy-shaft/production/shift', 'Machining\AssyShaftShiftProductionController::index', ['filter' => 'auth:OPERATOR,AS']);
+    $routes->get('assy-shaft/schedule/inventory', 'Machining\AssyShaftDailyScheduleController::inventory');
 });
 
 /**

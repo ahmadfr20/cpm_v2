@@ -248,8 +248,7 @@ class AssyBushingDailyScheduleController extends BaseController
     }
 
     /* =========================================================
-     * Incoming WIP untuk Assy Bushing saat schedule:
-     * qty_in bertambah, stock AB tetap 0
+     * Incoming WIP untuk Assy Bushing saat schedule
      * ========================================================= */
     private function upsertIncomingWipForAssyBushing(
         $db,
@@ -297,10 +296,7 @@ class AssyBushingDailyScheduleController extends BaseController
             ];
             if ($hasQty)    $upd['qty'] = $newQtyIn;
             if ($hasQtyOut) $upd['qty_out'] = (int)($exist['qty_out'] ?? 0);
-
-            // ✅ stock tetap 0 (belum diproses)
             if ($hasStock)  $upd['stock'] = 0;
-
             if ($db->fieldExists('transfer', 'production_wip')) $upd['transfer'] = (int)($exist['transfer'] ?? 0);
             if ($hasUpdatedAt) $upd['updated_at'] = $now;
 
@@ -398,9 +394,7 @@ class AssyBushingDailyScheduleController extends BaseController
         if ($shiftId <= 0) return $this->response->setJSON([]);
 
         $processIdAB = $this->getProcessIdAssyBushing($db);
-
         $totalSecond = $this->getTotalSecondShift($db, $shiftId);
-        // kalau shift kosong, tetap tampilkan produk, target = 0
 
         $q = $db->table('product_process_flows ppf')
             ->select('p.id, p.part_no, p.part_name, p.cycle_time, p.cavity, p.efficiency_rate')
@@ -409,7 +403,6 @@ class AssyBushingDailyScheduleController extends BaseController
             ->where('p.is_active', 1)
             ->where('ppf.process_id', $processIdAB);
 
-        // Optional: filter by machine_products (kalau ada)
         if ($machineId > 0 && $db->tableExists('machine_products')) {
             $q->join(
                 'machine_products mp',
@@ -454,7 +447,7 @@ class AssyBushingDailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * STORE — MACHINING STYLE WIP FLOW
+     * STORE
      * ===================================================== */
     public function store()
     {
@@ -491,7 +484,6 @@ class AssyBushingDailyScheduleController extends BaseController
                     throw new \Exception("Product ID {$productId} tidak punya flow Assy Bushing aktif.");
                 }
 
-                // ===== header daily_schedules (1 per shift) =====
                 $schedule = $db->table('daily_schedules')
                     ->where([
                         'schedule_date' => $date,
@@ -522,7 +514,6 @@ class AssyBushingDailyScheduleController extends BaseController
                     }
                 }
 
-                // ===== cek item lama (delta) =====
                 $existItem = $db->table('daily_schedule_items')
                     ->where([
                         'daily_schedule_id' => $scheduleId,
@@ -535,18 +526,15 @@ class AssyBushingDailyScheduleController extends BaseController
 
                 $prevProcessIdNew = $this->resolvePrevProcessByFlow($db, $productId, $processIdAB);
 
-                // release old jika product diganti
                 if ($existItem && $oldProductId > 0 && $oldProductId !== $productId) {
                     $prevOld = $this->resolvePrevProcessByFlow($db, $oldProductId, $processIdAB);
                     if ($prevOld && $oldPlan > 0) {
-                        // release = delta negatif
                         $this->applyPrevReserveToNext($db, $date, $oldProductId, $prevOld, -$oldPlan);
                         $this->upsertIncomingWipForAssyBushing($db, $date, $oldProductId, $prevOld, $processIdAB, (int)$existItem['id'], -$oldPlan);
                     }
                     $oldPlan = 0;
                 }
 
-                // master product (CT & cavity)
                 $product = $db->table('products')
                     ->select('cycle_time, cavity, efficiency_rate')
                     ->where('id', $productId)
@@ -564,7 +552,6 @@ class AssyBushingDailyScheduleController extends BaseController
                 $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
                 $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
 
-                // upsert schedule item
                 $dataItem = [
                     'daily_schedule_id' => $scheduleId,
                     'shift_id'          => $shiftId,
@@ -586,7 +573,6 @@ class AssyBushingDailyScheduleController extends BaseController
                     $itemId = (int)$db->insertID();
                 }
 
-                // apply delta (reserve stock prev + incoming AB)
                 if ($prevProcessIdNew) {
                     $delta = $planInput - $oldPlan;
 
@@ -615,5 +601,79 @@ class AssyBushingDailyScheduleController extends BaseController
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
         }
+    }
+
+    /* =====================================================
+     * INVENTORY STOCK (Assy Bushing Only)
+     * ===================================================== */
+    public function inventory()
+    {
+        $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+        if (!$isAdmin) $date = date('Y-m-d');
+
+        $ts = strtotime($date);
+        $bulan = [1=>'Jan',2=>'Feb',3=>'Mar',4=>'Apr',5=>'Mei',6=>'Jun',7=>'Jul',8=>'Agu',9=>'Sep',10=>'Okt',11=>'Nov',12=>'Des'];
+        $m = (int)date('n', $ts);
+        $titleDate = date('d', $ts) . ' ' . ($bulan[$m] ?? date('M',$ts)) . ' ' . date('Y', $ts);
+
+        $processIdAB = $this->getProcessIdAssyBushing($db);
+
+        $tbl = 'production_wip';
+        $wipDateCol = $db->fieldExists('wip_date', $tbl) ? 'wip_date' : 
+                     ($db->fieldExists('schedule_date', $tbl) ? 'schedule_date' : 'production_date');
+        
+        $colStock = 'stock';
+        foreach (['stock', 'stock_qty', 'qty_stock'] as $col) {
+            if ($db->fieldExists($col, $tbl)) {
+                $colStock = $col; break;
+            }
+        }
+
+        $productData = [];
+
+        if ($db->tableExists($tbl)) {
+            // Ambil max stock terakhir khusus untuk process Assy Bushing
+            $query = $db->table($tbl . ' w')
+                ->select('w.product_id, p.part_no, p.part_name, w.'.$colStock.' as current_stock')
+                ->join('products p', 'p.id = w.product_id', 'inner')
+                ->where("w.$wipDateCol <=", $date)
+                ->where('w.to_process_id', $processIdAB)
+                ->where('w.id IN (
+                    SELECT MAX(id) 
+                    FROM production_wip 
+                    WHERE '.$wipDateCol.' <= "'.$date.'" 
+                    AND to_process_id = '.$processIdAB.'
+                    GROUP BY product_id
+                )', null, false)
+                ->get()
+                ->getResultArray();
+
+            foreach ($query as $row) {
+                $qty = (int)$row['current_stock'];
+                
+                if($qty > 0) {
+                    $productData[] = [
+                        'part_no'     => $row['part_no'],
+                        'part_name'   => $row['part_name'],
+                        'total_stock' => $qty,
+                    ];
+                }
+            }
+        }
+
+        usort($productData, function($a, $b) {
+            return strcmp($a['part_no'], $b['part_no']);
+        });
+
+        return view('machining/assy_bushing_schedule/inventory', [
+            'date'        => $date,
+            'titleDate'   => $titleDate,
+            'isAdmin'     => $isAdmin,
+            'productData' => $productData
+        ]);
     }
 }

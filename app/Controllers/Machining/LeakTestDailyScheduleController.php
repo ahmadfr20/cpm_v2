@@ -82,7 +82,6 @@ class LeakTestDailyScheduleController extends BaseController
 
     /* =====================================================
      * VALIDATE product punya flow LT aktif
-     * (pakai is_active jika kolom ada)
      * ===================================================== */
     private function validateProductHasFlow($db, int $productId, int $processId): bool
     {
@@ -100,7 +99,7 @@ class LeakTestDailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * resolve PREV process by flow (sequence < current)
+     * resolve PREV process by flow
      * ===================================================== */
     private function resolvePrevProcessByFlow($db, int $productId, int $currentProcessId): ?int
     {
@@ -374,9 +373,7 @@ class LeakTestDailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * ✅ AJAX Select2: product + target + stock_prev
-     * FIX: jangan pakai p.is_active jika kolom tidak ada
-     * Return: { results: [...] }
+     * AJAX Select2: product + target + stock_prev
      * ===================================================== */
     public function getProductAndTarget()
     {
@@ -384,7 +381,6 @@ class LeakTestDailyScheduleController extends BaseController
         $shiftId = (int)($this->request->getGet('shift_id') ?? 0);
         $date    = (string)($this->request->getGet('date') ?? date('Y-m-d'));
 
-        // select2 default 'term'
         $term = trim((string)($this->request->getGet('term') ?? ''));
         $q    = trim((string)($this->request->getGet('q') ?? ''));
         $search = ($term !== '') ? $term : $q;
@@ -395,14 +391,13 @@ class LeakTestDailyScheduleController extends BaseController
 
         try {
             $processIdLT = $this->getProcessIdLeakTest($db);
-            $totalSecond = $this->getTotalSecondShift($db, $shiftId); // boleh 0
+            $totalSecond = $this->getTotalSecondShift($db, $shiftId); 
 
             $builder = $db->table('product_process_flows ppf')
                 ->select('p.id, p.part_no, p.part_name, p.cycle_time, p.cavity, p.efficiency_rate')
                 ->join('products p', 'p.id = ppf.product_id', 'inner')
                 ->where('ppf.process_id', $processIdLT);
 
-            // filter is_active hanya jika kolom ada
             if ($db->fieldExists('is_active', 'product_process_flows')) {
                 $builder->where('ppf.is_active', 1);
             }
@@ -465,9 +460,9 @@ class LeakTestDailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * STORE (punya kamu, tidak diubah)
+     * STORE
      * ===================================================== */
-       public function store()
+    public function store()
     {
         $db    = db_connect();
         $date  = trim((string)($this->request->getPost('date') ?? ''));
@@ -502,7 +497,7 @@ class LeakTestDailyScheduleController extends BaseController
                     throw new \Exception("Product ID {$productId} tidak punya flow Leak Test aktif.");
                 }
 
-                // ===== header daily_schedules =====
+                // header
                 $schedule = $db->table('daily_schedules')
                     ->where([
                         'schedule_date' => $date,
@@ -533,7 +528,6 @@ class LeakTestDailyScheduleController extends BaseController
                     }
                 }
 
-                // ===== cek item lama (delta) =====
                 $existItem = $db->table('daily_schedule_items')
                     ->where([
                         'daily_schedule_id' => $scheduleId,
@@ -546,7 +540,7 @@ class LeakTestDailyScheduleController extends BaseController
 
                 $prevProcessIdNew = $this->resolvePrevProcessByFlow($db, $productId, $processIdLT);
 
-                // release old jika product diganti
+                // release old 
                 if ($existItem && $oldProductId > 0 && $oldProductId !== $productId) {
                     $prevOld = $this->resolvePrevProcessByFlow($db, $oldProductId, $processIdLT);
                     if ($prevOld && $oldPlan > 0) {
@@ -556,7 +550,6 @@ class LeakTestDailyScheduleController extends BaseController
                     $oldPlan = 0;
                 }
 
-                // master product
                 $product = $db->table('products')
                     ->select('cycle_time, cavity, efficiency_rate')
                     ->where('id', $productId)
@@ -575,7 +568,6 @@ class LeakTestDailyScheduleController extends BaseController
 
                 $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
 
-                // upsert schedule item
                 $dataItem = [
                     'daily_schedule_id' => $scheduleId,
                     'shift_id'          => $shiftId,
@@ -597,7 +589,6 @@ class LeakTestDailyScheduleController extends BaseController
                     $itemId = (int)$db->insertID();
                 }
 
-                // apply delta
                 if ($prevProcessIdNew) {
                     $delta = $planInput - $oldPlan;
 
@@ -626,5 +617,83 @@ class LeakTestDailyScheduleController extends BaseController
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
         }
+    }
+
+    /* =====================================================
+     * INVENTORY STOCK (Leak Test Only)
+     * ===================================================== */
+    public function inventory()
+    {
+        $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+        if (!$isAdmin) $date = date('Y-m-d');
+
+        // Format tanggal
+        $ts = strtotime($date);
+        $bulan = [1=>'Jan',2=>'Feb',3=>'Mar',4=>'Apr',5=>'Mei',6=>'Jun',7=>'Jul',8=>'Agu',9=>'Sep',10=>'Okt',11=>'Nov',12=>'Des'];
+        $m = (int)date('n', $ts);
+        $titleDate = date('d', $ts) . ' ' . ($bulan[$m] ?? date('M',$ts)) . ' ' . date('Y', $ts);
+
+        $processIdLT = $this->getProcessIdLeakTest($db);
+
+        $tbl = 'production_wip';
+        $wipDateCol = $db->fieldExists('wip_date', $tbl) ? 'wip_date' : 
+                     ($db->fieldExists('schedule_date', $tbl) ? 'schedule_date' : 'production_date');
+        
+        $colStock = 'stock';
+        foreach (['stock', 'stock_qty', 'qty_stock'] as $col) {
+            if ($db->fieldExists($col, $tbl)) {
+                $colStock = $col; break;
+            }
+        }
+
+        $productData = [];
+
+        if ($db->tableExists($tbl)) {
+            // Ambil max stock terakhir khusus untuk process Leak Test
+            $query = $db->table($tbl . ' w')
+                ->select('w.product_id, p.part_no, p.part_name, w.'.$colStock.' as current_stock')
+                ->join('products p', 'p.id = w.product_id', 'inner')
+                ->where("w.$wipDateCol <=", $date)
+                ->where('w.to_process_id', $processIdLT)
+                // Subquery row terakhir
+                ->where('w.id IN (
+                    SELECT MAX(id) 
+                    FROM production_wip 
+                    WHERE '.$wipDateCol.' <= "'.$date.'" 
+                    AND to_process_id = '.$processIdLT.'
+                    GROUP BY product_id
+                )', null, false)
+                ->get()
+                ->getResultArray();
+
+            foreach ($query as $row) {
+                $qty = (int)$row['current_stock'];
+                
+                // Tampilkan jika stock ada
+                if($qty > 0) {
+                    $productData[] = [
+                        'part_no'     => $row['part_no'],
+                        'part_name'   => $row['part_name'],
+                        'total_stock' => $qty,
+                    ];
+                }
+            }
+        }
+
+        // Urutkan berdasarkan Part No
+        usort($productData, function($a, $b) {
+            return strcmp($a['part_no'], $b['part_no']);
+        });
+
+        return view('machining/leak_test_schedule/inventory', [
+            'date'        => $date,
+            'titleDate'   => $titleDate,
+            'isAdmin'     => $isAdmin,
+            'productData' => $productData
+        ]);
     }
 }

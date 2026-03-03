@@ -32,7 +32,12 @@
   }
 </style>
 
-<h4 class="mb-3">DAILY PRODUCTION SCHEDULE – LEAK TEST</h4>
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0">DAILY PRODUCTION SCHEDULE – LEAK TEST</h4>
+  <a href="<?= base_url('machining/leak-test/schedule/inventory?date='.$date) ?>" class="btn btn-outline-primary fw-bold btn-sm">
+    <i class="bi bi-box-seam me-1"></i> Lihat Stock Leak Test
+  </a>
+</div>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
@@ -148,7 +153,7 @@
 const productUrl   = "/machining/leak-test/schedule/product-target";
 const scheduleDate = "<?= esc($date) ?>";
 
-/** init select2 (ikut machining biasa) */
+/** init select2 */
 function initSelect2(selectEl) {
   const $el = $(selectEl);
   if ($el.data('select2')) return;
@@ -170,18 +175,16 @@ function setStockBadge(row, stockVal){
   badge.classList.toggle('zero', v <= 0);
 }
 
-/** load options per select (ikut machining biasa) */
+/** load options per select */
 async function loadProducts(selectEl) {
   const shiftId    = selectEl.dataset.shift;
   const selectedId = selectEl.dataset.selected;
 
   try {
-    // ✅ leak test controller butuh shift_id + date (+ optional term/q)
     const url = `${productUrl}?shift_id=${encodeURIComponent(shiftId)}&date=${encodeURIComponent(scheduleDate)}&term=`;
     const res = await fetch(url, { headers: { 'Accept': 'application/json' }});
     const json = await res.json();
 
-    // controller leak test yang benar: { results: [...] }
     const data = (json && json.results) ? json.results : (Array.isArray(json) ? json : []);
 
     selectEl.innerHTML = '<option value=""></option>';
@@ -191,13 +194,8 @@ async function loadProducts(selectEl) {
       opt.value = p.id;
       opt.textContent = p.text || `${p.part_no} - ${p.part_name}`;
 
-      // ✅ CT Leak Test
       opt.dataset.ct = p.cycle_time_used || '';
-
-      // target default
       opt.dataset.targetShift = p.target_per_shift || 0;
-
-      // ✅ stock prev + prev process
       opt.dataset.stockPrev = p.stock_prev || 0;
       opt.dataset.prevProcessId = p.prev_process_id || 0;
 
@@ -245,7 +243,6 @@ function validatePlanAgainstStock(row, showAlert = true) {
   return true;
 }
 
-/** on change product */
 $(document).on('change', '.product-select', function() {
   const selectEl = this;
   const opt = selectEl.selectedOptions[0];
@@ -254,7 +251,6 @@ $(document).on('change', '.product-select', function() {
   const ctEl   = row.querySelector('.cycle-time');
   const planEl = row.querySelector('.plan-input');
 
-  // clear
   if (!opt || !selectEl.value) {
     if (ctEl) ctEl.value = '';
     if (planEl) planEl.removeAttribute('data-stock-prev');
@@ -262,24 +258,19 @@ $(document).on('change', '.product-select', function() {
     return;
   }
 
-  // set CT
   ctEl.value = opt.dataset.ct || '';
 
-  // set stock prev into plan dataset
   const stockPrev = parseInt(opt.dataset.stockPrev || '0', 10);
   planEl.dataset.stockPrev = String(stockPrev);
 
-  // badge
   setStockBadge(row, stockPrev);
 
-  // stock kosong
   if (stockPrev <= 0) {
     alert('Stock kosong pada proses sebelumnya. Tidak bisa scheduling product ini.');
     planEl.value = 0;
     return;
   }
 
-  // default plan kalau kosong
   if (!planEl.value || planEl.value == 0) {
     planEl.value = parseInt(opt.dataset.targetShift || '0', 10);
   }
@@ -287,13 +278,11 @@ $(document).on('change', '.product-select', function() {
   validatePlanAgainstStock(row, true);
 });
 
-/** on input plan */
 $(document).on('input', '.plan-input', function() {
   const row = this.closest('tr');
   validatePlanAgainstStock(row, true);
 });
 
-/** validasi sebelum submit */
 $(document).on('submit', '.lt-form', function(e){
   const rows = this.querySelectorAll('tbody tr');
   for (const row of rows) {
@@ -306,7 +295,6 @@ $(document).on('submit', '.lt-form', function(e){
   return true;
 });
 
-/** init all selects */
 document.querySelectorAll('.product-select').forEach(selectEl => {
   initSelect2(selectEl);
   loadProducts(selectEl);

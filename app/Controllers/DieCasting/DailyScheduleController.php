@@ -234,7 +234,6 @@ class DailyScheduleController extends BaseController
         if ($db->fieldExists('updated_at', 'production_wip')) $payload['updated_at'] = $now;
 
         if ($exist) {
-            // kalau DONE jangan dioverwrite kecuali memang set DONE
             if (($exist['status'] ?? '') === 'DONE' && $status !== 'DONE') {
                 return (int)$exist['id'];
             }
@@ -249,8 +248,7 @@ class DailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * ✅ UPSERT DAILY_SCHEDULES (HEADER)
-     * Key: (schedule_date, process_id, shift_id, section)
+     * UPSERT DAILY_SCHEDULES (HEADER)
      * ===================================================== */
     private function upsertDailyScheduleHeader($db, string $date, int $processId, int $shiftId, string $section): int
     {
@@ -279,7 +277,6 @@ class DailyScheduleController extends BaseController
         $payload = $where + [
             'is_completed' => 0,
         ];
-        // created_at di schema daily_schedules: datetime DEFAULT NULL
         if ($db->fieldExists('created_at', 'daily_schedules')) $payload['created_at'] = $now;
         if ($db->fieldExists('updated_at', 'daily_schedules')) $payload['updated_at'] = $now;
 
@@ -288,16 +285,13 @@ class DailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * ✅ REBUILD DAILY_SCHEDULE_ITEMS utk 1 header
-     * - hapus item lama daily_schedule_id
-     * - insert ulang item baru
+     * REBUILD DAILY_SCHEDULE_ITEMS
      * ===================================================== */
     private function rebuildDailyScheduleItems($db, int $dailyScheduleId, array $itemsToInsert): void
     {
         if ($dailyScheduleId <= 0) return;
         if (!$db->tableExists('daily_schedule_items')) return;
 
-        // delete lama biar tidak dobel
         $db->table('daily_schedule_items')->where('daily_schedule_id', $dailyScheduleId)->delete();
 
         foreach ($itemsToInsert as $it) {
@@ -307,9 +301,6 @@ class DailyScheduleController extends BaseController
 
     /* =====================================================
      * STORE SCHEDULE (PLAN)
-     * - buat die_casting_production
-     * - buat WIP "IN ke DIE CASTING"
-     * - ✅ tambahan: buat daily_schedules + daily_schedule_items
      * ===================================================== */
     public function store()
     {
@@ -320,14 +311,9 @@ class DailyScheduleController extends BaseController
             return redirect()->back()->with('error', 'Tidak ada data');
         }
 
-        // =====================================================
-        // ✅ RULE ROLE + TANGGAL
-        // ADMIN boleh hari ini, non-admin hanya boleh besok dst
-        // =====================================================
         $role  = session()->get('role') ?? '';
-        $today = date('Y-m-d'); // pastikan App timezone = Asia/Jakarta
+        $today = date('Y-m-d'); 
 
-        // ambil tanggal dari salah satu row (semua row harusnya sama)
         $firstRow = reset($items);
         $formDate = isset($firstRow['date']) ? trim((string)$firstRow['date']) : '';
 
@@ -335,7 +321,6 @@ class DailyScheduleController extends BaseController
             return redirect()->back()->with('error', 'Tanggal schedule tidak valid.');
         }
 
-        // non-admin tidak boleh hari ini atau tanggal lampau
         if ($role !== 'ADMIN' && $formDate <= $today) {
             return redirect()->back()->with(
                 'error',
@@ -348,14 +333,6 @@ class DailyScheduleController extends BaseController
         $db->transBegin();
         try {
             $processIdDC = $this->getProcessIdDieCasting($db);
-
-            /**
-             * Kumpulkan item untuk daily_schedules per (date, shift)
-             * Struktur:
-             *  $dailyGroup["{$date}_{$shiftId}"] = [
-             *     'date'=>..., 'shift_id'=>..., 'items'=>[]
-             *  ]
-             */
             $dailyGroup = [];
 
             foreach ($items as $row) {
@@ -367,7 +344,6 @@ class DailyScheduleController extends BaseController
                 $shiftId   = (int)$row['shift_id'];
                 $machineId = (int)$row['machine_id'];
 
-                // Hard-guard: pastikan semua row tetap pakai tanggal yg sama (opsional tapi aman)
                 if ($date !== $formDate) {
                     continue;
                 }
@@ -377,11 +353,8 @@ class DailyScheduleController extends BaseController
                 $statusRow = (string)($row['status'] ?? 'Normal');
 
                 if ($productId <= 0 || $qtyP <= 0) continue;
-
-                // wajib punya flow DC
                 if (!$this->validateProductHasFlowDC($db, $productId, $processIdDC)) continue;
 
-                // master product
                 $product = $db->table('products')
                     ->select('id, part_name, cycle_time, cavity')
                     ->where('id', $productId)
@@ -390,10 +363,8 @@ class DailyScheduleController extends BaseController
 
                 $cycle  = (int)($product['cycle_time'] ?? 0);
                 $cavity = (int)($product['cavity'] ?? 0);
-
                 $partLabel = (($product['part_name'] ?? '') ?: '-') . ' #1';
 
-                // UPSERT die_casting_production (plan)
                 $exist = $db->table('die_casting_production')
                     ->where([
                         'production_date' => $date,
@@ -432,9 +403,6 @@ class DailyScheduleController extends BaseController
                     $sourceId = (int)$db->insertID();
                 }
 
-                /**
-                 * ✅ WIP untuk DIE CASTING SAJA (IN masuk ke DC)
-                 */
                 $wipStatus = ($date === $today) ? 'SCHEDULED' : 'WAITING';
 
                 $this->upsertProductionWip(
@@ -443,18 +411,15 @@ class DailyScheduleController extends BaseController
                     $productId,
                     $processIdDC,
                     $processIdDC,
-                    $qtyP,                 // qty legacy
+                    $qtyP,                 
                     $wipStatus,
                     'die_casting_production',
                     $sourceId,
-                    $qtyP,                 // qty_in = PLAN
-                    0,                     // qty_out
-                    0                      // stock selalu 0 (stock pakai qtyA di finish)
+                    $qtyP,                 
+                    0,                     
+                    0                      
                 );
 
-                /**
-                 * ✅ KUMPULKAN untuk daily_schedules + items
-                 */
                 $gKey = $date . '_' . $shiftId;
                 if (!isset($dailyGroup[$gKey])) {
                     $dailyGroup[$gKey] = [
@@ -464,13 +429,11 @@ class DailyScheduleController extends BaseController
                     ];
                 }
 
-                // target per hour (berdasarkan durasi shift)
                 $totalMinute = $this->getTotalMinuteShift($db, $shiftId);
                 $hours = ($totalMinute > 0) ? ($totalMinute / 60) : 0;
                 $targetPerHour = ($hours > 0) ? (int)ceil($qtyP / $hours) : 0;
 
                 $dailyGroup[$gKey]['items'][] = [
-                    // daily_schedule_id akan diisi nanti
                     'daily_schedule_id' => 0,
                     'shift_id'          => $shiftId,
                     'machine_id'        => $machineId,
@@ -483,14 +446,9 @@ class DailyScheduleController extends BaseController
                 ];
             }
 
-            /**
-             * ✅ BUAT HEADER + REBUILD ITEMS untuk setiap (date, shift)
-             */
             foreach ($dailyGroup as $g) {
                 $date    = (string)$g['date'];
                 $shiftId = (int)$g['shift_id'];
-
-                // section untuk DC
                 $section = 'Die Casting';
 
                 $headerId = $this->upsertDailyScheduleHeader($db, $date, $processIdDC, $shiftId, $section);
@@ -520,9 +478,6 @@ class DailyScheduleController extends BaseController
 
     /* =====================================================
      * FINISH SHIFT
-     * - qtyA diambil dari hourly (SUM qty_fg)
-     * - DC WIP: qty_out = qtyA, stock = 0, DONE
-     * - buat WIP ke proses berikutnya: qty_in = qtyA, stock = qtyA, WAITING
      * ===================================================== */
     public function finishShift()
     {
@@ -539,7 +494,6 @@ class DailyScheduleController extends BaseController
         try {
             $processIdDC = $this->getProcessIdDieCasting($db);
 
-            // 1) Hitung actual dari hourly
             $actuals = [];
             if ($db->tableExists('die_casting_hourly')) {
                 $actuals = $db->table('die_casting_hourly')
@@ -559,7 +513,6 @@ class DailyScheduleController extends BaseController
                 ];
             }
 
-            // 2) Ambil semua rows schedule DC pada shift tsb
             $rows = $db->table('die_casting_production')
                 ->select('id, machine_id, product_id, qty_p')
                 ->where('production_date', $date)
@@ -579,7 +532,6 @@ class DailyScheduleController extends BaseController
                 $qtyA  = (int)($actMap[$key]['fg'] ?? 0);
                 $qtyNG = (int)($actMap[$key]['ng'] ?? 0);
 
-                // Update die_casting_production actual
                 $db->table('die_casting_production')
                     ->where('id', $sourceId)
                     ->update([
@@ -588,38 +540,16 @@ class DailyScheduleController extends BaseController
                         'is_completed' => 1,
                     ]);
 
-                // A) Update WIP DIE CASTING (DC -> DC)
                 $this->upsertProductionWip(
-                    $db,
-                    $date,
-                    $productId,
-                    $processIdDC,
-                    $processIdDC,
-                    $qtyA,
-                    'DONE',
-                    'die_casting_production',
-                    $sourceId,
-                    null,
-                    $qtyA,
-                    0
+                    $db, $date, $productId, $processIdDC, $processIdDC, $qtyA,
+                    'DONE', 'die_casting_production', $sourceId, null, $qtyA, 0
                 );
 
-                // B) Create/Update WIP ke proses berikutnya (DC -> NEXT)
                 $nextProcessId = $this->getNextProcessIdByFlow($db, $productId, $processIdDC);
                 if ($nextProcessId && $qtyA > 0) {
                     $this->upsertProductionWip(
-                        $db,
-                        $date,
-                        $productId,
-                        $processIdDC,
-                        $nextProcessId,
-                        $qtyA,
-                        'WAITING',
-                        'die_casting_production',
-                        $sourceId,
-                        $qtyA,
-                        0,
-                        $qtyA
+                        $db, $date, $productId, $processIdDC, $nextProcessId, $qtyA,
+                        'WAITING', 'die_casting_production', $sourceId, $qtyA, 0, $qtyA
                     );
                 }
 
@@ -638,5 +568,84 @@ class DailyScheduleController extends BaseController
             $db->transRollback();
             return $this->response->setJSON(['status' => false, 'message' => $e->getMessage()]);
         }
+    }
+
+    /* =====================================================
+     * INVENTORY STOCK (Die Casting Only)
+     * ===================================================== */
+    public function inventory()
+    {
+        $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
+        
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+        if (!$isAdmin) $date = date('Y-m-d');
+
+        // Format tanggal untuk tampilan
+        $ts = strtotime($date);
+        $bulan = [1=>'Jan',2=>'Feb',3=>'Mar',4=>'Apr',5=>'Mei',6=>'Jun',7=>'Jul',8=>'Agu',9=>'Sep',10=>'Okt',11=>'Nov',12=>'Des'];
+        $m = (int)date('n', $ts);
+        $titleDate = date('d', $ts) . ' ' . ($bulan[$m] ?? date('M',$ts)) . ' ' . date('Y', $ts);
+
+        $processIdDC = $this->getProcessIdDieCasting($db);
+
+        // Cari tahu nama kolom stock & date di production_wip
+        $tbl = 'production_wip';
+        $wipDateCol = $db->fieldExists('wip_date', $tbl) ? 'wip_date' : 
+                     ($db->fieldExists('schedule_date', $tbl) ? 'schedule_date' : 'production_date');
+        
+        $colStock = 'stock';
+        foreach (['stock', 'stock_qty', 'qty_stock'] as $col) {
+            if ($db->fieldExists($col, $tbl)) {
+                $colStock = $col; break;
+            }
+        }
+
+        $productData = [];
+
+        if ($db->tableExists($tbl)) {
+            // Ambil max stock terakhir khusus untuk process Die Casting pada tanggal tsb
+            $query = $db->table($tbl . ' w')
+                ->select('w.product_id, p.part_no, p.part_name, w.'.$colStock.' as current_stock')
+                ->join('products p', 'p.id = w.product_id', 'inner')
+                ->where("w.$wipDateCol <=", $date)
+                ->where('w.to_process_id', $processIdDC)
+                // Subquery ambil row terakhir (id terbesar) per product
+                ->where('w.id IN (
+                    SELECT MAX(id) 
+                    FROM production_wip 
+                    WHERE '.$wipDateCol.' <= "'.$date.'" 
+                    AND to_process_id = '.$processIdDC.'
+                    GROUP BY product_id
+                )', null, false)
+                ->get()
+                ->getResultArray();
+
+            foreach ($query as $row) {
+                $qty = (int)$row['current_stock'];
+                
+                // Tampilkan hanya jika stok lebih dari 0
+                if($qty > 0) {
+                    $productData[] = [
+                        'part_no'     => $row['part_no'],
+                        'part_name'   => $row['part_name'],
+                        'total_stock' => $qty,
+                    ];
+                }
+            }
+        }
+
+        // Urutkan berdasarkan Part No
+        usort($productData, function($a, $b) {
+            return strcmp($a['part_no'], $b['part_no']);
+        });
+
+        return view('die_casting/daily_schedule/inventory', [
+            'date'        => $date,
+            'titleDate'   => $titleDate,
+            'isAdmin'     => $isAdmin,
+            'productData' => $productData
+        ]);
     }
 }
