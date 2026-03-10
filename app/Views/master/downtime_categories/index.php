@@ -63,13 +63,14 @@
 <div class="card shadow-sm mb-3">
   <div class="card-body">
     <form method="get" action="/master/downtime-categories" class="row g-2 align-items-end">
+      
       <div class="col-md-4">
         <label class="form-label mb-1">Cari (Code / Name / Process)</label>
         <input type="text" name="keyword" class="form-control" placeholder="contoh: 20 / Set Up" value="<?= esc($keyword ?? '') ?>">
       </div>
 
       <div class="col-md-3">
-        <label class="form-label mb-1">Process</label>
+        <label class="form-label mb-1">Filter Process</label>
         <select name="process_id" class="form-select" onchange="this.form.submit()">
           <option value="">-- Semua Process --</option>
           <?php foreach ($processes as $p): ?>
@@ -81,7 +82,7 @@
       </div>
 
       <div class="col-md-2">
-        <label class="form-label mb-1">Status</label>
+        <label class="form-label mb-1">Filter Status</label>
         <select name="status" class="form-select" onchange="this.form.submit()">
           <option value=""  <?= ($status ?? '') === '' ? 'selected' : '' ?>>Semua</option>
           <option value="1" <?= ($status ?? '') === '1' ? 'selected' : '' ?>>Aktif</option>
@@ -99,9 +100,10 @@
       </div>
 
       <div class="col-md-2 d-flex gap-2">
-        <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i></button>
-        <a href="/master/downtime-categories" class="btn btn-outline-secondary"><i class="bi bi-arrow-counterclockwise"></i></a>
+        <button class="btn btn-primary" type="submit"><i class="bi bi-search"></i> Cari</button>
+        <a href="/master/downtime-categories" class="btn btn-outline-secondary" title="Reset Filter"><i class="bi bi-arrow-counterclockwise"></i></a>
       </div>
+      
     </form>
   </div>
 </div>
@@ -116,13 +118,14 @@
             <th style="width:220px;">Process</th>
             <th style="width:140px;">Downtime Code</th>
             <th>Downtime Name</th>
+            <th style="width:120px;">Value (Qty)</th> 
             <th style="width:140px;">Status</th>
             <th style="width:190px;" class="text-end">Aksi</th>
           </tr>
         </thead>
         <tbody>
           <?php if (empty($rows)): ?>
-            <tr><td colspan="6" class="text-center py-4 text-muted">Data Downtime Category belum tersedia</td></tr>
+            <tr><td colspan="7" class="text-center py-4 text-muted">Data Downtime Category belum tersedia atau tidak ditemukan</td></tr>
           <?php else: ?>
             <?php
               $page = (int)($pager->getCurrentPage('downtimecats') ?? 1);
@@ -135,6 +138,7 @@
                 <td class="fw-semibold text-primary"><?= esc($r['process_name'] ?? 'Unknown Process') ?></td>
                 <td class="fw-bold text-danger"><?= esc($r['downtime_code'] ?? '-') ?></td>
                 <td><?= esc($r['downtime_name'] ?? '-') ?></td>
+                <td class="fw-bold"><?= esc($r['value'] ?? 10) ?></td> 
                 <td>
                   <?php if ((int)($r['is_active'] ?? 1) === 1): ?>
                     <span class="badge bg-success">Aktif</span>
@@ -150,6 +154,7 @@
                           data-process_id="<?= esc($r['process_id'] ?? '', 'attr') ?>"
                           data-downtime_code="<?= esc($r['downtime_code'] ?? '', 'attr') ?>"
                           data-downtime_name="<?= esc($r['downtime_name'] ?? '', 'attr') ?>"
+                          data-value="<?= esc($r['value'] ?? 10, 'attr') ?>" 
                           data-is_active="<?= esc($r['is_active'] ?? 1, 'attr') ?>">
                     <i class="bi bi-pencil"></i> Edit
                   </button>
@@ -166,7 +171,8 @@
       </table>
     </div>
   </div>
-  <div class="d-flex justify-content-end p-2">
+  
+  <div class="d-flex justify-content-end p-2 border-top">
     <?= $pager->links('downtimecats', 'bootstrap_pagination') ?>
   </div>
 </div>
@@ -203,6 +209,10 @@
             <div class="row-item">
               <label>Downtime Name <span class="text-danger">*</span></label>
               <input type="text" name="downtime_name" class="form-control" required placeholder="Contoh: Setting Cetakan" value="<?= esc(old('downtime_name') ?? '') ?>">
+            </div>
+            <div class="row-item">
+              <label>Value Pengurang Qty <span class="text-danger">*</span></label>
+              <input type="number" name="value" class="form-control" required placeholder="Contoh: 10" value="<?= esc(old('value') ?? 10) ?>">
             </div>
             <div class="row-item">
               <label>Status</label>
@@ -254,6 +264,10 @@
               <input type="text" name="downtime_name" id="edit_downtime_name" class="form-control" required>
             </div>
             <div class="row-item">
+              <label>Value Pengurang Qty <span class="text-danger">*</span></label>
+              <input type="number" name="value" id="edit_value" class="form-control" required>
+            </div>
+            <div class="row-item">
               <label>Status</label>
               <select name="is_active" id="edit_is_active" class="form-select">
                 <option value="1">Aktif</option>
@@ -279,6 +293,7 @@
     document.getElementById('edit_process_id').value = button.getAttribute('data-process_id') || '';
     document.getElementById('edit_downtime_code').value = button.getAttribute('data-downtime_code') || '';
     document.getElementById('edit_downtime_name').value = button.getAttribute('data-downtime_name') || '';
+    document.getElementById('edit_value').value = button.getAttribute('data-value') || '10';
     document.getElementById('edit_is_active').value = button.getAttribute('data-is_active') ?? '1';
 
     document.getElementById('formEditDowntime').action = '/master/downtime-categories/update/' + button.getAttribute('data-id');

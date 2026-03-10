@@ -17,8 +17,8 @@ class DowntimeCategoryController extends BaseController
     public function index()
     {
         $keyword   = trim((string) $this->request->getGet('keyword'));
-        $processId = $this->request->getGet('process_id'); // ID dari production_processes
-        $status    = trim((string) $this->request->getGet('status')); // '', '1', '0'
+        $processId = $this->request->getGet('process_id');
+        $status    = trim((string) $this->request->getGet('status'));
         $perPage   = (int) ($this->request->getGet('perPage') ?? 10);
 
         $perPageOptions = [10, 25, 50, 100];
@@ -26,13 +26,11 @@ class DowntimeCategoryController extends BaseController
 
         $db = db_connect();
         
-        // Ambil data production_processes untuk dropdown filter dan Form Modal
         $processes = $db->table('production_processes')
                         ->orderBy('process_name', 'ASC')
                         ->get()
                         ->getResultArray();
 
-        // Query join downtime_categories dengan production_processes
         $builder = $this->model
             ->select('downtime_categories.*, production_processes.process_name')
             ->join('production_processes', 'production_processes.id = downtime_categories.process_id', 'left')
@@ -75,6 +73,7 @@ class DowntimeCategoryController extends BaseController
             'process_id'    => 'required|integer',
             'downtime_code' => 'required|integer',
             'downtime_name' => 'required|min_length[2]|max_length[120]',
+            'value'         => 'required|integer|greater_than_equal_to[0]', // Tambahan rules value
         ];
 
         if (!$this->validate($rules)) {
@@ -88,9 +87,9 @@ class DowntimeCategoryController extends BaseController
             $processId = (int)$this->request->getPost('process_id');
             $code      = (int)$this->request->getPost('downtime_code');
             $name      = trim((string)$this->request->getPost('downtime_name'));
+            $value     = (int)($this->request->getPost('value') ?? 10); // Menangkap value (default 10)
             $active    = (int)($this->request->getPost('is_active') ?? 1);
 
-            // Cek unique downtime_code di dalam process_id yang sama
             $exists = $this->model
                 ->where('process_id', $processId)
                 ->where('downtime_code', $code)
@@ -104,6 +103,7 @@ class DowntimeCategoryController extends BaseController
                 'process_id'    => $processId,
                 'downtime_code' => $code,
                 'downtime_name' => $name,
+                'value'         => $value, // Simpan value
                 'is_active'     => $active,
             ]);
 
@@ -127,6 +127,7 @@ class DowntimeCategoryController extends BaseController
             'process_id'    => 'required|integer',
             'downtime_code' => 'required|integer',
             'downtime_name' => 'required|min_length[2]|max_length[120]',
+            'value'         => 'required|integer|greater_than_equal_to[0]', // Tambahan rules value
         ];
 
         if (!$this->validate($rules)) {
@@ -140,6 +141,7 @@ class DowntimeCategoryController extends BaseController
             $processId = (int)$this->request->getPost('process_id');
             $code      = (int)$this->request->getPost('downtime_code');
             $name      = trim((string)$this->request->getPost('downtime_name'));
+            $value     = (int)($this->request->getPost('value') ?? 10); // Menangkap value
             $active    = (int)($this->request->getPost('is_active') ?? ($row['is_active'] ?? 1));
 
             $dup = $this->model
@@ -156,6 +158,7 @@ class DowntimeCategoryController extends BaseController
                 'process_id'    => $processId,
                 'downtime_code' => $code,
                 'downtime_name' => $name,
+                'value'         => $value, // Update value
                 'is_active'     => $active,
             ]);
 

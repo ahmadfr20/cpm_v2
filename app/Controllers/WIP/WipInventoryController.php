@@ -282,10 +282,6 @@ class WipInventoryController extends BaseController
         return $map;
     }
 
-    /* =====================================================
-     * TRANSFER
-     * ===================================================== */
-
     private function buildTransferMap($db, string $wipDateCol, string $date, array $processIds, array $productIds): array
     {
         $map = [];
@@ -409,21 +405,28 @@ class WipInventoryController extends BaseController
         $transferMap = $this->buildTransferMap($db, $wipDateCol, $date, $processIds, $productIds);
         $prevMap = $this->buildPrevProcessMap($db, $productIds);
 
-        $stockTodayMap = [];
-        $colStock = $this->detectColumn($db, $tbl, ['stock', 'stock_qty', 'qty_stock']);
-        if ($db->tableExists($tbl) && $colStock) {
-            $rowsToday = $db->table($tbl)
-                ->select("to_process_id as process_id, product_id, MAX(COALESCE($colStock,0)) as stock_today")
-                ->where($wipDateCol, $date)
-                ->whereIn('to_process_id', $processIds)
-                ->whereIn('product_id', $productIds)
-                ->groupBy('to_process_id, product_id')
-                ->get()->getResultArray();
+        // AMBIL STOCK & TRANSFER TERAKHIR UNTUK MENGHINDARI DOUBLE COUNTING (AKURASI TOTAL STOCK)
+        $latestWipMap = [];
+        if ($db->tableExists($tbl)) {
+            $query = $db->table($tbl . ' w')
+                ->select("w.to_process_id, w.product_id, w.stock, w.transfer")
+                ->where("w.$wipDateCol <=", $date)
+                ->where('w.id IN (
+                    SELECT MAX(id) 
+                    FROM production_wip 
+                    WHERE '.$wipDateCol.' <= "'.$date.'" 
+                    GROUP BY to_process_id, product_id
+                )', null, false)
+                ->get()
+                ->getResultArray();
 
-            foreach ($rowsToday as $r) {
-                $procId = (int)($r['process_id'] ?? 0);
-                $pid    = (int)($r['product_id'] ?? 0);
-                $stockTodayMap[$procId][$pid] = (int)($r['stock_today'] ?? 0);
+            foreach ($query as $r) {
+                $procId = (int)$r['to_process_id'];
+                $pid    = (int)$r['product_id'];
+                $latestWipMap[$procId][$pid] = [
+                    'stock'    => (int)$r['stock'],
+                    'transfer' => (int)$r['transfer'],
+                ];
             }
         }
 
@@ -444,9 +447,12 @@ class WipInventoryController extends BaseController
             $qtyOut = (int)($hourlyOutMap[$procId][$shiftId][$pid] ?? 0);
             $qtyNg  = (int)($hourlyNgMap[$procId][$shiftId][$pid] ?? 0);
 
-            $wipAkhir = max(0, $wipAwal + $qtyIn - $qtyOut - $qtyNg);
-            $stock = $colStock ? (int)($stockTodayMap[$procId][$pid] ?? $wipAkhir) : $wipAkhir;
-            $transfer = (int)($transferMap[$procId][$pid] ?? 0);
+            // MENGGUNAKAN PENGUKURAN ABSOLUT DARI DB ROW TERAKHIR
+            $stock    = (int)($latestWipMap[$procId][$pid]['stock'] ?? 0);
+            $transfer = (int)($latestWipMap[$procId][$pid]['transfer'] ?? 0);
+            
+            // Buffer/WIP Akhir adalah Stock Bebas + Stock Terjadwal
+            $wipAkhir = $stock + $transfer;
 
             $rows[] = [
                 'date' => $date,
@@ -455,15 +461,14 @@ class WipInventoryController extends BaseController
                 'part_no' => $pinfo['part_no'],
                 'part_name' => $pinfo['part_name'],
 
+                // KEYS YANG DIBUTUHKAN VIEW (.php HTML)
                 'wip_awal' => $wipAwal,
                 'qty_in' => $qtyIn,
                 'qty_out' => $qtyOut,
                 'qty_ng' => $qtyNg,
-
                 'wip_akhir' => $wipAkhir,
                 'stock' => $stock,
                 'transfer' => $transfer,
-
                 'qty_in_schedule' => $qtyIn,
                 'qty_in_transfer' => $wipAwal,
             ];
@@ -501,19 +506,15 @@ class WipInventoryController extends BaseController
 
         $wipDateCol = $this->detectWipDateColumn($db);
         $tbl = 'production_wip';
-        $colStock = $this->detectColumn($db, $tbl, ['stock', 'stock_qty', 'qty_stock']);
 
         $productData = [];
 
-        if ($db->tableExists($tbl) && $colStock) {
-            // Ambil semua max stock terakhir untuk setiap product dan setiap process
-            // Mengambil baris terakhir per product per process pada tanggal terpilih
+        if ($db->tableExists($tbl)) {
             $query = $db->table($tbl . ' w')
-                ->select('w.product_id, p.part_no, p.part_name, pr.process_name, w.'.$colStock.' as current_stock')
+                ->select('w.product_id, p.part_no, p.part_name, pr.process_name, w.stock, w.transfer')
                 ->join('products p', 'p.id = w.product_id', 'inner')
                 ->join('production_processes pr', 'pr.id = w.to_process_id', 'left')
-                ->where("w.$wipDateCol <=", $date) // Ambil yang hari itu atau sebelum-sebelumnya
-                // Subquery untuk mendapatkan ID terakhir per process dan product
+                ->where("w.$wipDateCol <=", $date)
                 ->where('w.id IN (
                     SELECT MAX(id) 
                     FROM production_wip 
@@ -535,25 +536,24 @@ class WipInventoryController extends BaseController
                     ];
                 }
 
-                $qty = (int)$row['current_stock'];
+                $stock = (int)$row['stock'];
+                $transfer = (int)$row['transfer'];
+                $totalQty = $stock + $transfer;
                 
-                // Skip jika stoknya 0 dan tidak ingin ditampilkan, tapi lebih baik tampilkan agar transparan
-                if($qty > 0) {
-                    $productData[$pid]['total_stock'] += $qty;
+                if($totalQty > 0) {
+                    $productData[$pid]['total_stock'] += $totalQty;
                     $productData[$pid]['details'][] = [
                         'process' => $row['process_name'] ?? 'Unknown Process',
-                        'qty' => $qty
+                        'qty' => $totalQty
                     ];
                 }
             }
         }
 
-        // Hapus produk yang total stocknya 0 (Opsional)
         $productData = array_filter($productData, function($item) {
             return $item['total_stock'] > 0;
         });
 
-        // Urutkan berdasarkan Part No
         usort($productData, function($a, $b) {
             return strcmp($a['part_no'], $b['part_no']);
         });

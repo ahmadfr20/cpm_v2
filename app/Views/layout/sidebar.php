@@ -100,7 +100,7 @@ function isActive($path, $currentUrl)
 <li class="text-secondary small mt-2">Others</li>
 <li><a class="nav-link" href="/raw-material">Raw Material</a></li>
 <li><a class="nav-link" href="/maintenance">Maintenance</a></li>
-<li><a class="nav-link" href="/part-transfer/machining">Part Transfer to Machining</a></li>
+<li><a class="nav-link" href="/production/transfer-machining">Part Transfer to Machining</a></li>
 
 </ul>
 </div>

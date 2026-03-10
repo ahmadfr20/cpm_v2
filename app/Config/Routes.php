@@ -149,6 +149,10 @@ $routes->group('production', ['filter' => 'auth:PPIC'], function ($routes) {
     $routes->get('get-machines', 'Production\DailyScheduleController::getMachines');
     $routes->get('get-products', 'Production\DailyScheduleController::getProducts');
     $routes->get('calculate-target', 'Production\DailyScheduleController::calculateTarget');
+
+    $routes->get('transfer-machining', 'Production\TransferMachiningController::index');
+    $routes->post('transfer-machining/getAvailableStock', 'Production\TransferMachiningController::getAvailableStock');
+    $routes->post('transfer-machining/store', 'Production\TransferMachiningController::store');
 });
 
 $routes->get('production/daily-schedule/list', 'Production\DailyScheduleController::list', ['filter' => 'auth:PPIC']);
@@ -252,6 +256,8 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
 
     $routes->get('daily-schedule/incoming-wip', 'Machining\DailyScheduleController::incomingWip', ['filter' => 'auth:PPIC']);
     $routes->post('daily-schedule/assign-incoming-wip-bulk', 'Machining\DailyScheduleController::assignIncomingWipBulk', ['filter' => 'auth:PPIC']);
+    $routes->get('daily-schedule/approval-data', 'Machining\DailyScheduleController::getApprovalData');
+    $routes->post('daily-schedule/approve', 'Machining\DailyScheduleController::approveStock');
 
     // duplikat versi kamu (tetap)
     $routes->get('schedule', 'Machining\DailyScheduleController::index', ['filter' => 'auth:PPIC']);

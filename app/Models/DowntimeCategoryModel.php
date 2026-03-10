@@ -16,7 +16,8 @@ class DowntimeCategoryModel extends Model
     protected $allowedFields    = [
         'process_id', 
         'downtime_code', 
-        'downtime_name', 
+        'downtime_name',
+        'value', 
         'is_active'
     ];
 

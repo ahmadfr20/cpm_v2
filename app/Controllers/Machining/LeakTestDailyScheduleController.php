@@ -393,8 +393,11 @@ class LeakTestDailyScheduleController extends BaseController
             $processIdLT = $this->getProcessIdLeakTest($db);
             $totalSecond = $this->getTotalSecondShift($db, $shiftId); 
 
+            $hasCtMach = $db->fieldExists('cycle_time_machining', 'products');
+
             $builder = $db->table('product_process_flows ppf')
-                ->select('p.id, p.part_no, p.part_name, p.cycle_time, p.cavity, p.efficiency_rate')
+                ->select('p.id, p.part_no, p.part_name, p.cavity, p.efficiency_rate'
+                    . ($hasCtMach ? ', p.cycle_time_machining' : ', p.cycle_time'))
                 ->join('products p', 'p.id = ppf.product_id', 'inner')
                 ->where('ppf.process_id', $processIdLT);
 
@@ -421,7 +424,8 @@ class LeakTestDailyScheduleController extends BaseController
             $results = [];
             foreach ($products as $p) {
                 $pid    = (int)($p['id'] ?? 0);
-                $cycle  = (int)($p['cycle_time'] ?? 0);
+                // Menggunakan cycle_time_machining jika ada
+                $cycle  = $hasCtMach ? (int)($p['cycle_time_machining'] ?? 0) : (int)($p['cycle_time'] ?? 0);
                 $cavity = (int)($p['cavity'] ?? 0);
 
                 $effRaw = (float)($p['efficiency_rate'] ?? 100.0);
@@ -443,7 +447,7 @@ class LeakTestDailyScheduleController extends BaseController
                 $results[] = [
                     'id' => $pid,
                     'text' => trim((string)($p['part_no'] ?? '').' - '.(string)($p['part_name'] ?? '')),
-                    'cycle_time_used'  => $cycle,
+                    'cycle_time_used'  => $cycle, // Disimpan untuk referensi di view jika perlu
                     'target_per_shift' => min($targetShift, 1200),
                     'target_per_hour'  => (int)$targetHour,
                     'prev_process_id'  => (int)($prevId ?? 0),
@@ -476,6 +480,7 @@ class LeakTestDailyScheduleController extends BaseController
         if ($deny) return $deny;
 
         $processIdLT = $this->getProcessIdLeakTest($db);
+        $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
         $now = date('Y-m-d H:i:s');
 
         $db->transBegin();
@@ -551,13 +556,14 @@ class LeakTestDailyScheduleController extends BaseController
                 }
 
                 $product = $db->table('products')
-                    ->select('cycle_time, cavity, efficiency_rate')
+                    ->select('cavity, efficiency_rate' . ($hasCtMach ? ', cycle_time_machining' : ', cycle_time'))
                     ->where('id', $productId)
                     ->get()->getRowArray();
 
                 if (!$product) throw new \Exception("Product ID {$productId} tidak ditemukan.");
 
-                $cycle  = (int)($product['cycle_time'] ?? 0);
+                // Menggunakan cycle_time_machining
+                $cycle  = $hasCtMach ? (int)($product['cycle_time_machining'] ?? 0) : (int)($product['cycle_time'] ?? 0);
                 $cavity = (int)($product['cavity'] ?? 0);
                 if ($cycle <= 0 || $cavity <= 0) {
                     throw new \Exception("Cycle time / cavity belum valid untuk Product ID {$productId}.");
@@ -573,7 +579,7 @@ class LeakTestDailyScheduleController extends BaseController
                     'shift_id'          => $shiftId,
                     'machine_id'        => $machineId,
                     'product_id'        => $productId,
-                    'cycle_time'        => $cycle,
+                    'cycle_time'        => $cycle, // Akan diisi dengan cycle_time_machining
                     'cavity'            => $cavity,
                     'target_per_hour'   => $targetPerHour,
                     'target_per_shift'  => $planInput,

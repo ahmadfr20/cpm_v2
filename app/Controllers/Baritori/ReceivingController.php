@@ -49,6 +49,29 @@ class ReceivingController extends BaseController
         return $this->findProcessId($db, ['BT'], ['BURRYTORY', 'Burrytory', 'BARITORI', 'Baritori']);
     }
 
+    private function getPrevNextProcessByFlow($db, int $productId, int $currentProcessId): array
+    {
+        if (!$db->tableExists('product_process_flows')) return ['prev' => null, 'next' => null];
+
+        $rows = $db->table('product_process_flows')
+            ->select('process_id, sequence')
+            ->where('product_id', $productId)
+            ->where('is_active', 1)
+            ->orderBy('sequence', 'ASC')
+            ->get()->getResultArray();
+
+        if (!$rows) return ['prev' => null, 'next' => null];
+
+        $seq = array_map(fn($r) => (int)$r['process_id'], $rows);
+        $idx = array_search($currentProcessId, $seq, true);
+        if ($idx === false) return ['prev' => null, 'next' => null];
+
+        return [
+            'prev' => $seq[$idx - 1] ?? null,
+            'next' => $seq[$idx + 1] ?? null,
+        ];
+    }
+
     private function detectWipDateColumn($db): string
     {
         if ($db->fieldExists('production_date', 'production_wip')) return 'production_date';
@@ -219,34 +242,68 @@ class ReceivingController extends BaseController
     {
         $db = db_connect();
 
-        // vendor disimpan di material_transactions.process_to
-        $hasVendors = $db->tableExists('vendors');
+        $baritoriId = $this->getBaritoriProcessId($db);
+        if (!$baritoriId) {
+            return view('baritori/receiving/index', ['deliveries' => [], 'errorMsg' => 'Process Baritori tidak ditemukan.']);
+        }
+
+        $hasVendors   = $db->tableExists('vendors');
+        $hasVendorCol = $db->fieldExists('vendor_id', 'material_transactions');
+        
+        // Membaca kolom vendor (tergantung schema database, fallback ke process_to)
+        $vendorCol = $hasVendorCol ? 'mt.vendor_id' : 'mt.process_to';
 
         $builder = $db->table('material_transactions mt')
             ->select("
                 mt.shift_id,
                 s.shift_name,
-
                 mt.product_id,
                 p.part_no,
                 p.part_name,
-
-                mt.process_to AS vendor_id,
+                {$vendorCol} AS vendor_id,
                 " . ($hasVendors ? "COALESCE(v.vendor_name,'-')" : "'-'") . " AS vendor_name,
-
                 SUM(CASE WHEN mt.transaction_type='VENDOR_OUT' THEN mt.qty ELSE 0 END) AS qty_out,
                 SUM(CASE WHEN mt.transaction_type='VENDOR_IN'  THEN mt.qty ELSE 0 END) AS qty_in
             ")
             ->join('products p', 'p.id = mt.product_id', 'left')
             ->join('shifts s', 's.id = mt.shift_id', 'left')
-            ->whereIn('mt.transaction_type', ['VENDOR_OUT', 'VENDOR_IN'])
-            ->groupBy('mt.shift_id, mt.product_id, mt.process_to')
-            ->orderBy('vendor_name', 'ASC')
-            ->orderBy('p.part_no', 'ASC');
+            ->whereIn('mt.transaction_type', ['VENDOR_OUT', 'VENDOR_IN']);
 
         if ($hasVendors) {
-            $builder->join('vendors v', 'v.id = mt.process_to', 'left');
+            $builder->join('vendors v', "v.id = {$vendorCol}", 'left');
         }
+
+        // AMBIL SEMUA PRODUK YANG MEMILIKI FLOW BARITORI
+        $baritoriFlows = $db->table('product_process_flows')
+            ->select('product_id')
+            ->where('process_id', $baritoriId)
+            ->where('is_active', 1)
+            ->get()->getResultArray();
+
+        $validConditions = [];
+        foreach ($baritoriFlows as $f) {
+            $pid = (int)$f['product_id'];
+            $flow = $this->getPrevNextProcessByFlow($db, $pid, $baritoriId);
+            $prevId = (int)($flow['prev'] ?? 0);
+            
+            if ($prevId > 0) {
+                // Syarat: Transaksi terkait dengan Produk ini, dan process_from nya adalah 
+                // ID Proses Sebelumnya (saat Delivery/OUT) ATAU ID Baritori (saat Receive/IN)
+                $validConditions[] = "(mt.product_id = {$pid} AND mt.process_from IN ({$prevId}, {$baritoriId}))";
+            }
+        }
+
+        // Jika tidak ada produk yang terkait Baritori sama sekali, return kosong
+        if (empty($validConditions)) {
+            return view('baritori/receiving/index', ['deliveries' => [], 'errorMsg' => null]);
+        }
+
+        // Terapkan filter Baritori
+        $builder->where('(' . implode(' OR ', $validConditions) . ')');
+
+        $builder->groupBy("mt.shift_id, mt.product_id, {$vendorCol}")
+                ->orderBy('vendor_name', 'ASC')
+                ->orderBy('p.part_no', 'ASC');
 
         $rows = $builder->get()->getResultArray();
 
@@ -263,6 +320,7 @@ class ReceivingController extends BaseController
 
         return view('baritori/receiving/index', [
             'deliveries' => $rows,
+            'errorMsg'   => null
         ]);
     }
 
@@ -296,7 +354,7 @@ class ReceivingController extends BaseController
         }
 
         $date       = date('Y-m-d');
-        $wipDateCol  = $this->detectWipDateColumn($db);
+        $wipDateCol = $this->detectWipDateColumn($db);
         $now        = date('Y-m-d H:i:s');
 
         $db->transBegin();
@@ -306,11 +364,14 @@ class ReceivingController extends BaseController
                 $qty       = (int)($row['qty'] ?? 0);
                 $productId = (int)($row['product_id'] ?? 0);
                 $shiftId   = (int)($row['shift_id'] ?? 0);
-                $vendorId  = (int)($row['vendor_id'] ?? 0); // ini = mt.process_to
+                $vendorId  = (int)($row['vendor_id'] ?? 0);
 
                 if ($qty <= 0 || $productId <= 0 || $shiftId <= 0 || $vendorId <= 0) continue;
 
-                // outstanding berdasarkan shift+product+vendor(process_to)
+                $hasVendorCol = $db->fieldExists('vendor_id', 'material_transactions');
+                $vendorColName = $hasVendorCol ? 'vendor_id' : 'process_to';
+
+                // outstanding berdasarkan shift+product+vendor
                 $sumRow = $db->table('material_transactions')
                     ->select("
                         SUM(CASE WHEN transaction_type='VENDOR_OUT' THEN qty ELSE 0 END) AS qty_out,
@@ -318,7 +379,7 @@ class ReceivingController extends BaseController
                     ")
                     ->where('shift_id', $shiftId)
                     ->where('product_id', $productId)
-                    ->where('process_to', $vendorId)
+                    ->where($vendorColName, $vendorId)
                     ->whereIn('transaction_type', ['VENDOR_OUT', 'VENDOR_IN'])
                     ->get()->getRowArray();
 
@@ -331,7 +392,11 @@ class ReceivingController extends BaseController
                     throw new \Exception("Qty receive melebihi outstanding. Max: {$outstanding}");
                 }
 
-                // 1) insert VENDOR_IN + simpan vendor di process_to
+                // 1) Dapatkan proses sebelumnya untuk mengurangi nilai Transfer
+                $flow   = $this->getPrevNextProcessByFlow($db, $productId, $baritoriId);
+                $prevId = (int)($flow['prev'] ?? 0);
+
+                // 2) insert VENDOR_IN
                 $trxPayload = [
                     'transaction_date' => $date,
                     'shift_id'         => $shiftId,
@@ -339,37 +404,47 @@ class ReceivingController extends BaseController
                     'qty'              => $qty,
                     'transaction_type' => 'VENDOR_IN',
                     'created_at'       => $now,
-                    'process_to'       => $vendorId, // ✅ PENTING
-                    'process_from'     => $baritoriId, // optional (kalau mau tracking)
+                    'process_from'     => $baritoriId, // Set identitas Baritori agar difilter di Index
                 ];
-                $trxPayload = $this->onlyExistingColumns($db, 'material_transactions', $trxPayload);
+                
+                if ($hasVendorCol) {
+                    $trxPayload['vendor_id']  = $vendorId;
+                    $trxPayload['process_to'] = $baritoriId;
+                } else {
+                    $trxPayload['process_to'] = $vendorId; // Fallback simpan vendor di process_to
+                }
 
+                $trxPayload = $this->onlyExistingColumns($db, 'material_transactions', $trxPayload);
                 $db->table('material_transactions')->insert($trxPayload);
                 $trxId = (int)$db->insertID();
 
-                // 2) update stock WIP Baritori (receiving yang isi stock)
-                $barSnap      = $this->getLatestSnapshot($db, $date, $baritoriId, $productId);
-                $barBefore    = (int)($barSnap['stock'] ?? 0);
-                $barTransfer  = (int)($barSnap['transfer'] ?? 0);
+                // 3) Kurangi nilai transfer di Proses Sebelumnya (karena barang sudah diterima di Baritori)
+                if ($prevId > 0 && $transferCol) {
+                    $prevSnap = $this->getLatestSnapshot($db, $date, $prevId, $productId);
+                    $prevStock = (int)($prevSnap['stock'] ?? 0);
+                    $prevTransfer = (int)($prevSnap['transfer'] ?? 0);
+                    $newPrevTransfer = max(0, $prevTransfer - $qty);
+
+                    $this->upsertWaitingSnapshot(
+                        $db, $date, $prevId, $productId, $prevId, $prevStock, $newPrevTransfer, 'material_transactions', $trxId
+                    );
+                }
+
+                // 4) Update stock WIP Baritori (Stock bertambah)
+                $barSnap       = $this->getLatestSnapshot($db, $date, $baritoriId, $productId);
+                $barBefore     = (int)($barSnap['stock'] ?? 0);
+                $barTransfer   = (int)($barSnap['transfer'] ?? 0);
                 $barAfterStock = $barBefore + $qty;
 
                 $this->upsertWaitingSnapshot(
-                    $db,
-                    $date,
-                    $baritoriId,
-                    $productId,
-                    $baritoriId,
-                    $barAfterStock,
-                    $barTransfer,
-                    'material_transactions',
-                    $trxId
+                    $db, $date, $baritoriId, $productId, $prevId, $barAfterStock, $barTransfer, 'material_transactions', $trxId
                 );
 
-                // history DONE IN
+                // 5) Insert History Log DONE IN (Masuk Baritori)
                 $barIn = [
                     $wipDateCol       => $date,
                     'product_id'      => $productId,
-                    'from_process_id' => $baritoriId,
+                    'from_process_id' => $prevId,
                     'to_process_id'   => $baritoriId,
                     'qty'             => $qty,
                     'qty_in'          => $qty,
@@ -380,6 +455,8 @@ class ReceivingController extends BaseController
                     'status'          => 'DONE',
                     'created_at'      => $now,
                 ];
+                if ($transferCol) $barIn[$transferCol] = $barTransfer;
+
                 $barIn = $this->onlyExistingColumns($db, 'production_wip', $barIn);
                 $db->table('production_wip')->insert($barIn);
             }
@@ -387,7 +464,7 @@ class ReceivingController extends BaseController
             if ($db->transStatus() === false) throw new \Exception('DB error');
 
             $db->transCommit();
-            return redirect()->back()->with('success', 'Receiving Baritori berhasil disimpan ✅');
+            return redirect()->back()->with('success', 'Receiving Baritori berhasil disimpan. Transfer dikurangi & Stock bertambah ✅');
 
         } catch (\Throwable $e) {
             $db->transRollback();

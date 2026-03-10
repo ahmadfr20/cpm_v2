@@ -395,9 +395,11 @@ class AssyBushingDailyScheduleController extends BaseController
 
         $processIdAB = $this->getProcessIdAssyBushing($db);
         $totalSecond = $this->getTotalSecondShift($db, $shiftId);
+        $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
 
         $q = $db->table('product_process_flows ppf')
-            ->select('p.id, p.part_no, p.part_name, p.cycle_time, p.cavity, p.efficiency_rate')
+            ->select('p.id, p.part_no, p.part_name, p.cavity, p.efficiency_rate' 
+                . ($hasCtMach ? ', p.cycle_time_machining' : ', p.cycle_time'))
             ->join('products p', 'p.id = ppf.product_id')
             ->where('ppf.is_active', 1)
             ->where('p.is_active', 1)
@@ -418,7 +420,9 @@ class AssyBushingDailyScheduleController extends BaseController
         $out = [];
         foreach ($products as $p) {
             $pid    = (int)($p['id'] ?? 0);
-            $cycle  = (int)($p['cycle_time'] ?? 0);
+            
+            // Prioritaskan cycle_time_machining
+            $cycle  = $hasCtMach ? (int)($p['cycle_time_machining'] ?? 0) : (int)($p['cycle_time'] ?? 0);
             $cavity = (int)($p['cavity'] ?? 0);
 
             $effRaw = (float)($p['efficiency_rate'] ?? 100.0);
@@ -463,6 +467,7 @@ class AssyBushingDailyScheduleController extends BaseController
         if ($deny) return $deny;
 
         $processIdAB = $this->getProcessIdAssyBushing($db);
+        $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
         $now = date('Y-m-d H:i:s');
 
         $db->transBegin();
@@ -536,13 +541,14 @@ class AssyBushingDailyScheduleController extends BaseController
                 }
 
                 $product = $db->table('products')
-                    ->select('cycle_time, cavity, efficiency_rate')
+                    ->select('cavity, efficiency_rate' . ($hasCtMach ? ', cycle_time_machining' : ', cycle_time'))
                     ->where('id', $productId)
                     ->get()->getRowArray();
 
                 if (!$product) throw new \Exception("Product ID {$productId} tidak ditemukan.");
 
-                $cycle  = (int)($product['cycle_time'] ?? 0);
+                // Memakai cycle_time_machining
+                $cycle  = $hasCtMach ? (int)($product['cycle_time_machining'] ?? 0) : (int)($product['cycle_time'] ?? 0);
                 $cavity = (int)($product['cavity'] ?? 0);
                 if ($cycle <= 0 || $cavity <= 0) {
                     throw new \Exception("Cycle time / cavity belum valid untuk Product ID {$productId}.");
@@ -557,7 +563,7 @@ class AssyBushingDailyScheduleController extends BaseController
                     'shift_id'          => $shiftId,
                     'machine_id'        => $machineId,
                     'product_id'        => $productId,
-                    'cycle_time'        => $cycle,
+                    'cycle_time'        => $cycle, // Disimpan sebagai info historis
                     'cavity'            => $cavity,
                     'target_per_hour'   => $targetPerHour,
                     'target_per_shift'  => $planInput,

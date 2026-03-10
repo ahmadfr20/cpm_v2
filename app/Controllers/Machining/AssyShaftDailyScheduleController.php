@@ -39,6 +39,10 @@ class AssyShaftDailyScheduleController extends BaseController
      * ============================================ */
     private function getTotalSecondShift($db, int $shiftId): int
     {
+        if (!$db->tableExists('shift_time_slots') || !$db->tableExists('time_slots')) {
+            return 0;
+        }
+
         $slots = $db->table('shift_time_slots sts')
             ->select('ts.time_start, ts.time_end')
             ->join('time_slots ts', 'ts.id = sts.time_slot_id')
@@ -377,12 +381,12 @@ class AssyShaftDailyScheduleController extends BaseController
         $totalSecond = $this->getTotalSecondShift($db, $shiftId);
         if ($totalSecond <= 0) return $this->response->setJSON([]);
 
-        $hasCtAS = $db->fieldExists('cycle_time_assy_shaft', 'products');
+        $hasCtMach = $db->fieldExists('cycle_time_machining', 'products');
 
         $products = $db->table('product_process_flows ppf')
             ->select(
                 'p.id, p.part_no, p.part_name, p.cavity, p.efficiency_rate'
-                . ($hasCtAS ? ', p.cycle_time_assy_shaft' : ', p.cycle_time')
+                . ($hasCtMach ? ', p.cycle_time_machining' : ', p.cycle_time')
             )
             ->join('products p', 'p.id = ppf.product_id')
             ->where('ppf.is_active', 1)
@@ -394,7 +398,7 @@ class AssyShaftDailyScheduleController extends BaseController
             ->getResultArray();
 
         foreach ($products as &$p) {
-            $cycle  = $hasCtAS ? (int)($p['cycle_time_assy_shaft'] ?? 0) : (int)($p['cycle_time'] ?? 0);
+            $cycle  = $hasCtMach ? (int)($p['cycle_time_machining'] ?? 0) : (int)($p['cycle_time'] ?? 0);
             $cavity = (int)($p['cavity'] ?? 0);
 
             $effRaw = (float)($p['efficiency_rate'] ?? 100.0);
@@ -443,7 +447,7 @@ class AssyShaftDailyScheduleController extends BaseController
         }
 
         $processIdAS = $this->getProcessIdAssyShaft($db);
-        $hasCtAS     = $db->fieldExists('cycle_time_assy_shaft', 'products');
+        $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
         $now         = date('Y-m-d H:i:s');
 
         $db->transBegin();
@@ -516,9 +520,9 @@ class AssyShaftDailyScheduleController extends BaseController
                     $oldPlan = 0;
                 }
 
-                // CT Assy Shaft 
+                // CT Machining 
                 $product = $db->table('products')
-                    ->select($hasCtAS ? 'cycle_time_assy_shaft as ct, cavity, efficiency_rate' : 'cycle_time as ct, cavity, efficiency_rate')
+                    ->select($hasCtMach ? 'cycle_time_machining as ct, cavity, efficiency_rate' : 'cycle_time as ct, cavity, efficiency_rate')
                     ->where('id', $productId)
                     ->get()
                     ->getRowArray();
@@ -528,7 +532,7 @@ class AssyShaftDailyScheduleController extends BaseController
                 $cycle  = (int)($product['ct'] ?? 0);
                 $cavity = (int)($product['cavity'] ?? 0);
                 if ($cycle <= 0 || $cavity <= 0) {
-                    throw new \Exception("Cycle time Assy Shaft / cavity belum valid untuk Product ID {$productId}.");
+                    throw new \Exception("Cycle time Machining / cavity belum valid untuk Product ID {$productId}.");
                 }
 
                 $effRaw = (float)($product['efficiency_rate'] ?? 100.0);
@@ -726,9 +730,9 @@ class AssyShaftDailyScheduleController extends BaseController
             return $this->response->setJSON(['status' => false, 'message' => "Product {$productId} tidak punya flow Assy Shaft aktif"]);
         }
 
-        $hasCtAS = $db->fieldExists('cycle_time_assy_shaft', 'products');
+        $hasCtMach = $db->fieldExists('cycle_time_machining', 'products');
         $product = $db->table('products')
-            ->select($hasCtAS ? 'cycle_time_assy_shaft as ct, cavity, efficiency_rate' : 'cycle_time as ct, cavity, efficiency_rate')
+            ->select($hasCtMach ? 'cycle_time_machining as ct, cavity, efficiency_rate' : 'cycle_time as ct, cavity, efficiency_rate')
             ->where('id', $productId)
             ->get()
             ->getRowArray();
@@ -740,7 +744,7 @@ class AssyShaftDailyScheduleController extends BaseController
         $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
 
         if ($cycle <= 0 || $cavity <= 0) {
-            return $this->response->setJSON(['status' => false, 'message' => 'Cycle time / cavity belum valid']);
+            return $this->response->setJSON(['status' => false, 'message' => 'Cycle time Machining / cavity belum valid']);
         }
 
         $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
