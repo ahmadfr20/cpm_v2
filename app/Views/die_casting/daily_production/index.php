@@ -160,23 +160,6 @@
     <div class="d-flex align-items-center justify-content-between gap-2 mt-4 mb-2">
       <h5 class="m-0"><?= esc($shift['shift_name']) ?></h5>
 
-      <!-- <div class="d-flex align-items-center gap-3">
-        <button type="button"
-                class="btn <?= $finishAllowed ? 'btn-warning' : 'btn-secondary' ?>"
-                data-shift-id="<?= $shiftId ?>"
-                data-shift-code="<?= $shiftCode ?>"
-                onclick="finishShiftPerShift(this)"
-                <?= $finishAllowed ? '' : 'disabled' ?>>
-          <i class="bi bi-send"></i> Finish Shift <?= $shiftCode ?>
-        </button>
-
-        <div class="small text-muted fw-bold">
-          <?php if (!$isAdmin): ?>
-            Aktif ±15 menit sebelum shift selesai
-          <?php else: ?>
-            Admin override (bebas finish kapan saja)
-          <?php endif; ?>
-        </div> -->
       </div>
     </div>
 
@@ -259,7 +242,6 @@
                 </td>
 
                 <td>
-                  <!-- total NG slot (auto update dari table NG inline) -->
                   <input type="number"
                          class="form-control form-control-sm slot-input ng"
                          readonly
@@ -294,13 +276,11 @@
                           </tr>
                         </thead>
                         <tbody id="ngBody_<?= esc($key) ?>">
-                          <!-- di-render JS dari hidden -->
-                        </tbody>
+                          </tbody>
                       </table>
                     </div>
                   </div>
 
-                  <!-- hidden untuk submit (dipakai controller) -->
                   <div class="ng-hidden d-none" id="ngHidden_<?= esc($key) ?>">
                     <?php foreach ($ngDetail as $idx => $d): ?>
                       <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][ng_category_id]" value="<?= (int)$d['ng_category_id'] ?>">
@@ -595,11 +575,33 @@ function parseTimeOnDate(dateISO, hhmmss){
   const t = String(hhmmss || '').slice(0,5);
   return new Date(`${dateISO}T${t}:00`);
 }
+
 function isSlotActive(prodDateISO, start, end){
   const now = new Date();
   let s = parseTimeOnDate(prodDateISO, start);
   let e = parseTimeOnDate(prodDateISO, end);
-  if (e <= s) e.setDate(e.getDate() + 1);
+
+  // Ambil jam (hour) saja dari slot
+  const startHour = parseInt(String(start).split(':')[0], 10);
+  const endHour = parseInt(String(end).split(':')[0], 10);
+
+  // LOGIKA SHIFT MALAM:
+  // Jika pabrik mulai shift pertama jam 07:00 pagi, maka jam 00:00 s/d 06:59 
+  // secara kalender fisik sudah masuk ke Hari Esok (Next Day) dari Tanggal Produksi.
+  // (Jika di pabrik Anda Shift pagi mulai jam 06:00, ubah angka 7 di bawah menjadi 6)
+  if (startHour >= 0 && startHour < 7) {
+    s.setDate(s.getDate() + 1);
+  }
+  
+  if (endHour >= 0 && endHour < 7) {
+    e.setDate(e.getDate() + 1);
+  }
+
+  // Jika masih terbalik (Misal rentang 23:00 ke 00:00, atau 06:00 ke 07:00)
+  if (e <= s) {
+    e.setDate(e.getDate() + 1);
+  }
+
   return now >= s && now <= e;
 }
 
@@ -629,7 +631,7 @@ function applySlotLock(){
 }
 
 applySlotLock();
-setInterval(applySlotLock, 30000);
+setInterval(applySlotLock, 30000); // refresh tiap 30 detik
 </script>
 
 <?= $this->endSection() ?>

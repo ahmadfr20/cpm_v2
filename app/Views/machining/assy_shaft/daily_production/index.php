@@ -108,7 +108,7 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
           </tr>
         </thead>
 
-        <tbody>
+        <tbody class="shift-body">
         <?php foreach ($shift['items'] as $item): ?>
           <tr>
             <td class="sticky-left fw-bold text-center"><?= esc($item['line_position']) ?></td>
@@ -147,7 +147,7 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
                        name="items[<?= esc($key) ?>][ng]">
               </td>
 
-              <td class="text-start">
+              <td class="text-start outer-td">
                 <div class="ng-inline" data-key="<?= esc($key) ?>">
                   <div class="ng-inline-head">
                     <div class="meta">Total NG: <span class="fw-bold" id="ngTotalBadge_<?= esc($key) ?>">0</span></div>
@@ -221,22 +221,7 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
     <button class="btn btn-success" type="submit">
       <i class="bi bi-save"></i> Simpan
     </button>
-
-    <!-- <button class="btn btn-warning" type="submit"
-            formaction="/machining/assy-shaft/hourly/finish-shift"
-            <?= (!$canFinishUI) ? 'disabled' : '' ?>
-            title="<?= $finishTitleUI ?>"
-            onclick="return confirm('Finish Shift? Stock WIP Assy Shaft akan dikirim ke proses berikutnya.')">
-      <i class="bi bi-check2-circle"></i> Finish Shift
-      <?php if ($isAdmin): ?><span class="badge bg-dark ms-2">ADMIN</span><?php endif; ?>
-    </button>
   </div>
-
-  <?php if (!$isAdmin && !($canFinish ?? false) && !empty($shift3EndAt)): ?>
-    <div class="text-muted mt-2" style="font-size:13px">
-      Finish Shift aktif setelah Shift 3 selesai (<?= esc($shift3EndAt) ?> WIB)
-    </div>
-  <?php endif; ?> -->
 </form>
 
 <script>
@@ -428,18 +413,36 @@ document.querySelectorAll('.ng-inline[data-key]').forEach(box=>{
   renderNgTable(box.getAttribute('data-key'));
 });
 
-// slot lock
+// ========= SLOT LOCK MENDUKUNG SHIFT 3 MALAM =========
 function parseTimeOnDate(dateISO, hhmmss){
   const t = String(hhmmss || '').slice(0,5);
   return new Date(`${dateISO}T${t}:00`);
 }
+
 function isSlotActive(prodDateISO, start, end){
   const now = new Date();
   let s = parseTimeOnDate(prodDateISO, start);
   let e = parseTimeOnDate(prodDateISO, end);
-  if (e <= s) e.setDate(e.getDate() + 1);
+  
+  const startHour = parseInt(String(start).split(':')[0], 10);
+  const endHour = parseInt(String(end).split(':')[0], 10);
+
+  // Jika jam berada di antara 00:00 dan 06:59, maka dianggap masuk hari esok
+  if (startHour >= 0 && startHour < 7) {
+    s.setDate(s.getDate() + 1);
+  }
+  if (endHour >= 0 && endHour < 7) {
+    e.setDate(e.getDate() + 1);
+  }
+
+  // Jika masih menyeberang tengah malam secara langsung
+  if (e <= s) {
+    e.setDate(e.getDate() + 1);
+  }
+  
   return now >= s && now <= e;
 }
+
 function applySlotLock(){
   const prodDateISO = "<?= esc($date) ?>";
 
@@ -453,13 +456,16 @@ function applySlotLock(){
     }
   });
 
+  // Cari parent terluar (outer-td) agar tombol tambah NG dan baris NG ter-lock bersamaan
   document.querySelectorAll('.ng-add-btn').forEach(btn=>{
     const active = isSlotActive(prodDateISO, btn.dataset.start, btn.dataset.end);
     btn.disabled = !active;
+    const td = btn.closest('td.outer-td');
+    if(td) td.classList.toggle('slot-locked', !active);
   });
 
-  document.querySelectorAll('.ngSel, .ngQty').forEach(el=>{
-    const wrap = el.closest('td');
+  document.querySelectorAll('.ngSel, .ngQty, .btn-danger').forEach(el=>{
+    const wrap = el.closest('td.outer-td');
     const btn = wrap?.querySelector('.ng-add-btn');
     el.disabled = btn ? btn.disabled : false;
   });
@@ -485,19 +491,23 @@ function calcTotals(){
     }
   });
 }
+
 function calcSlotTotals(){
   document.querySelectorAll('.production-table').forEach(t=>{
-    const rows=t.querySelectorAll('tbody tr');
+    // Mencegah terhitungnya cell (td) yang ada di dalam tabel NG Mini dengan mengambil element children secara spesifik
+    const rows=t.querySelectorAll('tbody.shift-body > tr');
     const slots=t.querySelectorAll('.total-slot-target').length;
     let tg=Array(slots).fill(0),ok=Array(slots).fill(0),ng=Array(slots).fill(0);
 
     rows.forEach(r=>{
-      const cells=r.querySelectorAll('td');
+      const cells = r.children;
       for(let i=4;i<cells.length;i+=4){
         const idx=(i-4)/4;
-        tg[idx]+=+cells[i].innerText||0;
-        ok[idx]+=+(cells[i+1].querySelector('.ok')?.value||0);
-        ng[idx]+=+(cells[i+2].querySelector('.ng')?.value||0);
+        if(idx < slots) {
+            tg[idx]+=+cells[i].innerText||0;
+            ok[idx]+=+(cells[i+1]?.querySelector('.ok')?.value||0);
+            ng[idx]+=+(cells[i+2]?.querySelector('.ng')?.value||0);
+        }
       }
     });
 
@@ -509,6 +519,7 @@ function calcSlotTotals(){
     });
   });
 }
+
 function recalcAll(){ calcTotals(); calcSlotTotals(); }
 
 applySlotLock();

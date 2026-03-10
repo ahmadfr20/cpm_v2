@@ -192,7 +192,6 @@
 
               $exist = $shift['hourly_map'][(int)$item['machine_id']][(int)$item['product_id']][(int)$slot['id']] ?? null;
 
-              // ✅ detail NG
               $ngDetail = $shift['ng_detail_map'][(int)$item['machine_id']][(int)$item['product_id']][(int)$slot['id']] ?? [];
 
               $key = $shiftId.'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
@@ -219,7 +218,7 @@
                        name="items[<?= esc($key) ?>][ng]">
               </td>
 
-              <td class="text-start">
+              <td class="text-start outer-td">
                 <div class="ng-inline" data-key="<?= esc($key) ?>">
                   <div class="ng-inline-head">
                     <div class="meta">
@@ -249,7 +248,6 @@
                   </div>
                 </div>
 
-                <!-- hidden submit -->
                 <div class="ng-hidden d-none" id="ngHidden_<?= esc($key) ?>">
                   <?php foreach ($ngDetail as $idx => $d): ?>
                     <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][ng_category_id]" value="<?= (int)($d['ng_category_id'] ?? 0) ?>">
@@ -257,7 +255,6 @@
                   <?php endforeach; ?>
                 </div>
 
-                <!-- meta submit -->
                 <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shiftId ?>">
                 <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$item['machine_id'] ?>">
                 <input type="hidden" name="items[<?= esc($key) ?>][product_id]" value="<?= (int)$item['product_id'] ?>">
@@ -299,25 +296,6 @@
   </button>
 </form>
 
-<!-- <form method="post"
-      action="/machining/leak-test/hourly/finish-shift"
-      id="formFinishShift"
-      class="mt-2"
-      onsubmit="return confirm('Finish Shift Leak Test? Ini akan transfer WIP ke proses berikutnya.');">
-  <?= csrf_field() ?>
-  <input type="hidden" name="date" value="<?= esc($date) ?>">
-  <input type="hidden" name="shift_id" value="<?= esc($lastShift['id'] ?? '') ?>">
-
-  <button type="submit" class="btn btn-warning" id="btnFinishShift" <?= $isAdmin ? '' : 'disabled' ?>>
-    <i class="bi bi-check2-circle"></i>
-    Finish Shift (<?= esc($lastShift['shift_name'] ?? 'Shift 3') ?>)
-  </button>
-
-  <div class="small mt-1" id="finishHint">
-    <?= $isAdmin
-      ? 'ADMIN: Finish Shift bisa dilakukan kapan saja (override waktu).'
-      : 'Finish Shift aktif setelah slot terakhir shift berakhir.' ?>
-  </div> -->
 </form>
 
 <script>
@@ -465,7 +443,7 @@ function addNgRowInline(key){
   rows.push({ ng_category_id: 0, qty: 0 });
   writeNgHiddenFromRows(key, rows);
   renderNgTable(key);
-  recalcAll();
+  applySlotLock(); 
 }
 
 function deleteNgRowInline(key, idx){
@@ -488,6 +466,11 @@ document.addEventListener('change', function(e){
 
   rows[idx].ng_category_id = parseInt(sel.value||'0',10);
   writeNgHiddenFromRows(key, rows);
+
+  const cat = NG_CATEGORIES.find(x=>x.id === rows[idx].ng_category_id) || null;
+  const tr = sel.closest('tr');
+  const codeTd = tr ? tr.querySelector('.ng-no') : null;
+  if(codeTd) codeTd.textContent = cat ? cat.ng_code : '-';
 
   updateNgTotalUI(key, calcTotalNg(rows));
   recalcAll();
@@ -525,13 +508,35 @@ function parseTimeOnDate(dateISO, hhmmss){
   const t = String(hhmmss || '').slice(0,5);
   return new Date(`${dateISO}T${t}:00`);
 }
+
 function isSlotActive(prodDateISO, start, end){
   const now = new Date();
   let s = parseTimeOnDate(prodDateISO, start);
   let e = parseTimeOnDate(prodDateISO, end);
-  if (e <= s) e.setDate(e.getDate() + 1);
+
+  // Ambil jam (hour) saja dari slot
+  const startHour = parseInt(String(start).split(':')[0], 10);
+  const endHour = parseInt(String(end).split(':')[0], 10);
+
+  // LOGIKA SHIFT MALAM:
+  // Asumsi pabrik ganti hari di jam 07:00 Pagi.
+  // Maka jam 00:00 s/d 06:59 sudah masuk Hari Esok (Next Day)
+  if (startHour >= 0 && startHour < 7) {
+    s.setDate(s.getDate() + 1);
+  }
+  
+  if (endHour >= 0 && endHour < 7) {
+    e.setDate(e.getDate() + 1);
+  }
+
+  // Jika masih terbalik (Misal rentang 23:00 ke 00:00, atau 06:00 ke 07:00)
+  if (e <= s) {
+    e.setDate(e.getDate() + 1);
+  }
+
   return now >= s && now <= e;
 }
+
 function applySlotLock(){
   const prodDateISO = "<?= esc($date) ?>";
 
@@ -547,15 +552,17 @@ function applySlotLock(){
     }
   });
 
-  // Add NG ikut lock
+  // Add NG ikut lock (Cari parent outer-td)
   document.querySelectorAll('.ng-add-btn').forEach(btn=>{
     const active = isSlotActive(prodDateISO, btn.dataset.start, btn.dataset.end);
     btn.disabled = !active;
+    const td = btn.closest('td.outer-td'); 
+    if(td) td.classList.toggle('slot-locked', !active);
   });
 
-  // select & qty ikut lock
-  document.querySelectorAll('.ngSel, .ngQty').forEach(el=>{
-    const wrap = el.closest('td');
+  // Lock select & qty ikut status tombol Add NG
+  document.querySelectorAll('.ngSel, .ngQty, .btn-danger').forEach(el=>{
+    const wrap = el.closest('td.outer-td');
     const btn = wrap?.querySelector('.ng-add-btn');
     const locked = btn ? btn.disabled : false;
     el.disabled = locked;
@@ -586,17 +593,20 @@ function calcTotals(){
 
 function calcSlotTotals(){
   document.querySelectorAll('.production-table').forEach(t=>{
-    const rows=t.querySelectorAll('tbody tr');
-    const slots=t.querySelectorAll('.total-slot-target').length;
+    // Gunakan children agar tidak menghitung baris tabel NG di dalamnya
+    const rows = t.querySelectorAll('tbody.shift-body > tr');
+    const slots = t.querySelectorAll('.total-slot-target').length;
     let tg=Array(slots).fill(0),ok=Array(slots).fill(0),ng=Array(slots).fill(0);
 
     rows.forEach(r=>{
-      const cells=r.querySelectorAll('td');
+      const cells = r.children;
       for(let i=4;i<cells.length;i+=4){
         const idx=(i-4)/4;
-        tg[idx]+=+cells[i].innerText||0;
-        ok[idx]+=+(cells[i+1].querySelector('.ok')?.value||0);
-        ng[idx]+=+(cells[i+2].querySelector('.ng')?.value||0);
+        if(idx < slots) {
+            tg[idx]+=+cells[i].innerText||0;
+            ok[idx]+=+(cells[i+1]?.querySelector('.ok')?.value||0);
+            ng[idx]+=+(cells[i+2]?.querySelector('.ng')?.value||0);
+        }
       }
     });
 
@@ -621,9 +631,18 @@ document.addEventListener('input', recalcAll);
 function parseSlotEnd(dateStr, start, end){
   const s = new Date(`${dateStr}T${start}`);
   let e = new Date(`${dateStr}T${end}`);
-  if (e <= s) e.setDate(e.getDate() + 1);
+  
+  // Tangani perpindahan hari (Shift Malam)
+  const endHour = parseInt(String(end).split(':')[0], 10);
+  if (endHour >= 0 && endHour < 7) {
+      e.setDate(e.getDate() + 1);
+  } else if (e <= s) {
+      e.setDate(e.getDate() + 1);
+  }
+  
   return e;
 }
+
 function updateFinishShiftButton() {
   const btn = document.getElementById('btnFinishShift');
   const hint = document.getElementById('finishHint');
@@ -661,6 +680,7 @@ function updateFinishShiftButton() {
       : `Finish Shift aktif setelah slot terakhir berakhir (${String(end).slice(0,5)}).`;
   }
 }
+
 updateFinishShiftButton();
 setInterval(updateFinishShiftButton, 30000);
 </script>

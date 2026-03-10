@@ -55,8 +55,9 @@
         $pid = (int)$row['product_id'];
         $availBt = (int)($availableMap[$pid] ?? 0);
         $schedQty = (int)$row['scheduled_qty'];
-        // Limit max input ke nilai terkecil antara Target Schedule dan Stock di BT
-        $maxDeliver = min($schedQty, $availBt);
+        
+        // ✅ FIX: Form input akan aktif selama ada Target Sched
+        $maxDeliver = $schedQty;
       ?>
       <tr>
         <td><?= $i + 1 ?></td>
@@ -94,7 +95,7 @@
 </form>
 
 <script>
-// Validasi agar QTY Actual tidak melebihi Ready Stock / Sched Target
+// Validasi agar QTY Actual tidak melebihi Target Sched
 document.querySelectorAll('.qty-input').forEach(inp => {
   inp.addEventListener('input', () => {
     const maxVal = parseInt(inp.dataset.max || '0', 10);

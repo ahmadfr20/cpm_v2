@@ -13,15 +13,52 @@ class AsakaiController extends BaseController
         $section = trim((string)$this->request->getGet('section'));
         $export  = $this->request->getGet('export');
 
-        // Ambil list semua section (process_name) untuk dropdown filter
+        // =================================================================
+        // 1. DEFINISIKAN URUTAN PROSES (Tanpa FINISHED GOOD)
+        // =================================================================
+        $processOrder = [
+            'RAW MATERIAL',
+            'DIE CASTING',
+            'BURRYTORY',
+            'BARITORI',       // Tambahan antisipasi jika penulisan DB berbeda
+            'SAND BLASTING',
+            'SHOT BLASTING',  // Tambahan antisipasi jika penulisan DB berbeda
+            'MACHINING',
+            'LEAK TEST',
+            'JIG PLUG',
+            'ASSY BUSHING',
+            'ASSY SHAFT',
+            'PAINTING',
+            'FINAL INSPECTION'
+        ];
+
+        // Daftar nama proses yang ingin dikecualikan / di-hide dari Asakai
+        $excludedSections = ['FINISHED GOOD', 'FINISH GOOD'];
+
+        // Ambil list semua section (process_name) dari database
+        // dan kecualikan (exclude) Finished Good
         $allSections = $db->table('production_processes')
             ->select('process_name')
+            ->whereNotIn('process_name', $excludedSections)
             ->groupBy('process_name')
-            ->orderBy('process_name', 'ASC')
             ->get()
             ->getResultArray();
 
         $sectionsList = array_column($allSections, 'process_name');
+
+        // 2. LAKUKAN SORTING CUSTOM PADA PHP
+        usort($sectionsList, function ($a, $b) use ($processOrder) {
+            // Cari posisi index (Abaikan huruf besar/kecil dengan strtoupper)
+            $posA = array_search(strtoupper(trim($a)), $processOrder);
+            $posB = array_search(strtoupper(trim($b)), $processOrder);
+
+            // Jika nama proses dari DB tidak ada di daftar di atas, taruh di paling belakang (999)
+            $posA = ($posA === false) ? 999 : $posA;
+            $posB = ($posB === false) ? 999 : $posB;
+
+            // Bandingkan posisi
+            return $posA <=> $posB;
+        });
 
         // Ambil list Shift (aktif)
         $shifts = $db->table('shifts')
@@ -33,11 +70,16 @@ class AsakaiController extends BaseController
         $summaryData = [];
 
         if ($section === '') {
+            // Karena $sectionsList sudah diurutkan dan Finished Good dibuang,
+            // data summary yang akan ditarik dan ditampilkan juga otomatis sesuai
             foreach ($sectionsList as $sec) {
                 $summaryData[$sec] = $this->getSummaryData($db, $sec, $date, $shifts);
             }
         } else {
-            $summaryData[$section] = $this->getSummaryData($db, $section, $date, $shifts);
+            // Cek jika user memaksa akses section Finished Good via URL
+            if (!in_array(strtoupper($section), $excludedSections)) {
+                $summaryData[$section] = $this->getSummaryData($db, $section, $date, $shifts);
+            }
         }
 
         // =================================================================

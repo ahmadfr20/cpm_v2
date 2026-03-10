@@ -47,9 +47,9 @@
       <small class="text-muted">Mengambil data dari WIP Transfer Machining</small>
   </div>
   <div>
-      <button class="btn btn-warning fw-bold btn-sm rounded-pill px-3 me-1 text-dark" onclick="openApprovalModal()">
+      <!-- <button class="btn btn-warning fw-bold btn-sm rounded-pill px-3 me-1 text-dark" onclick="openApprovalModal()">
           <i class="bi bi-check-all me-1"></i> Approval Stok Harian
-      </button>
+      </button> -->
       <a href="<?= base_url('machining/daily-schedule/inventory?date='.$date) ?>" class="btn btn-primary fw-bold btn-sm rounded-pill px-3">
         <i class="bi bi-box-seam me-1"></i> Stock Area MC
       </a>

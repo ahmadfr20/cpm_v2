@@ -474,16 +474,37 @@ document.querySelectorAll('.ng-inline[data-key]').forEach(box=>{
   renderNgTable(key);
 });
 
-/* ========= SLOT LOCK ========= */
+/* ========= SLOT LOCK LOGIC (MENDUKUNG SHIFT 3 MALAM) ========= */
 function parseTimeOnDate(dateISO, hhmmss){
   const t = String(hhmmss || '').slice(0,5);
   return new Date(`${dateISO}T${t}:00`);
 }
+
 function isSlotActive(prodDateISO, start, end){
   const now = new Date();
   let s = parseTimeOnDate(prodDateISO, start);
   let e = parseTimeOnDate(prodDateISO, end);
-  if (e <= s) e.setDate(e.getDate() + 1);
+
+  // Ambil jam (hour) saja dari slot
+  const startHour = parseInt(String(start).split(':')[0], 10);
+  const endHour = parseInt(String(end).split(':')[0], 10);
+
+  // LOGIKA SHIFT MALAM:
+  // Asumsi pabrik ganti hari di jam 07:00 Pagi.
+  // Maka jam 00:00 s/d 06:59 sudah masuk Hari Esok (Next Day)
+  if (startHour >= 0 && startHour < 7) {
+    s.setDate(s.getDate() + 1);
+  }
+  
+  if (endHour >= 0 && endHour < 7) {
+    e.setDate(e.getDate() + 1);
+  }
+
+  // Jika masih terbalik (Misal rentang 23:00 ke 00:00, atau 06:00 ke 07:00)
+  if (e <= s) {
+    e.setDate(e.getDate() + 1);
+  }
+
   return now >= s && now <= e;
 }
 
@@ -504,7 +525,7 @@ function applySlotLock(){
   document.querySelectorAll('.ng-add-btn').forEach(btn=>{
     const active = isSlotActive(prodDateISO, btn.dataset.start, btn.dataset.end);
     btn.disabled = !active;
-    const td = btn.closest('td.outer-td'); // FIX 2: Cari parent terluar
+    const td = btn.closest('td.outer-td');
     if(td) td.classList.toggle('slot-locked', !active);
   });
 
@@ -541,7 +562,7 @@ function calcTotals(){
 
 function calcSlotTotals(){
   document.querySelectorAll('.production-table').forEach(t=>{
-    // FIX 3: Hanya ambil <tr> dari tabel utama, JANGAN masuk ke tabel NG dalam loop
+    // Hanya ambil <tr> dari tabel utama, JANGAN masuk ke tabel NG dalam loop
     const rows = t.querySelectorAll('tbody.shift-body > tr');
     const slots = t.querySelectorAll('.total-slot-target').length;
     let tg=Array(slots).fill(0), fg=Array(slots).fill(0), ng=Array(slots).fill(0);

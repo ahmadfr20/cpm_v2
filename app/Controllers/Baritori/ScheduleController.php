@@ -283,6 +283,7 @@ class ScheduleController extends BaseController
 
         $flow   = $this->getPrevNextProcessByFlow($db, $productId, $baritoriId);
         $prevId = (int)($flow['prev'] ?? 0);
+        $nextId = (int)($flow['next'] ?? 0); // Ambil next process
 
         if ($prevId <= 0) return redirect()->back()->with('error', 'Flow sebelumnya tidak ditemukan.');
 
@@ -307,15 +308,14 @@ class ScheduleController extends BaseController
             $itemId = $this->insertDailyScheduleItem($db, $dailyId, $shiftId, $machineId, $productId, $qty, $targetHr, $vendorId);
             if ($itemId <= 0) throw new \Exception('Gagal membuat daily_schedule_items.');
 
-            // PREV OUT: Stock Prev berkurang, berpindah menjadi Transfer
+            // 1. PREV OUT: Stock Prev berkurang
             $prevAfterStock    = max(0, $availablePrev - $qty);
-            $prevAfterTransfer = $transferPrev + $qty; 
             
             $prevWip = [
                 $wipDateCol       => $date,
                 'product_id'      => $productId,
                 'from_process_id' => $prevId,
-                'to_process_id'   => $prevId, // Tetap di process sebelumnya, hanya status yang berubah
+                'to_process_id'   => $prevId,
                 'qty'             => $qty,
                 'qty_in'          => 0,
                 'qty_out'         => $qty,
@@ -325,21 +325,64 @@ class ScheduleController extends BaseController
                 'status'          => 'DONE',
                 'created_at'      => $now,
             ];
-            if ($transferCol) $prevWip[$transferCol] = $prevAfterTransfer;
-            
-            // Simpan log pengurangan stok di proses sebelumnya
+            // Transfer prev tetap sama
+            if ($transferCol) $prevWip[$transferCol] = $transferPrev;
             $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $prevWip));
 
-            // CATATAN PENTING:
-            // Proses Baritori IN Dihapus!
-            // Baritori baru akan mencatat Qty In dan penambahan Stock pada saat proses Receiving.
-            // Logika "Send Next" juga dihapus karena tidak relevan mengirim barang ke Next Process
-            // saat barangnya baru saja dijadwalkan untuk dikerjakan Vendor (Baritori).
+            // 2. BARITORI IN: Qty_in bertambah & Stock Baritori bertambah
+            $barWipStatus      = $this->getLatestWip($db, $date, $baritoriId, $productId);
+            $barBeforeStock    = $barWipStatus['stock'];
+            $barBeforeTransfer = $barWipStatus['transfer'];
+            
+            // Tambahkan qty ke Stock Baritori
+            $barAfterStock     = $barBeforeStock + $qty;
+
+            $barIn = [
+                $wipDateCol       => $date,
+                'product_id'      => $productId,
+                'from_process_id' => $prevId,
+                'to_process_id'   => $baritoriId,
+                'qty'             => $qty,
+                'qty_in'          => $qty, // Masuk ke Qty In Baritori
+                'qty_out'         => 0,
+                $stockCol         => $barAfterStock, // Stock Baritori terisi
+                'source_table'    => 'daily_schedule_items',
+                'source_id'       => $itemId,
+                'status'          => 'DONE',
+                'created_at'      => $now,
+            ];
+            // Transfer baritori tetap
+            if ($transferCol) $barIn[$transferCol] = $barBeforeTransfer; 
+            $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $barIn));
+
+            // 3. NEXT PROCESS TRANSFER: Kolom transfer di proses selanjutnya terisi
+            if ($nextId > 0 && $transferCol) {
+                $nextWipStatus    = $this->getLatestWip($db, $date, $nextId, $productId);
+                $nextBeforeStock  = $nextWipStatus['stock'];
+                $nextAfterTransfer = $nextWipStatus['transfer'] + $qty; // Transfer proses selanjutnya bertambah
+
+                $nextWip = [
+                    $wipDateCol       => $date,
+                    'product_id'      => $productId,
+                    'from_process_id' => $baritoriId,
+                    'to_process_id'   => $nextId,
+                    'qty'             => $qty,
+                    'qty_in'          => 0,
+                    'qty_out'         => 0,
+                    $stockCol         => $nextBeforeStock, // Stock proses selanjutnya belum bertambah (masih tetap)
+                    $transferCol      => $nextAfterTransfer, // HANYA transfer yang terisi
+                    'source_table'    => 'daily_schedule_items',
+                    'source_id'       => $itemId,
+                    'status'          => 'DONE',
+                    'created_at'      => $now,
+                ];
+                $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $nextWip));
+            }
 
             if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
 
-            return redirect()->back()->with('success', 'Schedule Baritori & Alokasi Vendor tersimpan. Stock dialihkan ke transfer.');
+            return redirect()->back()->with('success', 'Schedule Baritori tersimpan. Stock & Qty In Baritori terisi, serta Transfer di proses selanjutnya telah ditambahkan.');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', 'Gagal simpan: ' . $e->getMessage());
