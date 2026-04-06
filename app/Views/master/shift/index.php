@@ -17,7 +17,7 @@
   }
 
   .shift-table{
-    min-width: 1700px;
+    min-width: 1200px;
     margin:0;
     border-collapse: separate;
     border-spacing: 0;
@@ -46,13 +46,13 @@
   .shift-table tbody tr:nth-child(even) td{ background: var(--stripe); }
   .shift-table tbody tr:hover td{ background: var(--rowHover); }
 
-  .w-sec{ width:140px; }
-  .w-days{ width:110px; }
+  .w-sec{ width:120px; }
+  .w-days{ width:90px; }
   .w-shift{ width:60px; text-align:center; font-weight:800; }
-  .w-time{ width:85px; text-align:center; font-weight:700; }
-  .w-slot{ width:190px; }
-  .w-total{ width:120px; text-align:right; font-weight:900; }
-  .w-action{ width:130px; text-align:center; }
+  .w-time{ width:70px; text-align:center; font-weight:700; }
+  .w-slots{ min-width:350px; }
+  .w-total{ width:100px; text-align:right; font-weight:900; }
+  .w-action{ width:120px; text-align:center; }
 
   .cell-muted{ color:#777; font-size:12px; line-height: 1.2; }
   .btn-mini{ padding:4px 10px; }
@@ -73,17 +73,48 @@
   .select2-container--default .select2-selection--single .select2-selection__arrow{ height: 32px; }
   .select2-container{ width:100% !important; }
   .select2-results__option{ font-size: 13px; }
+  
+  /* Styling nomor slot */
+  .slot-number {
+    font-size: 11px;
+    min-width: 22px;
+    text-align: center;
+  }
 </style>
 
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 
+<?php 
+$optsHtml = '<option value="">-- pilih --</option>';
+foreach ($timeSlots as $ts) {
+    $tsId = (int)$ts['id'];
+    $st = substr((string)$ts['time_start'], 0, 5);
+    $en = substr((string)$ts['time_end'], 0, 5);
+    
+    $mins = 0;
+    if ($st && $en) {
+        $sArr = explode(':', $st);
+        $eArr = explode(':', $en);
+        $mStart = ((int)$sArr[0] * 60) + (int)$sArr[1];
+        $mEnd   = ((int)$eArr[0] * 60) + (int)$eArr[1];
+        if ($mEnd <= $mStart) $mEnd += 1440;
+        $mins = $mEnd - $mStart;
+    }
+    $label = $st . ' - ' . $en;
+    $optsHtml .= sprintf(
+        '<option value="%d" data-start="%s" data-end="%s" data-minutes="%d">%s</option>',
+        $tsId, esc($st, 'attr'), esc($en, 'attr'), $mins, esc($label)
+    );
+}
+?>
+
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <h4 class="mb-0">Master Shift</h4>
     <small class="text-muted">
-      Slot hanya 1 kolom (Time Slot). Begin / End & Total Minutes otomatis dihitung.
+      Slot bebas ditambahkan/dihapus sesuai kebutuhan shift.
     </small>
   </div>
 
@@ -115,11 +146,7 @@
         <th class="w-shift">shift</th>
         <th class="w-time">begin</th>
         <th class="w-time">end</th>
-
-        <?php for($i=1;$i<=10;$i++): ?>
-          <th class="w-slot">slot <?= $i ?></th>
-        <?php endfor; ?>
-
+        <th class="w-slots">time slots (berurutan)</th>
         <th class="w-total">total minutes</th>
         <th class="w-action">edit</th>
       </tr>
@@ -128,72 +155,51 @@
     <tbody>
     <?php if (empty($shifts)): ?>
       <tr>
-        <td colspan="18" class="text-center text-muted py-4">Tidak ada data shift.</td>
+        <td colspan="8" class="text-center text-muted py-4">Tidak ada data shift.</td>
       </tr>
     <?php else: ?>
       <?php foreach ($shifts as $s): ?>
         <?php $isNew = ((int)($newShiftId ?? 0) === (int)$s['id']); ?>
         <tr id="shift-row-<?= (int)$s['id'] ?>" class="<?= $isNew ? 'row-highlight' : '' ?>">
-          <form method="post" action="/master/shift/update-slots/<?= (int)$s['id'] ?>" class="rowForm">
-            <?= csrf_field() ?>
+          
+          <form method="post" action="/master/shift/update-slots/<?= (int)$s['id'] ?>" id="form-<?= (int)$s['id'] ?>"></form>
+          <?= csrf_field() ?>
+          <input type="hidden" name="<?= csrf_token() ?>" value="<?= csrf_hash() ?>" form="form-<?= (int)$s['id'] ?>">
 
-            <td class="w-sec"><?= esc($s['section']) ?></td>
-            <td class="w-days"><?= esc($s['days_label']) ?></td>
-            <td class="w-shift"><?= (int)$s['shift_no'] ?></td>
+          <td class="w-sec"><?= esc($s['section']) ?></td>
+          <td class="w-days"><?= esc($s['days_label']) ?></td>
+          <td class="w-shift"><?= (int)$s['shift_no'] ?></td>
 
-            <td class="w-time"><span class="beginTxt"><?= esc($s['begin'] ?: '-') ?></span></td>
-            <td class="w-time"><span class="endTxt"><?= esc($s['end'] ?: '-') ?></span></td>
+          <td class="w-time"><span class="beginTxt"><?= esc($s['begin']) ?></span></td>
+          <td class="w-time"><span class="endTxt"><?= esc($s['end']) ?></span></td>
 
-            <?php for($i=1;$i<=10;$i++): ?>
-              <?php
-                $slot = $s['slots'][$i] ?? ['time_slot_id'=>null,'start'=>'','end'=>'','minutes'=>0];
-                $selectedId = $slot['time_slot_id'];
-              ?>
-              <td class="w-slot">
-                <select class="form-select form-select-sm slotSelect"
-                        name="slots[<?= $i ?>]"
-                        data-slot="<?= $i ?>">
-                  <option value="">-- pilih --</option>
+          <td class="w-slots">
+            <div class="d-flex flex-wrap align-items-center gap-2 slot-container">
+              <?php foreach($s['slots'] as $idx => $slot): ?>
+                <div class="slot-item d-flex align-items-center border rounded bg-white p-1">
+                  <span class="badge bg-secondary me-1 slot-number"><?= $idx + 1 ?></span>
+                  
+                  <select class="form-select form-select-sm slotSelect" name="slots[]" style="width:140px;" form="form-<?= (int)$s['id'] ?>">
+                    <?= str_replace('value="'.$slot['time_slot_id'].'"', 'value="'.$slot['time_slot_id'].'" selected', $optsHtml) ?>
+                  </select>
+                  <button type="button" class="btn btn-sm text-danger btn-remove-slot ms-1 px-1 py-0 border-0" title="Hapus Slot"><i class="bi bi-x-circle-fill"></i></button>
+                </div>
+              <?php endforeach; ?>
+              
+              <button type="button" class="btn btn-sm btn-outline-primary btn-add-slot">+ Slot</button>
+            </div>
+          </td>
 
-                  <?php foreach ($timeSlots as $ts): ?>
-                    <?php
-                      $tsId = (int)$ts['id'];
-                      $st = substr((string)$ts['time_start'], 0, 5);
-                      $en = substr((string)$ts['time_end'], 0, 5);
+          <td class="w-total"><span class="totalMinutes"><?= (int)$s['total_minutes'] ?></span></td>
 
-                      $mins = 0;
-                      $t1 = strtotime((string)$ts['time_start']);
-                      $t2 = strtotime((string)$ts['time_end']);
-                      if ($t1 !== false && $t2 !== false && $t2 > $t1) $mins = (int)(($t2-$t1)/60);
-
-                      // ✅ label hanya jam start - end
-                      $label = $st . ' - ' . $en;
-                    ?>
-                    <option
-                      value="<?= $tsId ?>"
-                      <?= ($selectedId === $tsId) ? 'selected' : '' ?>
-                      data-start="<?= esc($st,'attr') ?>"
-                      data-end="<?= esc($en,'attr') ?>"
-                      data-minutes="<?= (int)$mins ?>"
-                    >
-                      <?= esc($label) ?>
-                    </option>
-                  <?php endforeach; ?>
-                </select>
-              </td>
-            <?php endfor; ?>
-
-            <td class="w-total"><span class="totalMinutes"><?= (int)$s['total_minutes'] ?></span></td>
-
-            <td class="w-action">
-              <button type="submit" class="btn btn-sm btn-warning btn-mini">
-                <i class="bi bi-save"></i> Update
-              </button>
-              <div class="cell-muted mt-1">
-                #<?= esc($s['shift_code'] ?: $s['shift_name']) ?>
-              </div>
-            </td>
-          </form>
+          <td class="w-action">
+            <button type="submit" form="form-<?= (int)$s['id'] ?>" class="btn btn-sm btn-warning btn-mini">
+              <i class="bi bi-save"></i> Update
+            </button>
+            <div class="cell-muted mt-1">
+              #<?= esc($s['shift_code'] ?: $s['shift_name']) ?>
+            </div>
+          </td>
         </tr>
       <?php endforeach; ?>
     <?php endif; ?>
@@ -201,7 +207,6 @@
   </table>
 </div>
 
-<!-- ===================== MODAL ADD SHIFT ===================== -->
 <div class="modal fade" id="modalAddShift" tabindex="-1" aria-hidden="true">
   <div class="modal-dialog modal-lg">
     <div class="modal-content">
@@ -236,7 +241,7 @@
 
             <div class="col-md-8 d-flex align-items-end">
               <div class="text-muted">
-                Setelah disimpan, shift baru muncul sebagai <b>row kosong</b> untuk diisi slot.
+                Setelah disimpan, shift baru muncul sebagai <b>row kosong</b>. Silakan gunakan tombol <b>+ Slot</b> untuk merakit slot waktunya.
               </div>
             </div>
           </div>
@@ -253,44 +258,98 @@
   </div>
 </div>
 
+<template id="slot-template">
+  <div class="slot-item d-flex align-items-center border rounded bg-white p-1">
+    <span class="badge bg-secondary me-1 slot-number">#</span>
+    <select class="form-select form-select-sm slotSelect" name="slots[]" style="width:140px;">
+      <?= $optsHtml ?>
+    </select>
+    <button type="button" class="btn btn-sm text-danger btn-remove-slot ms-1 px-1 py-0 border-0" title="Hapus Slot"><i class="bi bi-x-circle-fill"></i></button>
+  </div>
+</template>
+
 <script>
 (function(){
-  function initSelect2(){
-    $('.slotSelect').select2({
-      width: '100%',
+  // Initialize select2
+  function initSelect2(container) {
+    container.find('.slotSelect:not(.select2-hidden-accessible)').select2({
+      width: '140px',
       placeholder: '-- pilih --',
       allowClear: true
     });
   }
-  initSelect2();
 
-  function recalcRow($form){
-    let total = 0, begin = '', end = '';
+  // Initial render
+  initSelect2($('body'));
 
-    $form.find('.slotSelect').each(function(){
-      const opt = this.options[this.selectedIndex];
-      const st = opt?.dataset?.start || '';
-      const en = opt?.dataset?.end || '';
-      const mins = parseInt(opt?.dataset?.minutes || '0', 10) || 0;
+  // Logic presisi: Menghitung baris dan update nomor urut
+  function recalcRow($tr){
+    let total = 0;
+    let validSlots = [];
 
-      if (!begin && st) begin = st;
-      if (en) end = en;
-      total += mins;
+    // 1. Kumpulkan data slot dan re-numbering
+    $tr.find('.slot-item').each(function(index){
+      // Update nomor badge berurutan (1, 2, 3...)
+      $(this).find('.slot-number').text(index + 1);
+
+      const select = $(this).find('.slotSelect');
+      if (select.val()) {
+        const opt = select[0].options[select[0].selectedIndex];
+        validSlots.push({
+          st: opt?.dataset?.start || '',
+          en: opt?.dataset?.end || '',
+          mins: parseInt(opt?.dataset?.minutes || '0', 10) || 0
+        });
+      }
     });
 
-    $form.find('.totalMinutes').text(total);
-    $form.find('.beginTxt').text(begin || '-');
-    $form.find('.endTxt').text(end || '-');
+    // 2. Kalkulasi begin, end, dan total menit
+    let begin = '-';
+    let end = '-';
+    if (validSlots.length > 0) {
+      begin = validSlots[0].st;
+      end = validSlots[validSlots.length - 1].en;
+      validSlots.forEach(s => { total += s.mins; });
+    }
+
+    $tr.find('.totalMinutes').text(total);
+    $tr.find('.beginTxt').text(begin);
+    $tr.find('.endTxt').text(end);
   }
 
+  // Trigger rekalkulasi saat nilai dropdown berubah
   $(document).on('change', '.slotSelect', function(){
-    recalcRow($(this).closest('form'));
+    recalcRow($(this).closest('tr'));
   });
 
-  $('form.rowForm').each(function(){
-    recalcRow($(this));
+  // Action: Tambah Slot Dinamis
+  $(document).on('click', '.btn-add-slot', function() {
+    const tr = $(this).closest('tr');
+    const formId = tr.find('form').attr('id'); // Ikat dengan form row tersebut
+    
+    // Ambil template
+    const template = document.getElementById('slot-template').content.cloneNode(true);
+    const select = template.querySelector('select');
+    select.setAttribute('form', formId); // Bind form HTML5
+    
+    // Masukkan ke depan tombol Add
+    $(this).before(template);
+    
+    // Init select2 pada elemen yang baru di-add
+    initSelect2(tr);
+    // Kalkulasi ulang (termasuk update nomor urut)
+    recalcRow(tr);
   });
 
+  // Action: Hapus Slot Dinamis
+  $(document).on('click', '.btn-remove-slot', function() {
+    const tr = $(this).closest('tr');
+    $(this).closest('.slot-item').remove();
+    // Kalkulasi ulang (nomor urut akan otomatis bergeser merapat)
+    recalcRow(tr);
+  });
+
+  // Auto scroll saat shift baru ditambahkan
   const newShiftId = <?= (int)($newShiftId ?? 0) ?>;
   if (newShiftId > 0) {
     const el = document.getElementById('shift-row-' + newShiftId);

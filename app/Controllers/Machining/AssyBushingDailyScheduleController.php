@@ -33,11 +33,10 @@ class AssyBushingDailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * PROCESS ID Assy Bushing (robust)
+     * PROCESS ID Assy Bushing
      * ===================================================== */
     private function getProcessIdAssyBushing($db): int
     {
-        // 1) by process_code AB
         if ($db->fieldExists('process_code', 'production_processes')) {
             $row = $db->table('production_processes')->select('id')
                 ->where('process_code', 'AB')
@@ -45,7 +44,6 @@ class AssyBushingDailyScheduleController extends BaseController
             if ($row && !empty($row['id'])) return (int)$row['id'];
         }
 
-        // 2) exact name
         $exact = ['Assy Bushing', 'ASSY BUSHING', 'AssyBushing', 'ASSYBUSHING', 'AB'];
         foreach ($exact as $name) {
             $row = $db->table('production_processes')->select('id')
@@ -54,7 +52,6 @@ class AssyBushingDailyScheduleController extends BaseController
             if ($row && !empty($row['id'])) return (int)$row['id'];
         }
 
-        // 3) like
         $row = $db->table('production_processes')->select('id')
             ->like('process_name', 'BUSHING')
             ->get()->getRowArray();
@@ -64,29 +61,35 @@ class AssyBushingDailyScheduleController extends BaseController
     }
 
     /* =====================================================
-     * SHIFT seconds
+     * SHIFT Minutes
      * ===================================================== */
-    private function getTotalSecondShift($db, int $shiftId): int
+    private function getTotalMinuteShift($db, int $shiftId, ?int $endSlotId = null): int
     {
         if (!$db->tableExists('shift_time_slots') || !$db->tableExists('time_slots')) {
             return 0;
         }
 
         $slots = $db->table('shift_time_slots sts')
-            ->select('ts.time_start, ts.time_end')
+            ->select('ts.id, ts.time_start, ts.time_end')
             ->join('time_slots ts', 'ts.id = sts.time_slot_id')
             ->where('sts.shift_id', $shiftId)
+            ->orderBy('sts.id', 'ASC')
             ->get()->getResultArray();
 
-        $totalSecond = 0;
+        $totalMinute = 0;
         foreach ($slots as $s) {
             $start = strtotime($s['time_start']);
             $end   = strtotime($s['time_end']);
-            if ($end <= $start) $end += 86400;
-            $totalSecond += ($end - $start);
+            if ($end <= $start) $end += 86400; // Lewat tengah malam
+            
+            $totalMinute += (int)(($end - $start) / 60);
+            
+            if ($endSlotId !== null && (int)$s['id'] === $endSlotId) {
+                break; 
+            }
         }
 
-        return (int)$totalSecond;
+        return $totalMinute;
     }
 
     /* =====================================================
@@ -96,45 +99,49 @@ class AssyBushingDailyScheduleController extends BaseController
     {
         if (!$db->tableExists('product_process_flows')) return false;
 
-        return $db->table('product_process_flows')
+        $q = $db->table('product_process_flows')
             ->where('product_id', $productId)
-            ->where('process_id', $processId)
-            ->where('is_active', 1)
-            ->countAllResults() > 0;
+            ->where('process_id', $processId);
+
+        if ($db->fieldExists('is_active', 'product_process_flows')) {
+            $q->where('is_active', 1);
+        }
+
+        return $q->countAllResults() > 0;
     }
 
     /* =====================================================
-     * resolve PREV process by flow (sequence < current)
+     * resolve PREV process by flow
      * ===================================================== */
     private function resolvePrevProcessByFlow($db, int $productId, int $currentProcessId): ?int
     {
         if (!$db->tableExists('product_process_flows')) return null;
 
-        $currentFlow = $db->table('product_process_flows')
+        $curQ = $db->table('product_process_flows')
             ->select('sequence')
-            ->where([
-                'product_id' => $productId,
-                'process_id' => $currentProcessId,
-                'is_active'  => 1,
-            ])
-            ->orderBy('sequence', 'ASC')
-            ->get()
-            ->getRowArray();
+            ->where('product_id', $productId)
+            ->where('process_id', $currentProcessId);
 
+        if ($db->fieldExists('is_active', 'product_process_flows')) {
+            $curQ->where('is_active', 1);
+        }
+
+        $currentFlow = $curQ->orderBy('sequence', 'ASC')->get()->getRowArray();
         if (!$currentFlow) return null;
+
         $curSeq = (int)$currentFlow['sequence'];
 
-        $prevFlow = $db->table('product_process_flows')
+        $prevQ = $db->table('product_process_flows')
             ->select('process_id, sequence')
             ->where('product_id', $productId)
-            ->where('is_active', 1)
-            ->where('sequence <', $curSeq)
-            ->orderBy('sequence', 'DESC')
-            ->get()
-            ->getRowArray();
+            ->where('sequence <', $curSeq);
 
-        if (!$prevFlow) return null;
-        return (int)$prevFlow['process_id'];
+        if ($db->fieldExists('is_active', 'product_process_flows')) {
+            $prevQ->where('is_active', 1);
+        }
+
+        $prevFlow = $prevQ->orderBy('sequence', 'DESC')->get()->getRowArray();
+        return $prevFlow ? (int)$prevFlow['process_id'] : null;
     }
 
     /* =====================================================
@@ -145,7 +152,7 @@ class AssyBushingDailyScheduleController extends BaseController
         if ($db->fieldExists('production_date', 'production_wip')) return 'production_date';
         if ($db->fieldExists('schedule_date', 'production_wip'))   return 'schedule_date';
         if ($db->fieldExists('wip_date', 'production_wip'))        return 'wip_date';
-        throw new \Exception('Tabel production_wip tidak punya kolom tanggal (production_date / schedule_date / wip_date).');
+        throw new \Exception('production_wip tidak punya kolom tanggal (production_date / schedule_date / wip_date).');
     }
 
     /* =====================================================
@@ -168,7 +175,7 @@ class AssyBushingDailyScheduleController extends BaseController
     }
 
     /* =========================================================
-     * Ambil ROW stock terbaru untuk prev process (carry-over)
+     * Ambil ROW stock terbaru untuk prev process
      * ========================================================= */
     private function getPrevProcessLatestRow($db, string $date, int $productId, int $prevProcessId): ?array
     {
@@ -181,26 +188,22 @@ class AssyBushingDailyScheduleController extends BaseController
         $builder = $db->table('production_wip pw')
             ->select("pw.id, pw.$stockCol as stock_val, pw.transfer, pw.qty_in, pw.qty_out")
             ->where('pw.product_id', $productId)
-            ->where('pw.to_process_id', $prevProcessId);
-
-        $builder->where("DATE(pw.$dateCol) <=", $date, false);
+            ->where('pw.to_process_id', $prevProcessId)
+            ->where("DATE(pw.$dateCol) <=", $date, false);
 
         $row = $builder
             ->orderBy("DATE(pw.$dateCol)", 'DESC', false)
             ->orderBy("pw.id", 'DESC')
-            ->get()
-            ->getRowArray();
+            ->get()->getRowArray();
 
         if ($row) return $row;
 
-        // fallback latest
         return $db->table('production_wip pw')
             ->select("pw.id, pw.$stockCol as stock_val, pw.transfer, pw.qty_in, pw.qty_out")
             ->where('pw.product_id', $productId)
             ->where('pw.to_process_id', $prevProcessId)
             ->orderBy("pw.id", 'DESC')
-            ->get()
-            ->getRowArray();
+            ->get()->getRowArray();
     }
 
     private function getPrevProcessStock($db, string $date, int $productId, int $prevProcessId): int
@@ -210,7 +213,7 @@ class AssyBushingDailyScheduleController extends BaseController
     }
 
     /* =========================================================
-     * Reserve/Release prev -> next:
+     * Reserve/Release prev -> next
      * ========================================================= */
     private function applyPrevReserveToNext($db, string $date, int $productId, int $prevProcessId, int $deltaQty): void
     {
@@ -251,13 +254,8 @@ class AssyBushingDailyScheduleController extends BaseController
      * Incoming WIP untuk Assy Bushing saat schedule
      * ========================================================= */
     private function upsertIncomingWipForAssyBushing(
-        $db,
-        string $date,
-        int $productId,
-        int $fromPrevProcessId,
-        int $toAssyProcessId,
-        int $scheduleItemId,
-        int $deltaQty
+        $db, string $date, int $productId, int $fromPrevProcessId,
+        int $toAssyProcessId, int $scheduleItemId, int $deltaQty
     ): void {
         if ($deltaQty === 0) return;
         if (!$db->tableExists('production_wip')) return;
@@ -294,9 +292,9 @@ class AssyBushingDailyScheduleController extends BaseController
                 'qty_in' => $newQtyIn,
                 'status' => ($newQtyIn > 0) ? 'WAITING' : ($exist['status'] ?? 'WAITING'),
             ];
-            if ($hasQty)    $upd['qty'] = $newQtyIn;
+            if ($hasQty) $upd['qty'] = $newQtyIn;
             if ($hasQtyOut) $upd['qty_out'] = (int)($exist['qty_out'] ?? 0);
-            if ($hasStock)  $upd['stock'] = 0;
+            if ($hasStock) $upd['stock'] = 0;
             if ($db->fieldExists('transfer', 'production_wip')) $upd['transfer'] = (int)($exist['transfer'] ?? 0);
             if ($hasUpdatedAt) $upd['updated_at'] = $now;
 
@@ -311,9 +309,9 @@ class AssyBushingDailyScheduleController extends BaseController
             'qty_in' => $insQty,
             'status' => 'WAITING',
         ];
-        if ($hasQty)    $ins['qty'] = $insQty;
+        if ($hasQty) $ins['qty'] = $insQty;
         if ($hasQtyOut) $ins['qty_out'] = 0;
-        if ($hasStock)  $ins['stock'] = 0;
+        if ($hasStock) $ins['stock'] = 0;
         if ($db->fieldExists('transfer', 'production_wip')) $ins['transfer'] = 0;
         if ($hasCreatedAt) $ins['created_at'] = $now;
         if ($hasUpdatedAt) $ins['updated_at'] = $now;
@@ -340,6 +338,41 @@ class AssyBushingDailyScheduleController extends BaseController
             ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
             ->get()->getResultArray();
 
+        $dailySchedules = $db->table('daily_schedules')
+            ->where('schedule_date', $date)
+            ->where('section', 'Assy Bushing')
+            ->get()->getResultArray();
+            
+        $shiftEndSlots = [];
+        foreach ($dailySchedules as $ds) {
+            $shiftEndSlots[$ds['shift_id']] = $ds['end_time_slot_id'];
+        }
+
+        $shiftSlots = [];
+        foreach ($shifts as &$shift) {
+            $slots = $db->table('shift_time_slots sts')
+                ->select('ts.id as time_slot_id, ts.time_start, ts.time_end')
+                ->join('time_slots ts', 'ts.id = sts.time_slot_id')
+                ->where('sts.shift_id', (int)$shift['id'])
+                ->orderBy('sts.id', 'ASC')
+                ->get()->getResultArray();
+
+            $totalMinute = 0;
+            foreach ($slots as &$s) {
+                $start = strtotime($s['time_start']);
+                $end   = strtotime($s['time_end']);
+                if ($end <= $start) $end += 86400;
+                
+                $mins = (int)(($end - $start) / 60);
+                $s['minutes'] = $mins;
+                $s['label']   = substr($s['time_start'], 0, 5) . ' - ' . substr($s['time_end'], 0, 5);
+                $totalMinute += $mins;
+            }
+            $shift['total_minute'] = $totalMinute;
+            $shiftSlots[$shift['id']] = $slots;
+        }
+        unset($shift);
+
         $machines = $db->table('machines m')
             ->select('m.id, m.machine_code, m.machine_name, m.line_position')
             ->join('production_processes pp', 'pp.id = m.process_id', 'left')
@@ -348,15 +381,16 @@ class AssyBushingDailyScheduleController extends BaseController
             ->get()->getResultArray();
 
         $existing = $db->table('daily_schedule_items dsi')
-            ->select('ds.shift_id, dsi.machine_id, dsi.product_id, dsi.cycle_time, dsi.target_per_shift')
+            ->select('ds.id schedule_id, ds.shift_id, dsi.machine_id, dsi.product_id, dsi.cycle_time, dsi.target_per_shift')
             ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
             ->where('ds.schedule_date', $date)
             ->where('ds.section', 'Assy Bushing')
             ->get()->getResultArray();
 
+        // Mengizinkan multi-row untuk satu mesin di shift yang sama
         $planMap = [];
         foreach ($existing as $e) {
-            $planMap[$e['shift_id'].'_'.$e['machine_id']] = $e;
+            $planMap[$e['shift_id']][$e['machine_id']][] = $e;
         }
 
         $actualMap = [];
@@ -368,86 +402,107 @@ class AssyBushingDailyScheduleController extends BaseController
                 ->get()->getResultArray();
 
             foreach ($actuals as $a) {
-                $actualMap[$a['shift_id'].'_'.$a['machine_id'].'_'.$a['product_id']] = $a;
+                $actualMap[$a['shift_id'] . '_' . $a['machine_id'] . '_' . $a['product_id']] = $a;
             }
         }
 
         return view('machining/assy_bushing_schedule/index', [
-            'date'      => $date,
-            'shifts'    => $shifts,
-            'machines'  => $machines,
-            'planMap'   => $planMap,
-            'actualMap' => $actualMap
+            'date'          => $date,
+            'shifts'        => $shifts,
+            'shiftSlots'    => $shiftSlots,
+            'shiftEndSlots' => $shiftEndSlots,
+            'machines'      => $machines,
+            'planMap'       => $planMap,
+            'actualMap'     => $actualMap
         ]);
     }
 
     /* =====================================================
-     * AJAX: product + target + stock_prev (untuk view)
+     * AJAX Select2: product + target + stock_prev
      * ===================================================== */
     public function getProductAndTarget()
     {
-        $db        = db_connect();
-        $machineId = (int)($this->request->getGet('machine_id') ?? 0);
-        $shiftId   = (int)($this->request->getGet('shift_id') ?? 0);
-        $date      = (string)($this->request->getGet('date') ?? date('Y-m-d'));
+        $db      = db_connect();
+        $shiftId = (int)($this->request->getGet('shift_id') ?? 0);
+        $date    = (string)($this->request->getGet('date') ?? date('Y-m-d'));
+        $term = trim((string)($this->request->getGet('term') ?? ''));
+        $q    = trim((string)($this->request->getGet('q') ?? ''));
+        $search = ($term !== '') ? $term : $q;
 
-        if ($shiftId <= 0) return $this->response->setJSON([]);
-
-        $processIdAB = $this->getProcessIdAssyBushing($db);
-        $totalSecond = $this->getTotalSecondShift($db, $shiftId);
-        $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
-
-        $q = $db->table('product_process_flows ppf')
-            ->select('p.id, p.part_no, p.part_name, p.cavity, p.efficiency_rate' 
-                . ($hasCtMach ? ', p.cycle_time_machining' : ', p.cycle_time'))
-            ->join('products p', 'p.id = ppf.product_id')
-            ->where('ppf.is_active', 1)
-            ->where('p.is_active', 1)
-            ->where('ppf.process_id', $processIdAB);
-
-        if ($machineId > 0 && $db->tableExists('machine_products')) {
-            $q->join(
-                'machine_products mp',
-                'mp.product_id = p.id AND mp.machine_id = '.$machineId.' AND mp.is_active=1',
-                'left'
-            );
+        if ($shiftId <= 0) {
+            return $this->response->setJSON(['results' => []]);
         }
 
-        $products = $q->groupBy('p.id')
-            ->orderBy('p.part_no', 'ASC')
-            ->get()->getResultArray();
+        try {
+            $processIdAB = $this->getProcessIdAssyBushing($db);
+            $totalMinute = $this->getTotalMinuteShift($db, $shiftId); 
 
-        $out = [];
-        foreach ($products as $p) {
-            $pid    = (int)($p['id'] ?? 0);
-            
-            // Prioritaskan cycle_time_machining
-            $cycle  = $hasCtMach ? (int)($p['cycle_time_machining'] ?? 0) : (int)($p['cycle_time'] ?? 0);
-            $cavity = (int)($p['cavity'] ?? 0);
+            $hasCtMach = $db->fieldExists('cycle_time_machining', 'products');
 
-            $effRaw = (float)($p['efficiency_rate'] ?? 100.0);
-            $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
+            $builder = $db->table('product_process_flows ppf')
+                ->select('p.id, p.part_no, p.part_name, p.cavity, p.efficiency_rate'
+                    . ($hasCtMach ? ', p.cycle_time_machining' : ', p.cycle_time'))
+                ->join('products p', 'p.id = ppf.product_id', 'inner')
+                ->where('ppf.process_id', $processIdAB);
 
-            $targetShift = 0;
-            if ($totalSecond > 0 && $cycle > 0 && $cavity > 0) {
-                $targetShift = (int)min(floor(($totalSecond / $cycle) * $cavity * $eff), 1200);
+            if ($db->fieldExists('is_active', 'product_process_flows')) {
+                $builder->where('ppf.is_active', 1);
+            }
+            if ($db->fieldExists('is_active', 'products')) {
+                $builder->where('p.is_active', 1);
             }
 
-            $prevId = $this->resolvePrevProcessByFlow($db, $pid, $processIdAB);
-            $stockPrev = $prevId ? $this->getPrevProcessStock($db, $date, $pid, (int)$prevId) : 0;
+            if ($search !== '') {
+                $builder->groupStart()
+                    ->like('p.part_no', $search)
+                    ->orLike('p.part_name', $search)
+                    ->groupEnd();
+            }
 
-            $out[] = [
-                'id'               => $pid,
-                'part_no'          => (string)($p['part_no'] ?? ''),
-                'part_name'        => (string)($p['part_name'] ?? ''),
-                'cycle_time_used'  => $cycle,
-                'target_per_shift' => $targetShift,
-                'prev_process_id'  => (int)($prevId ?? 0),
-                'stock_prev'       => (int)$stockPrev,
-            ];
+            $products = $builder
+                ->groupBy('p.id')
+                ->orderBy('p.part_no', 'ASC')
+                ->limit(50)
+                ->get()->getResultArray();
+
+            $results = [];
+            foreach ($products as $p) {
+                $pid    = (int)($p['id'] ?? 0);
+                $cycle  = $hasCtMach ? (int)($p['cycle_time_machining'] ?? 0) : (int)($p['cycle_time'] ?? 0);
+                $cavity = (int)($p['cavity'] ?? 0);
+                $effRaw = (float)($p['efficiency_rate'] ?? 100.0);
+                $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
+
+                $targetShift = 0;
+                $targetHour  = 0;
+
+                if ($cycle > 0 && $cavity > 0) {
+                    if ($totalMinute > 0) {
+                        $targetShift = (int)floor((($totalMinute * 60) / $cycle) * $cavity * $eff);
+                    }
+                    $targetHour = (int)floor((3600 / $cycle) * $cavity * $eff);
+                }
+
+                $prevId = $this->resolvePrevProcessByFlow($db, $pid, $processIdAB);
+                $stockPrev = $prevId ? $this->getPrevProcessStock($db, $date, $pid, (int)$prevId) : 0;
+
+                $results[] = [
+                    'id' => $pid,
+                    'text' => trim((string)($p['part_no'] ?? '').' - '.(string)($p['part_name'] ?? '')),
+                    'cycle_time_used'  => $cycle, 
+                    'target_per_shift' => min($targetShift, 1200),
+                    'target_per_hour'  => (int)$targetHour,
+                    'prev_process_id'  => (int)($prevId ?? 0),
+                    'stock_prev'       => (int)$stockPrev,
+                ];
+            }
+
+            return $this->response->setJSON(['results' => $results]);
+
+        } catch (\Throwable $e) {
+            log_message('error', 'AssyBushing getProductAndTarget error: ' . $e->getMessage());
+            return $this->response->setJSON(['results' => []]);
         }
-
-        return $this->response->setJSON($out);
     }
 
     /* =====================================================
@@ -458,6 +513,8 @@ class AssyBushingDailyScheduleController extends BaseController
         $db    = db_connect();
         $date  = trim((string)($this->request->getPost('date') ?? ''));
         $items = $this->request->getPost('items');
+        
+        $shiftEndSlots = $this->request->getPost('shift_end_slots') ?? [];
 
         if ($date === '' || !preg_match('/^\d{4}-\d{2}-\d{2}$/', $date) || !$items || !is_array($items)) {
             return redirect()->back()->with('error', 'Data tidak valid');
@@ -468,10 +525,13 @@ class AssyBushingDailyScheduleController extends BaseController
 
         $processIdAB = $this->getProcessIdAssyBushing($db);
         $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
+        $hasEndSlotCol = $db->fieldExists('end_time_slot_id', 'daily_schedules');
         $now = date('Y-m-d H:i:s');
 
         $db->transBegin();
         try {
+            $activeSchedules = [];
+
             foreach ($items as $row) {
                 $shiftId   = (int)($row['shift_id'] ?? 0);
                 $machineId = (int)($row['machine_id'] ?? 0);
@@ -479,23 +539,19 @@ class AssyBushingDailyScheduleController extends BaseController
 
                 if ($shiftId <= 0 || $machineId <= 0) continue;
 
-                $planInput = (int)($row['target_per_shift'] ?? 0);
+                $planInput = (int)($row['plan'] ?? 0);
                 if ($planInput < 0) $planInput = 0;
                 if ($planInput > 1200) $planInput = 1200;
 
-                if ($productId <= 0) continue;
+                $endSlotId = !empty($shiftEndSlots[$shiftId]) ? (int)$shiftEndSlots[$shiftId] : null;
 
-                if (!$this->validateProductHasFlow($db, $productId, $processIdAB)) {
-                    throw new \Exception("Product ID {$productId} tidak punya flow Assy Bushing aktif.");
-                }
-
+                // 1. HEADER (daily_schedules)
                 $schedule = $db->table('daily_schedules')
                     ->where([
                         'schedule_date' => $date,
                         'shift_id'      => $shiftId,
                         'section'       => 'Assy Bushing',
-                    ])
-                    ->get()->getRowArray();
+                    ])->get()->getRowArray();
 
                 if (!$schedule) {
                     $header = [
@@ -506,91 +562,125 @@ class AssyBushingDailyScheduleController extends BaseController
                         'created_at'    => $now,
                     ];
                     if ($db->fieldExists('process_id', 'daily_schedules')) $header['process_id'] = $processIdAB;
-                    if ($db->fieldExists('updated_at', 'daily_schedules')) $header['updated_at'] = $now;
-
+                    if ($hasEndSlotCol) $header['end_time_slot_id'] = $endSlotId;
+                    
                     $db->table('daily_schedules')->insert($header);
                     $scheduleId = (int)$db->insertID();
                 } else {
                     $scheduleId = (int)$schedule['id'];
+                    $upd = ['updated_at' => $now];
+                    
                     if ($db->fieldExists('process_id', 'daily_schedules') && empty($schedule['process_id'])) {
-                        $upd = ['process_id' => $processIdAB];
-                        if ($db->fieldExists('updated_at', 'daily_schedules')) $upd['updated_at'] = $now;
-                        $db->table('daily_schedules')->where('id', $scheduleId)->update($upd);
+                        $upd['process_id'] = $processIdAB;
                     }
+                    if ($hasEndSlotCol) $upd['end_time_slot_id'] = $endSlotId;
+                    
+                    $db->table('daily_schedules')->where('id', $scheduleId)->update($upd);
                 }
 
+                if (!isset($activeSchedules[$scheduleId])) {
+                    $activeSchedules[$scheduleId] = [];
+                }
+
+                if ($productId <= 0 || $planInput <= 0) continue;
+
+                if (!$this->validateProductHasFlow($db, $productId, $processIdAB)) {
+                    throw new \Exception("Product ID {$productId} tidak punya flow Assy Bushing aktif.");
+                }
+
+                // Cek Item
                 $existItem = $db->table('daily_schedule_items')
-                    ->where([
-                        'daily_schedule_id' => $scheduleId,
-                        'machine_id'        => $machineId,
-                    ])
+                    ->where(['daily_schedule_id' => $scheduleId, 'machine_id' => $machineId, 'product_id' => $productId])
                     ->get()->getRowArray();
 
-                $oldProductId = $existItem ? (int)($existItem['product_id'] ?? 0) : 0;
-                $oldPlan      = $existItem ? (int)($existItem['target_per_shift'] ?? 0) : 0;
-
+                $oldPlan = $existItem ? (int)($existItem['target_per_shift'] ?? 0) : 0;
                 $prevProcessIdNew = $this->resolvePrevProcessByFlow($db, $productId, $processIdAB);
 
-                if ($existItem && $oldProductId > 0 && $oldProductId !== $productId) {
-                    $prevOld = $this->resolvePrevProcessByFlow($db, $oldProductId, $processIdAB);
-                    if ($prevOld && $oldPlan > 0) {
-                        $this->applyPrevReserveToNext($db, $date, $oldProductId, $prevOld, -$oldPlan);
-                        $this->upsertIncomingWipForAssyBushing($db, $date, $oldProductId, $prevOld, $processIdAB, (int)$existItem['id'], -$oldPlan);
-                    }
-                    $oldPlan = 0;
-                }
-
-                $product = $db->table('products')
-                    ->select('cavity, efficiency_rate' . ($hasCtMach ? ', cycle_time_machining' : ', cycle_time'))
-                    ->where('id', $productId)
-                    ->get()->getRowArray();
-
-                if (!$product) throw new \Exception("Product ID {$productId} tidak ditemukan.");
-
-                // Memakai cycle_time_machining
-                $cycle  = $hasCtMach ? (int)($product['cycle_time_machining'] ?? 0) : (int)($product['cycle_time'] ?? 0);
-                $cavity = (int)($product['cavity'] ?? 0);
-                if ($cycle <= 0 || $cavity <= 0) {
-                    throw new \Exception("Cycle time / cavity belum valid untuk Product ID {$productId}.");
-                }
-
-                $effRaw = (float)($product['efficiency_rate'] ?? 100.0);
-                $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
-                $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
-
-                $dataItem = [
-                    'daily_schedule_id' => $scheduleId,
-                    'shift_id'          => $shiftId,
-                    'machine_id'        => $machineId,
-                    'product_id'        => $productId,
-                    'cycle_time'        => $cycle, // Disimpan sebagai info historis
-                    'cavity'            => $cavity,
-                    'target_per_hour'   => $targetPerHour,
-                    'target_per_shift'  => $planInput,
-                    'is_selected'       => ($planInput > 0) ? 1 : 0,
-                ];
-
-                if ($existItem) {
-                    $db->table('daily_schedule_items')->where('id', (int)$existItem['id'])->update($dataItem);
-                    $itemId = (int)$existItem['id'];
-                } else {
-                    if ($planInput <= 0) continue;
-                    $db->table('daily_schedule_items')->insert($dataItem);
+                if (!$existItem) {
+                    $db->table('daily_schedule_items')->insert([
+                        'daily_schedule_id' => $scheduleId,
+                        'shift_id'          => $shiftId,
+                        'machine_id'        => $machineId,
+                        'product_id'        => $productId,
+                        'cycle_time'        => 0, // diisi nanti
+                        'cavity'            => 0,
+                        'target_per_hour'   => 0,
+                        'target_per_shift'  => 0,
+                        'is_selected'       => 0,
+                    ]);
                     $itemId = (int)$db->insertID();
+                } else {
+                    $itemId = (int)$existItem['id'];
                 }
 
+                // Kalkulasi Selisih Reserve WIP
                 if ($prevProcessIdNew) {
                     $delta = $planInput - $oldPlan;
-
                     if ($delta > 0) {
                         $stockPrev = $this->getPrevProcessStock($db, $date, $productId, $prevProcessIdNew);
                         if ($stockPrev <= 0) throw new \Exception("Stock kosong pada proses sebelumnya untuk Product ID {$productId}.");
                         if ($delta > $stockPrev) throw new \Exception("Scheduling tambahan ({$delta}) > stock ({$stockPrev}) untuk Product ID {$productId}.");
                     }
-
                     if ($delta !== 0) {
                         $this->applyPrevReserveToNext($db, $date, $productId, $prevProcessIdNew, $delta);
                         $this->upsertIncomingWipForAssyBushing($db, $date, $productId, $prevProcessIdNew, $processIdAB, $itemId, $delta);
+                    }
+                }
+
+                // Update detail item sesungguhnya array push
+                $product = $db->table('products')
+                    ->select('cavity, efficiency_rate' . ($hasCtMach ? ', cycle_time_machining' : ', cycle_time'))
+                    ->where('id', $productId)->get()->getRowArray();
+                
+                $cycle  = $hasCtMach ? (int)($product['cycle_time_machining'] ?? 0) : (int)($product['cycle_time'] ?? 0);
+                $cavity = (int)($product['cavity'] ?? 0);
+                $effRaw = (float)($product['efficiency_rate'] ?? 100.0);
+                $eff    = $effRaw > 0 ? ($effRaw / 100.0) : 1.0;
+                $targetPerHour = (int)floor((3600 / $cycle) * $cavity * $eff);
+
+                $activeSchedules[$scheduleId][] = [
+                    'daily_schedule_id' => $scheduleId,
+                    'shift_id'          => $shiftId,
+                    'machine_id'        => $machineId,
+                    'product_id'        => $productId,
+                    'cycle_time'        => $cycle,
+                    'cavity'            => $cavity,
+                    'target_per_hour'   => $targetPerHour,
+                    'target_per_shift'  => $planInput,
+                    'is_selected'       => 1,
+                ];
+            }
+
+            // Replace jadwal item secara masal di tiap shift
+            foreach ($activeSchedules as $schId => $itemsToInsert) {
+                // Jangan dihapus karena bisa merusak relasi Source_id di WIP. Kita update yang cocok, hapus yang tidak cocok.
+                $existingRows = $db->table('daily_schedule_items')->where('daily_schedule_id', $schId)->get()->getResultArray();
+                $existingMap = [];
+                foreach($existingRows as $er) {
+                    $existingMap[$er['machine_id'].'_'.$er['product_id']] = $er['id'];
+                }
+
+                $keysToKeep = [];
+                foreach ($itemsToInsert as $it) {
+                    $k = $it['machine_id'].'_'.$it['product_id'];
+                    $keysToKeep[] = $k;
+                    if(isset($existingMap[$k])) {
+                        $db->table('daily_schedule_items')->where('id', $existingMap[$k])->update($it);
+                    } else {
+                        $db->table('daily_schedule_items')->insert($it);
+                    }
+                }
+                
+                // Jika ada data di DB yang sudah tidak dikirim form lagi, artinya dihapus user (Plan 0). Return WIP-nya
+                foreach($existingRows as $er) {
+                    $k = $er['machine_id'].'_'.$er['product_id'];
+                    if(!in_array($k, $keysToKeep)) {
+                         $prevOld = $this->resolvePrevProcessByFlow($db, $er['product_id'], $processIdAB);
+                         if ($prevOld && $er['target_per_shift'] > 0) {
+                             $this->applyPrevReserveToNext($db, $date, $er['product_id'], $prevOld, -$er['target_per_shift']);
+                             $this->upsertIncomingWipForAssyBushing($db, $date, $er['product_id'], $prevOld, $processIdAB, (int)$er['id'], -$er['target_per_shift']);
+                         }
+                         $db->table('daily_schedule_items')->where('id', $er['id'])->delete();
                     }
                 }
             }
@@ -642,7 +732,6 @@ class AssyBushingDailyScheduleController extends BaseController
         $productData = [];
 
         if ($db->tableExists($tbl)) {
-            // Ambil max stock terakhir khusus untuk process Assy Bushing
             $query = $db->table($tbl . ' w')
                 ->select('w.product_id, p.part_no, p.part_name, w.'.$colStock.' as current_stock')
                 ->join('products p', 'p.id = w.product_id', 'inner')
@@ -660,7 +749,6 @@ class AssyBushingDailyScheduleController extends BaseController
 
             foreach ($query as $row) {
                 $qty = (int)$row['current_stock'];
-                
                 if($qty > 0) {
                     $productData[] = [
                         'part_no'     => $row['part_no'],

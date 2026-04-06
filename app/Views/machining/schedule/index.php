@@ -47,9 +47,6 @@
       <small class="text-muted">Mengambil data dari WIP Transfer Machining</small>
   </div>
   <div>
-      <!-- <button class="btn btn-warning fw-bold btn-sm rounded-pill px-3 me-1 text-dark" onclick="openApprovalModal()">
-          <i class="bi bi-check-all me-1"></i> Approval Stok Harian
-      </button> -->
       <a href="<?= base_url('machining/daily-schedule/inventory?date='.$date) ?>" class="btn btn-primary fw-bold btn-sm rounded-pill px-3">
         <i class="bi bi-box-seam me-1"></i> Stock Area MC
       </a>
@@ -74,152 +71,167 @@
     </div>
 </div>
 
-<?php foreach ($shifts as $shift): ?>
-  <div class="card shadow-sm border-0 mb-4">
-      <div class="card-header bg-white py-3 border-bottom">
-          <h5 class="mb-0 fw-bold text-primary"><i class="bi bi-clock-history me-2"></i><?= esc($shift['shift_name']) ?></h5>
+<form method="post" action="/machining/daily-schedule/store" class="mc-form">
+    <?= csrf_field() ?>
+    <input type="hidden" name="date" value="<?= esc($date) ?>">
+
+    <?php foreach ($shifts as $shift): ?>
+      <div class="card shadow-sm border-0 mb-4">
+          <div class="card-header bg-white py-3 border-bottom d-flex justify-content-between align-items-center">
+              <h5 class="mb-0 fw-bold text-primary"><i class="bi bi-clock-history me-2"></i><?= esc($shift['shift_name']) ?></h5>
+          </div>
+          
+          <div class="card-body bg-light border-bottom py-2">
+             <div class="d-flex align-items-center gap-3">
+                 <label class="fw-bold mb-0 text-dark"><i class="bi bi-stop-circle"></i> Waktu Berakhir Shift:</label>
+                 <div style="min-width: 250px;">
+                     <select class="form-select form-select-sm shift-end-select" name="shift_end_slots[<?= $shift['id'] ?>]" data-shift="<?= (int)$shift['id'] ?>">
+                        <?php 
+                          $savedEndId = $shiftEndSlots[$shift['id']] ?? null;
+                          $lastSlotId = !empty($shiftSlots[$shift['id']]) ? end($shiftSlots[$shift['id']])['time_slot_id'] : null;
+                          $activeEndId = $savedEndId ?: $lastSlotId;
+                        ?>
+                        <?php foreach ($shiftSlots[$shift['id']] as $slot): ?>
+                          <?php $sel = ($activeEndId == $slot['time_slot_id']) ? 'selected' : ''; ?>
+                          <option value="<?= $slot['time_slot_id'] ?>" data-seconds="<?= $slot['seconds'] ?>" <?= $sel ?>><?= $slot['label'] ?></option>
+                        <?php endforeach; ?>
+                     </select>
+                 </div>
+                 <div class="ms-auto fs-6 text-end">
+                     <span class="text-muted">Waktu Produksi:</span> 
+                     <span class="shift-net-minutes text-primary fw-bold fs-5 ms-1" data-shift="<?= (int)$shift['id'] ?>" data-net="0">
+                         0 Menit
+                     </span>
+                 </div>
+             </div>
+          </div>
+
+          <div class="card-body p-0">
+              <div class="table-responsive">
+                  <table class="table table-hover table-bordered mb-0 align-middle text-center" id="table-shift-<?= $shift['id'] ?>">
+                    <thead class="table-light">
+                      <tr>
+                        <th style="width:60px">Line</th>
+                        <th style="width:160px">Mesin</th>
+                        <th style="width:350px" class="text-start">Part Details</th>
+                        <th style="width:80px">CT</th>
+                        <th style="width:130px">Stock Ready</th>
+                        <th style="width:130px" class="text-primary">Planning</th>
+                        <th style="width:90px">Actual</th>
+                        <th style="min-width:140px;">Dandori & Waktu</th>
+                        <th style="width:60px">Hapus</th>
+                      </tr>
+                    </thead>
+
+                    <tbody id="tbody-shift-<?= $shift['id'] ?>">
+                    <?php 
+                    foreach ($machines as $m):
+                      $rows = $planMap[$shift['id']][$m['id']] ?? [[]]; 
+                      
+                      foreach ($rows as $plan):
+                          $uuid = uniqid('row_'); 
+                          $prodId = $plan['product_id'] ?? '';
+                          $actKey  = $shift['id'].'_'.$m['id'].'_'.$prodId;
+                          $actual  = $actualMap[$actKey]['act'] ?? 0;
+                          
+                          // Ambil data dandori dari map
+                          $dandoriData = $dandoriMap[$shift['id']][$m['id']][$prodId] ?? null;
+                          $isDandori = $dandoriData !== null;
+                          $dandoriTimeSlotId = $isDandori ? $dandoriData : '';
+                    ?>
+                      <tr class="schedule-row" data-shift="<?= (int)$shift['id'] ?>">
+                        <td class="text-muted fw-bold td-line"><?= esc($m['line_position']) ?></td>
+
+                        <td>
+                          <select class="form-select form-select-sm machine-select fw-bold" name="items[<?= $uuid ?>][machine_id]">
+                            <?php foreach ($machines as $mach): ?>
+                              <option value="<?= $mach['id'] ?>" data-line="<?= esc($mach['line_position']) ?>" <?= ($mach['id'] == $m['id']) ? 'selected' : '' ?>>
+                                <?= esc($mach['line_position'] . ' - ' . $mach['machine_code']) ?>
+                              </option>
+                            <?php endforeach ?>
+                          </select>
+                        </td>
+
+                        <td class="text-start">
+                          <select class="form-select form-select-sm product-select w-100"
+                                  data-machine="<?= (int)$m['id'] ?>"
+                                  data-shift="<?= (int)$shift['id'] ?>"
+                                  data-selected="<?= esc($prodId) ?>"
+                                  name="items[<?= $uuid ?>][product_id]">
+                            <option value="">-- Cari Part Number --</option>
+                          </select>
+                        </td>
+
+                        <td>
+                          <input type="text" class="form-control form-control-sm text-center cycle-time border-0 bg-transparent" value="<?= esc($plan['cycle_time'] ?? '') ?>" readonly>
+                        </td>
+
+                        <td class="text-center">
+                          <div class="stock-container">
+                              <span class="badge-stock stock-badge" data-val="0">0</span>
+                              <div class="ng-badge-container"></div>
+                          </div>
+                        </td>
+
+                        <td>
+                          <input type="number"
+                                 class="form-control text-center plan-input fw-bold text-primary"
+                                 name="items[<?= $uuid ?>][plan]"
+                                 min="0"
+                                 max="1200"
+                                 value="<?= esc($plan['target_per_shift'] ?? '') ?>">
+                        </td>
+
+                        <td>
+                          <input type="text" class="form-control text-center actual-display bg-light border-0" value="<?= esc($actual) ?>" readonly>
+                        </td>
+
+                        <td>
+                          <div class="form-check form-switch d-flex justify-content-center mb-1">
+                            <input class="form-check-input border-warning dandori-toggle" type="checkbox" role="switch" 
+                                   name="items[<?= $uuid ?>][is_dandori]" value="1" <?= $isDandori ? 'checked' : '' ?>>
+                          </div>
+                          
+                          <div class="dandori-time-container <?= $isDandori ? '' : 'd-none' ?>">
+                              <select class="form-select form-select-sm dandori-time-select bg-warning-subtle" name="items[<?= $uuid ?>][dandori_time_slot_id]">
+                                  <option value="">-- Set Waktu --</option>
+                                  <?php foreach ($shiftSlots[$shift['id']] as $slot): ?>
+                                      <option value="<?= $slot['time_slot_id'] ?>" <?= ($dandoriTimeSlotId == $slot['time_slot_id']) ? 'selected' : '' ?>>
+                                          <?= $slot['label'] ?>
+                                      </option>
+                                  <?php endforeach; ?>
+                              </select>
+                          </div>
+                        </td>
+
+                        <td>
+                          <button type="button" class="btn btn-sm btn-outline-danger btn-remove-row" title="Hapus Baris">
+                            <i class="bi bi-trash"></i>
+                          </button>
+                        </td>
+
+                        <input type="hidden" name="items[<?= $uuid ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
+                      </tr>
+                    <?php endforeach; ?>
+                    <?php endforeach; ?>
+                    </tbody>
+                  </table>
+              </div>
+          </div>
+          <div class="card-footer bg-white text-start">
+             <button type="button" class="btn btn-sm btn-outline-primary fw-bold btn-add-machine" data-shift="<?= $shift['id'] ?>">
+                <i class="bi bi-plus-circle"></i> Tambah Mesin di Shift Ini
+             </button>
+          </div>
       </div>
-      <div class="card-body p-0">
-          <form method="post" action="/machining/daily-schedule/store" class="mc-form">
-            <?= csrf_field() ?>
-            <input type="hidden" name="date" value="<?= esc($date) ?>">
-
-            <div class="table-responsive">
-                <table class="table table-hover table-bordered mb-0 align-middle text-center">
-                  <thead class="table-light">
-                    <tr>
-                      <th style="width:60px">Line</th>
-                      <th style="width:120px">Mesin</th>
-                      <th style="width:350px" class="text-start">Part Details</th>
-                      <th style="width:80px">CT</th>
-                      <th style="width:150px">Stock Ready (MC)</th>
-                      <th style="width:140px" class="text-primary">Planning (Target)</th>
-                      <th style="width:100px">Actual</th>
-                    </tr>
-                  </thead>
-
-                  <tbody>
-                  <?php foreach ($machines as $idx => $machine):
-                      $keyPlan = $shift['id'].'_'.$machine['id'];
-                      $plan    = $planMap[$keyPlan] ?? null;
-
-                      $actKey  = $shift['id'].'_'.$machine['id'].'_'.($plan['product_id'] ?? 0);
-                      $actual  = $actualMap[$actKey]['act'] ?? 0;
-                  ?>
-                    <tr>
-                      <td class="text-muted fw-bold"><?= esc($machine['line_position']) ?></td>
-
-                      <td>
-                          <div class="fw-bold text-dark"><?= esc($machine['machine_code']) ?></div>
-                          <div class="small text-muted" style="font-size: 11px;"><?= esc($machine['machine_name']) ?></div>
-                      </td>
-
-                      <td class="text-start">
-                        <select class="form-select form-select-sm product-select w-100"
-                                data-machine="<?= (int)$machine['id'] ?>"
-                                data-shift="<?= (int)$shift['id'] ?>"
-                                data-selected="<?= esc($plan['product_id'] ?? '') ?>"
-                                name="items[<?= $idx ?>][product_id]">
-                          <option value="">-- Cari Part Number --</option>
-                        </select>
-                      </td>
-
-                      <td>
-                        <input type="text" class="form-control form-control-sm text-center cycle-time border-0 bg-transparent" value="<?= esc($plan['cycle_time'] ?? '') ?>" readonly>
-                      </td>
-
-                      <td class="text-center">
-                        <div class="stock-container">
-                            <span class="badge-stock stock-badge" data-val="0">0</span>
-                            <div class="ng-badge-container"></div>
-                        </div>
-                      </td>
-
-                      <td>
-                        <input type="number"
-                               class="form-control text-center plan-input fw-bold text-primary"
-                               name="items[<?= $idx ?>][plan]"
-                               min="0"
-                               max="1200"
-                               value="<?= esc($plan['target_per_shift'] ?? '') ?>">
-                      </td>
-
-                      <td>
-                        <input type="text" class="form-control text-center bg-light border-0" value="<?= esc($actual) ?>" readonly>
-                      </td>
-
-                      <input type="hidden" name="items[<?= $idx ?>][machine_id]" value="<?= (int)$machine['id'] ?>">
-                      <input type="hidden" name="items[<?= $idx ?>][shift_id]" value="<?= (int)$shift['id'] ?>">
-                    </tr>
-                  <?php endforeach ?>
-                  </tbody>
-                </table>
-            </div>
-
-            <div class="p-3 bg-light border-top text-end">
-                <button type="submit" class="btn btn-primary px-4 rounded-pill">
-                  <i class="bi bi-save me-1"></i> Simpan Jadwal <?= esc($shift['shift_name']) ?>
-                </button>
-            </div>
-          </form>
-      </div>
-  </div>
-<?php endforeach ?>
-
-
-<div class="modal fade" id="modalApproval" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header bg-light">
-                <h5 class="modal-title fw-bold"><i class="bi bi-clipboard-check text-success me-2"></i> Approval Stok & Reject Harian</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body">
-                
-                <div class="alert alert-info d-flex justify-content-between align-items-center">
-                    <div>
-                        <h6 class="fw-bold mb-1">Tanggal Transfer: <span id="appDate">Memuat...</span></h6>
-                        <div id="appStatus">Memuat Status...</div>
-                    </div>
-                </div>
-
-                <div class="row">
-                    <div class="col-md-6">
-                        <h6 class="fw-bold text-success"><i class="bi bi-box-seam"></i> Part Masuk (OK)</h6>
-                        <table class="table table-sm table-bordered">
-                            <thead class="table-light">
-                                <tr><th>Part No</th><th class="text-end">Qty</th></tr>
-                            </thead>
-                            <tbody id="appTblFg">
-                                <tr><td colspan="2" class="text-center">Memuat...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                    
-                    <div class="col-md-6">
-                        <h6 class="fw-bold text-danger"><i class="bi bi-x-octagon"></i> Reject Sebelum MC (NG)</h6>
-                        <table class="table table-sm table-bordered">
-                            <thead class="table-light">
-                                <tr><th>Part No</th><th>Kategori NG</th><th class="text-end">Qty</th></tr>
-                            </thead>
-                            <tbody id="appTblNg">
-                                <tr><td colspan="3" class="text-center">Memuat...</td></tr>
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer bg-light">
-                <form action="/machining/daily-schedule/approve" method="post">
-                    <?= csrf_field() ?>
-                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Tutup</button>
-                    <button type="submit" class="btn btn-success fw-bold" id="btnApprove"><i class="bi bi-check-lg"></i> Approve Data Ini</button>
-                </form>
-            </div>
-        </div>
+    <?php endforeach ?>
+    
+    <div class="position-sticky bottom-0 bg-white p-3 border-top shadow-sm d-flex justify-content-end mt-3 z-3">
+        <button type="submit" class="btn btn-primary px-4 rounded-pill">
+          <i class="bi bi-save me-1"></i> Simpan Jadwal Keseluruhan
+        </button>
     </div>
-</div>
-
+</form>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
@@ -251,7 +263,6 @@ function updateStockDisplay(row, stockVal, ngVal, ngListHtml){
   badge.textContent = stock.toLocaleString('id-ID');
   badge.classList.toggle('zero', stock <= 0);
 
-  // Tampilkan Label NG menggunakan atribut Data-BS-Toggle untuk Popover Bootstrap
   if(ng > 0) {
       ngContainer.innerHTML = `<span class="badge bg-danger ng-badge shadow-sm" 
                                      data-bs-toggle="popover" 
@@ -263,7 +274,6 @@ function updateStockDisplay(row, stockVal, ngVal, ngListHtml){
                                  <i class="bi bi-exclamation-octagon me-1"></i> NG Before MC: ${ng}
                                </span>`;
                                
-      // Inisialisasi popover untuk elemen yang baru dirender
       const popoverTriggerList = row.querySelectorAll('[data-bs-toggle="popover"]')
       const popoverList = [...popoverTriggerList].map(popoverTriggerEl => new bootstrap.Popover(popoverTriggerEl))
   } else {
@@ -288,7 +298,8 @@ async function loadProducts(selectEl) {
       opt.textContent = `${p.part_no} - ${p.part_name}`;
 
       opt.dataset.ct = p.cycle_time_used || '';
-      opt.dataset.targetShift = p.target_per_shift || 0;
+      opt.dataset.cavity = p.cavity || 0;
+      opt.dataset.eff = p.efficiency_rate || 100;
       opt.dataset.stockReady = p.stock_ready || 0; 
       opt.dataset.ngBefore = p.ng_before_total || 0;     
       opt.dataset.ngList = p.ng_before_list || '';     
@@ -299,6 +310,10 @@ async function loadProducts(selectEl) {
     initSelect2(selectEl);
 
     if (selectedId) {
+      const row = selectEl.closest('tr');
+      const planEl = row.querySelector('.plan-input');
+      if (planEl) planEl.dataset.manual = "1";
+      
       $(selectEl).val(String(selectedId)).trigger('change');
     } else {
       $(selectEl).trigger('change');
@@ -336,6 +351,58 @@ function validatePlanAgainstStock(row, showAlert = true) {
   return true;
 }
 
+function calculatePlan(row) {
+    const shiftId = row.dataset.shift;
+    const netSpan = document.querySelector(`.shift-net-minutes[data-shift="${shiftId}"]`);
+    
+    const netMins = parseInt(netSpan?.dataset.net || 0);
+    const netSecs = netMins * 60; 
+
+    const selectEl = row.querySelector('.product-select');
+    const planEl   = row.querySelector('.plan-input');
+    const opt = selectEl ? selectEl.selectedOptions[0] : null;
+
+    if (opt && opt.value) {
+        const cycle = parseInt(opt.dataset.ct || 0);
+        const cavity = parseInt(opt.dataset.cavity || 0);
+        const eff = parseFloat(opt.dataset.eff || 100) / 100;
+
+        if (cycle > 0) {
+            const autoTarget = Math.floor((netSecs / cycle) * cavity * eff);
+            if (!planEl.dataset.manual) {
+                planEl.value = autoTarget;
+            }
+        }
+    }
+    
+    validatePlanAgainstStock(row, false);
+}
+
+$(document).on('change', '.shift-end-select', function() {
+    const shiftId = this.dataset.shift;
+    let totalMins = 0;
+    let found = false;
+
+    Array.from(this.options).forEach(opt => {
+        if (found) return;
+        const secs = parseInt(opt.dataset.seconds || 0);
+        totalMins += Math.floor(secs / 60); 
+        if (opt.selected) found = true; 
+    });
+
+    const netSpan = document.querySelector(`.shift-net-minutes[data-shift="${shiftId}"]`);
+    if (netSpan) {
+        netSpan.dataset.net = totalMins;
+        netSpan.innerText = `${totalMins} Menit`;
+    }
+
+    document.querySelectorAll(`tr.schedule-row[data-shift="${shiftId}"]`).forEach(tr => {
+        const planEl = tr.querySelector('.plan-input');
+        if (planEl) planEl.dataset.manual = ""; 
+        calculatePlan(tr);
+    });
+});
+
 $(document).on('change', '.product-select', function() {
   const selectEl = this;
   const opt = selectEl.selectedOptions[0];
@@ -346,7 +413,10 @@ $(document).on('change', '.product-select', function() {
 
   if (!opt || !selectEl.value) {
     if (ctEl) ctEl.value = '';
-    if (planEl) planEl.removeAttribute('data-stock-ready');
+    if (planEl) {
+        planEl.removeAttribute('data-stock-ready');
+        planEl.value = '';
+    }
     updateStockDisplay(row, 0, 0, '');
     return;
   }
@@ -358,8 +428,6 @@ $(document).on('change', '.product-select', function() {
   const ngList     = opt.dataset.ngList || '';
   
   planEl.dataset.stockReady = String(stockReady);
-
-  // Update UI Stock dan Hover NG List
   updateStockDisplay(row, stockReady, ngBefore, ngList);
 
   if (stockReady <= 0) {
@@ -369,22 +437,127 @@ $(document).on('change', '.product-select', function() {
   }
 
   if (!planEl.value || planEl.value == 0) {
-    planEl.value = parseInt(opt.dataset.targetShift || '0', 10);
+    planEl.dataset.manual = ""; 
   }
-
-  validatePlanAgainstStock(row, true);
+  
+  calculatePlan(row);
 });
 
 $(document).on('input', '.plan-input', function() {
+  this.dataset.manual = "1";
   const row = this.closest('tr');
   validatePlanAgainstStock(row, true);
 });
 
+// Aksi Toggle Dandori
+$(document).on('change', '.dandori-toggle', function() {
+    const container = $(this).closest('td').find('.dandori-time-container');
+    const selectBox = container.find('.dandori-time-select');
+    
+    if (this.checked) {
+        container.removeClass('d-none');
+        selectBox.prop('required', true); 
+    } else {
+        container.addClass('d-none');
+        selectBox.val('');
+        selectBox.prop('required', false);
+    }
+});
+
+$(document).on('click', '.btn-remove-row', function() {
+  const tbody = this.closest('tbody');
+  if (tbody.querySelectorAll('tr.schedule-row').length > 1) {
+      this.closest('tr').remove();
+  } else {
+      alert('Minimal harus ada 1 baris mesin di dalam shift ini.');
+  }
+});
+
+$(document).on('click', '.btn-add-machine', function() {
+    const shiftId = $(this).data('shift');
+    const tbody = document.getElementById(`tbody-shift-${shiftId}`);
+    const firstRow = tbody.querySelector('.schedule-row'); 
+
+    $(firstRow).find('.select2-hidden-accessible').select2('destroy');
+
+    const newRow = firstRow.cloneNode(true);
+    const uuid = 'row_' + Math.random().toString(36).substr(2, 9);
+
+    newRow.querySelectorAll('[name]').forEach(el => {
+        el.name = el.name.replace(/\[row_.*?\]/, `[${uuid}]`);
+    });
+
+    newRow.querySelectorAll('input[type="text"], input[type="number"], input[type="hidden"]').forEach(el => {
+        if(el.name.indexOf('[shift_id]') === -1 && el.name.indexOf('[date]') === -1) {
+            el.value = '';
+        }
+    });
+
+    const qtyPInput = newRow.querySelector('.plan-input');
+    if(qtyPInput) {
+        qtyPInput.value = 0;
+        qtyPInput.dataset.manual = ""; 
+    }
+    
+    const actualInput = newRow.querySelector('.actual-display');
+    if(actualInput) actualInput.value = 0;
+    
+    const pSelect = newRow.querySelector('.product-select');
+    if(pSelect) pSelect.innerHTML = '<option value="">-- Cari Part Number --</option>'; 
+    
+    const badge = newRow.querySelector('.stock-badge');
+    if(badge) {
+        badge.dataset.val = '0';
+        badge.textContent = '0';
+        badge.classList.add('zero');
+    }
+    const ngContainer = newRow.querySelector('.ng-badge-container');
+    if(ngContainer) ngContainer.innerHTML = '';
+    
+    // Reset Dandori Elements
+    const cb = newRow.querySelector('.dandori-toggle');
+    if(cb) cb.checked = false;
+    const dContainer = newRow.querySelector('.dandori-time-container');
+    if(dContainer) dContainer.classList.add('d-none');
+    const dSelect = newRow.querySelector('.dandori-time-select');
+    if(dSelect) {
+        dSelect.value = '';
+        dSelect.required = false;
+    }
+
+    tbody.appendChild(newRow);
+
+    initSelect2(firstRow.querySelector('.product-select'));
+    initSelect2(newRow.querySelector('.product-select'));
+    
+    $(newRow.querySelector('.machine-select')).trigger('change');
+});
+
+$(document).on('change', '.machine-select', function() {
+    const sel = this.closest('tr').querySelector('.product-select');
+    const opt = this.selectedOptions[0];
+    const machineId = this.value;
+    const lineTd = this.closest('tr').querySelector('.td-line');
+    const shiftId = sel.dataset.shift;
+    
+    if(!machineId) return;
+    
+    if (lineTd && opt.dataset.line) {
+        lineTd.innerText = opt.dataset.line;
+    }
+    
+    sel.dataset.machine = machineId;
+    loadProducts(sel);
+});
+
 $(document).on('submit', '.mc-form', function(e){
-  const rows = this.querySelectorAll('tbody tr');
+  const rows = this.querySelectorAll('tbody tr.schedule-row');
   for (const row of rows) {
-    const ok = validatePlanAgainstStock(row, true);
-    if (!ok) {
+    const isDandoriChecked = row.querySelector('.dandori-toggle').checked;
+    
+    const ok = validatePlanAgainstStock(row, !isDandoriChecked); 
+    
+    if (!ok && !isDandoriChecked) {
       e.preventDefault();
       return false;
     }
@@ -392,54 +565,15 @@ $(document).on('submit', '.mc-form', function(e){
   return true;
 });
 
-// LOGIC MODAL APPROVAL
-function openApprovalModal() {
-    $('#modalApproval').modal('show');
-    $('#appTblFg').html('<tr><td colspan="2" class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></td></tr>');
-    $('#appTblNg').html('<tr><td colspan="3" class="text-center"><div class="spinner-border spinner-border-sm text-danger"></div></td></tr>');
-
-    $.get('/machining/daily-schedule/approval-data', function(res) {
-        $('#appDate').text(res.date);
-        
-        if(res.is_approved) {
-            $('#appStatus').html(`<span class="badge bg-success"><i class="bi bi-check2-circle"></i> Sudah di-approve oleh ${res.approved_by}</span>`);
-            $('#btnApprove').hide();
-        } else {
-            $('#appStatus').html(`<span class="badge bg-warning text-dark"><i class="bi bi-hourglass-split"></i> Menunggu Approval</span>`);
-            $('#btnApprove').show();
-        }
-
-        // Render FG
-        let fgHtml = '';
-        if(res.fg_data.length === 0) {
-            fgHtml = '<tr><td colspan="2" class="text-center text-muted">Belum ada transfer masuk hari ini.</td></tr>';
-        } else {
-            res.fg_data.forEach(item => {
-                fgHtml += `<tr><td><div class="fw-bold">${item.part_no}</div><small class="text-muted">${item.part_name}</small></td><td class="text-end fw-bold text-success">${item.total_fg}</td></tr>`;
-            });
-        }
-        $('#appTblFg').html(fgHtml);
-
-        // Render NG
-        let ngHtml = '';
-        if(res.ng_data.length === 0) {
-            ngHtml = '<tr><td colspan="3" class="text-center text-muted">Tidak ada Reject (NG) hari ini.</td></tr>';
-        } else {
-            res.ng_data.forEach(item => {
-                ngHtml += `<tr>
-                            <td><div class="fw-bold">${item.part_no}</div><small class="text-muted">${item.part_name}</small></td>
-                            <td>${item.ng_name}</td>
-                            <td class="text-end fw-bold text-danger">${item.total_ng}</td>
-                           </tr>`;
-            });
-        }
-        $('#appTblNg').html(ngHtml);
+document.addEventListener('DOMContentLoaded', () => {
+    document.querySelectorAll('.shift-end-select').forEach(sel => {
+        $(sel).trigger('change');
     });
-}
 
-document.querySelectorAll('.product-select').forEach(selectEl => {
-  initSelect2(selectEl);
-  loadProducts(selectEl);
+    document.querySelectorAll('.product-select').forEach(selectEl => {
+      initSelect2(selectEl);
+      loadProducts(selectEl);
+    });
 });
 </script>
 

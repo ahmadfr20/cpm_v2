@@ -65,24 +65,26 @@ class HourlyController extends BaseController
     }
 
     /* =========================================================
-     * ✅ SAVE HOURLY (support NG inline like Die Casting)
-     *
-     * - qty_ng dihitung dari ng_details (sum)
-     * - ng_category (text) diisi null (karena sudah detail)
-     * - tetap simpan downtime & remark jika ada di payload
-     * - OPTIONAL: simpan detail ke machining_hourly_ng_details jika tabel ada
+     * ✅ SAVE HOURLY
      * ========================================================= */
     private function saveHourlyRows($db, array $items): void
     {
         $now = date('Y-m-d H:i:s');
         $hasDetailTable = $db->tableExists('machining_hourly_ng_details');
 
+        // Optimalisasi: Tarik master downtime 
+        $downtimeValues = [];
+        if ($db->tableExists('downtime_categories')) {
+            $dtRows = $db->table('downtime_categories')->get()->getResultArray();
+            foreach ($dtRows as $dt) {
+                $downtimeValues[(int)$dt['id']] = (int)$dt['value'];
+            }
+        }
+
         foreach ($items as $row) {
             if (
-                empty($row['date']) ||
-                empty($row['shift_id']) ||
-                empty($row['machine_id']) ||
-                empty($row['product_id']) ||
+                empty($row['date']) || empty($row['shift_id']) ||
+                empty($row['machine_id']) || empty($row['product_id']) ||
                 empty($row['time_slot_id'])
             ) {
                 continue;
@@ -96,15 +98,15 @@ class HourlyController extends BaseController
 
             $fg = (int)($row['fg'] ?? 0);
 
-            // ✅ total NG dari detail
+            // Total NG dari detail
             $ngDetails = $row['ng_details'] ?? [];
             $ngTotal   = $this->calcNgTotalFromDetails($ngDetails);
 
-            // downtime/remark optional (kalau view belum kirim -> default)
-            $downtime = (int)($row['downtime'] ?? 0);
-            $remark   = $row['remark'] ?? null;
+            // Downtime value
+            $dtId   = (int)($row['downtime_category_id'] ?? 0);
+            $dtVal  = $dtId > 0 ? ($downtimeValues[$dtId] ?? 0) : 0;
+            $remark = $row['remark'] ?? null;
 
-            // ✅ Upsert manual (biar bisa dapat hourly_id untuk detail)
             $exist = $db->table('machining_hourly')
                 ->where([
                     'production_date' => $date,
@@ -118,29 +120,33 @@ class HourlyController extends BaseController
 
             if ($exist) {
                 $update = [
-                    'qty_fg'      => $fg,
-                    'qty_ng'      => $ngTotal,
-                    'ng_category' => null,     // ✅ sudah pakai detail
-                    'downtime'    => $downtime,
-                    'remark'      => $remark,
+                    'qty_fg'               => $fg,
+                    'qty_ng'               => $ngTotal,
+                    'ng_category'          => null,     
+                    'downtime_category_id' => $dtId > 0 ? $dtId : null,
+                    'downtime'             => $dtVal,
+                    'remark'               => $remark,
                 ];
                 if ($db->fieldExists('updated_at', 'machining_hourly')) $update['updated_at'] = $now;
 
                 $db->table('machining_hourly')->where('id', (int)$exist['id'])->update($update);
                 $hourlyId = (int)$exist['id'];
             } else {
+                if ($fg == 0 && $ngTotal == 0 && $dtId == 0) continue; 
+
                 $insert = [
-                    'production_date' => $date,
-                    'shift_id'        => $shiftId,
-                    'machine_id'      => $machineId,
-                    'product_id'      => $productId,
-                    'time_slot_id'    => $slotId,
-                    'qty_fg'          => $fg,
-                    'qty_ng'          => $ngTotal,
-                    'ng_category'     => null,
-                    'downtime'        => $downtime,
-                    'remark'          => $remark,
-                    'created_at'      => $now,
+                    'production_date'      => $date,
+                    'shift_id'             => $shiftId,
+                    'machine_id'           => $machineId,
+                    'product_id'           => $productId,
+                    'time_slot_id'         => $slotId,
+                    'qty_fg'               => $fg,
+                    'qty_ng'               => $ngTotal,
+                    'ng_category'          => null,
+                    'downtime_category_id' => $dtId > 0 ? $dtId : null,
+                    'downtime'             => $dtVal,
+                    'remark'               => $remark,
+                    'created_at'           => $now,
                 ];
                 if ($db->fieldExists('updated_at', 'machining_hourly')) $insert['updated_at'] = $now;
 
@@ -148,7 +154,6 @@ class HourlyController extends BaseController
                 $hourlyId = (int)$db->insertID();
             }
 
-            // ✅ OPTIONAL: simpan detail NG ke tabel detail jika ada
             if ($hasDetailTable && $hourlyId > 0) {
                 $db->table('machining_hourly_ng_details')
                     ->where('machining_hourly_id', $hourlyId)
@@ -385,14 +390,8 @@ class HourlyController extends BaseController
      * WIP UPSERT (NEXT PROCESS)
      * ========================= */
     private function upsertWipNextProcess(
-        $db,
-        string $date,
-        int $productId,
-        int $fromProcessId,
-        int $toProcessId,
-        int $qtyMove,
-        string $sourceTable,
-        int $sourceId
+        $db, string $date, int $productId, int $fromProcessId, int $toProcessId,
+        int $qtyMove, string $sourceTable, int $sourceId
     ): void {
         if (!$db->tableExists('production_wip')) return;
 
@@ -410,15 +409,11 @@ class HourlyController extends BaseController
         $exist = $db->table('production_wip')->where($key)->get()->getRowArray();
         $now = date('Y-m-d H:i:s');
 
-        $payload = $key + [
-            'qty'    => $qtyMove,
-            'status' => 'WAITING',
-        ];
+        $payload = $key + ['qty' => $qtyMove, 'status' => 'WAITING'];
 
         if ($db->fieldExists('qty_in', 'production_wip'))  $payload['qty_in']  = $qtyMove;
-        if ($db->fieldExists('qty_out', 'production_wip')) $payload['qty_out'] = $qtyMove;
+        if ($db->fieldExists('qty_out', 'production_wip')) $payload['qty_out'] = 0;
         if ($db->fieldExists('stock', 'production_wip'))   $payload['stock']   = 0;
-
         if ($db->fieldExists('updated_at', 'production_wip')) $payload['updated_at'] = $now;
 
         if ($exist) {
@@ -500,10 +495,7 @@ class HourlyController extends BaseController
                 $inbound = $db->table('production_wip')->where($keyInbound)->get()->getRowArray();
 
                 if (!$inbound) {
-                    $ins = $keyInbound + [
-                        'qty'    => $qtyPlan,
-                        'status' => 'WAITING',
-                    ];
+                    $ins = $keyInbound + ['qty' => $qtyPlan, 'status' => 'WAITING'];
                     if ($hasQtyIn)  $ins['qty_in']  = max(0, $qtyPlan - $qtyA);
                     if ($hasQtyOut) $ins['qty_out'] = 0;
                     if ($hasStock)  $ins['stock']   = $qtyA;
@@ -533,26 +525,18 @@ class HourlyController extends BaseController
 
                 if ($nextProcessId > 0 && $transferQty > 0) {
                     $this->upsertWipNextProcess(
-                        $db,
-                        $date,
-                        $productId,
-                        $mcProcessId,
-                        (int)$nextProcessId,
-                        $transferQty,
-                        'daily_schedule_items',
-                        $dsiId
+                        $db, $date, $productId, $mcProcessId, (int)$nextProcessId,
+                        $transferQty, 'daily_schedule_items', $dsiId
                     );
                 }
             }
-
             $processed++;
         }
-
         return $processed;
     }
 
     /* =========================
-     * INDEX
+     * INDEX (Menampilkan View)
      * ========================= */
     public function index()
     {
@@ -560,18 +544,42 @@ class HourlyController extends BaseController
         $date     = $this->request->getGet('date') ?? date('Y-m-d');
         $operator = session()->get('fullname') ?? '-';
 
-        // ✅ NG Categories master (wajib agar dropdown muncul)
+        // ✅ NG Categories master 
         $ngCategories = $db->table('ng_categories')
             ->select('id, ng_code, ng_name')
+            ->where('process_name', 'Machining')
             ->where('is_active', 1)
             ->orderBy('ng_code', 'ASC')
             ->get()
             ->getResultArray();
 
+        $mcProcessId = $this->getProcessIdMachining($db);
+        
+        // Master Downtime Categories
+        $downtimes = [];
+        if ($db->tableExists('downtime_categories')) {
+            $downtimes = $db->table('downtime_categories')
+                ->where('process_id', $mcProcessId)
+                ->where('is_active', 1)
+                ->orderBy('downtime_name', 'ASC')
+                ->get()->getResultArray();
+        }
+
         $shifts = $this->getMachiningShifts($db);
 
         foreach ($shifts as &$shift) {
-            $shift['slots'] = $db->table('shift_time_slots sts')
+
+            // 1. Dapatkan End Slot ID (Jika di schedule di set limit slot)
+            $scheduleRow = $db->table('daily_schedules')
+                ->select('end_time_slot_id')
+                ->where('schedule_date', $date)
+                ->where('shift_id', $shift['id'])
+                ->where('section', 'Machining')
+                ->get()->getRowArray();
+            $endSlotId = $scheduleRow ? (int)$scheduleRow['end_time_slot_id'] : null;
+
+            // 2. Tarik & Filter Slot Waktu
+            $allSlots = $db->table('shift_time_slots sts')
                 ->select('ts.id, ts.time_start, ts.time_end')
                 ->join('time_slots ts', 'ts.id = sts.time_slot_id')
                 ->where('sts.shift_id', $shift['id'])
@@ -579,8 +587,16 @@ class HourlyController extends BaseController
                 ->get()
                 ->getResultArray();
 
+            $filteredSlots = [];
+            foreach($allSlots as $slot) {
+                $filteredSlots[] = $slot;
+                if($endSlotId > 0 && (int)$slot['id'] === $endSlotId) {
+                    break;
+                }
+            }
+
             $totalMinute = 0;
-            foreach ($shift['slots'] as &$slot) {
+            foreach ($filteredSlots as &$slot) {
                 $start = strtotime($slot['time_start']);
                 $end   = strtotime($slot['time_end']);
                 if ($end <= $start) $end += 86400;
@@ -589,8 +605,10 @@ class HourlyController extends BaseController
             }
             unset($slot);
 
+            $shift['slots'] = $filteredSlots;
             $shift['total_minute'] = $totalMinute;
 
+            // 3. Items Schedule
             $shift['items'] = $db->table('daily_schedule_items dsi')
                 ->select('
                     dsi.id AS dsi_id,
@@ -613,6 +631,7 @@ class HourlyController extends BaseController
                 ->get()
                 ->getResultArray();
 
+            // 4. Hourly Maps
             $hourly = $db->table('machining_hourly')
                 ->where('production_date', $date)
                 ->where('shift_id', $shift['id'])
@@ -620,7 +639,7 @@ class HourlyController extends BaseController
                 ->getResultArray();
 
             $shift['hourly_map'] = [];
-            $hourlyIdMap = []; // key mid_pid_sid => hourly_id (buat detail)
+            $hourlyIdMap = [];
 
             foreach ($hourly as $h) {
                 $mid = (int)$h['machine_id'];
@@ -628,15 +647,11 @@ class HourlyController extends BaseController
                 $sid = (int)$h['time_slot_id'];
 
                 $shift['hourly_map'][$mid][$pid][$sid] = $h;
-
-                if (isset($h['id'])) {
-                    $hourlyIdMap[$mid.'_'.$pid.'_'.$sid] = (int)$h['id'];
-                }
+                if (isset($h['id'])) $hourlyIdMap[$mid.'_'.$pid.'_'.$sid] = (int)$h['id'];
             }
 
-            // ✅ ng_detail_map (untuk render ngHidden)
+            // 5. NG Detail Maps
             $shift['ng_detail_map'] = [];
-
             if ($db->tableExists('machining_hourly_ng_details') && $hourlyIdMap) {
                 $ids = array_values(array_unique(array_filter(array_map('intval', $hourlyIdMap))));
                 if ($ids) {
@@ -676,7 +691,8 @@ class HourlyController extends BaseController
             'isAdmin'      => $isAdmin,
             'shift3EndAt'  => $shift3EndDT ? $shift3EndDT->format('Y-m-d H:i:s') : null,
             'finishError'  => $finishError,
-            'ngCategories' => $ngCategories, // ✅ penting untuk dropdown
+            'ngCategories' => $ngCategories,
+            'downtimes'    => $downtimes
         ]);
     }
 
@@ -744,7 +760,7 @@ class HourlyController extends BaseController
             // 2) update stock dari qty A
             $this->syncMachiningWipStockFromHourly($db, $date);
 
-            // 3) transfer flow style die casting
+            // 3) transfer flow 
             $processed = $this->finishMachiningTransferFlow($db, $date, $forceAdmin);
 
             if ($db->transStatus() === false) throw new \Exception('DB error');

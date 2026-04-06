@@ -72,49 +72,56 @@ class ShiftController extends BaseController
         foreach ($shiftsRaw as $row) {
             $shiftId = (int)($row['id'] ?? 0);
 
+            // Ambil slot sesuai urutan pivot (penting untuk begin/end yang berurutan)
             $selected = $this->pivot
                 ->select('shift_time_slots.time_slot_id, time_slots.time_start, time_slots.time_end')
                 ->join('time_slots', 'time_slots.id = shift_time_slots.time_slot_id', 'left')
                 ->where('shift_time_slots.shift_id', $shiftId)
-                ->orderBy('shift_time_slots.id', 'ASC')
+                ->orderBy('shift_time_slots.id', 'ASC') 
                 ->findAll();
 
             $slots = [];
             $totalMinutes = 0;
 
-            for ($i = 1; $i <= 10; $i++) {
-                $slots[$i] = ['time_slot_id'=>null,'start'=>'','end'=>'','minutes'=>0];
-            }
-
-            $idx = 1;
             foreach ($selected as $s) {
-                if ($idx > 10) break;
-
-                $start = (string)($s['time_start'] ?? '');
-                $end   = (string)($s['time_end'] ?? '');
+                $st = substr((string)($s['time_start'] ?? ''), 0, 5);
+                $en = substr((string)($s['time_end'] ?? ''), 0, 5);
 
                 $mins = 0;
-                if ($start && $end) {
-                    $t1 = strtotime($start);
-                    $t2 = strtotime($end);
-                    if ($t1 !== false && $t2 !== false && $t2 > $t1) $mins = (int)(($t2 - $t1) / 60);
+                if ($st && $en) {
+                    $sArr = explode(':', $st);
+                    $eArr = explode(':', $en);
+                    
+                    // Konversi ke total menit harian
+                    $mStart = ((int)$sArr[0] * 60) + (int)$sArr[1];
+                    $mEnd   = ((int)$eArr[0] * 60) + (int)$eArr[1];
+                    
+                    // Jika melewati jam 00:00 (end < start), tambah 24 jam (1440 menit)
+                    if ($mEnd <= $mStart) {
+                        $mEnd += 1440;
+                    }
+                    $mins = $mEnd - $mStart;
                 }
 
-                $slots[$idx] = [
-                    'time_slot_id' => (int)($s['time_slot_id'] ?? 0) ?: null,
-                    'start'        => $start ? substr($start, 0, 5) : '',
-                    'end'          => $end ? substr($end, 0, 5) : '',
+                $slots[] = [
+                    'time_slot_id' => (int)($s['time_slot_id'] ?? 0),
+                    'start'        => $st,
+                    'end'          => $en,
                     'minutes'      => $mins,
                 ];
 
                 $totalMinutes += $mins;
-                $idx++;
             }
 
-            $begin = '';
-            $end = '';
-            foreach ($slots as $sl) { if ($sl['start']) { $begin = $sl['start']; break; } }
-            for ($i=10; $i>=1; $i--) { if ($slots[$i]['end']) { $end = $slots[$i]['end']; break; } }
+            // Begin dan End secara presisi diambil dari array index pertama dan terakhir
+            $begin = '-';
+            $end   = '-';
+            if (!empty($slots)) {
+                $first = reset($slots);
+                $last  = end($slots);
+                $begin = $first['start'] ?: '-';
+                $end   = $last['end'] ?: '-';
+            }
 
             $shifts[] = [
                 'id'            => $shiftId,
@@ -138,10 +145,6 @@ class ShiftController extends BaseController
         ]);
     }
 
-    /**
-     * Tambah shift dari modal (langsung balik index)
-     * Slot belum diisi => row kosong akan muncul
-     */
     public function storeFromIndex()
     {
         $shiftCode = trim((string)$this->request->getPost('shift_code'));
@@ -169,10 +172,12 @@ class ShiftController extends BaseController
         $id = (int)$id;
         $slots = $this->request->getPost('slots') ?? [];
 
+        // Hapus data pivot lama
         $this->pivot->where('shift_id', $id)->delete();
 
-        for ($i = 1; $i <= 10; $i++) {
-            $tsId = (int)($slots[$i] ?? 0);
+        // Insert urutan slot baru yang dikirim form
+        foreach ($slots as $tsId) {
+            $tsId = (int)$tsId;
             if ($tsId > 0) {
                 $this->pivot->insert([
                     'shift_id'     => $id,
