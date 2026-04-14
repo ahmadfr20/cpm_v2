@@ -89,16 +89,22 @@ class DailyProductionController extends BaseController
             }
             $shift['total_minute'] = $totalMinute;
 
-            // dandori map
+            // dandori map: machine_id => time_slot_id => { activity, product_id }
             $dandoriRecords = $db->table('die_casting_dandori')
                 ->where('dandori_date', $date)
                 ->where('shift_id', $shift['id'])
                 ->get()->getResultArray();
-            
+
             $shift['dandori_map'] = [];
             foreach ($dandoriRecords as $d) {
-                $shift['dandori_map'][$d['machine_id']][$d['product_id']][$d['time_slot_id']] = true;
-                $shift['dandori_map'][$d['machine_id']][$d['product_id']]['is_dandori'] = true;
+                $mId = (int)$d['machine_id'];
+                $tId = !empty($d['time_slot_id']) ? (int)$d['time_slot_id'] : 0;
+                if ($tId > 0) {
+                    $shift['dandori_map'][$mId][$tId] = [
+                        'activity'   => $d['activity'] ?? 'Dandori',
+                        'product_id' => (int)$d['product_id'],
+                    ];
+                }
             }
 
             // items (plan)
@@ -122,10 +128,14 @@ class DailyProductionController extends BaseController
 
             $shift['items'] = [];
             foreach ($rawItems as $ritem) {
-                $mId = $ritem['machine_id'];
-                $pId = $ritem['product_id'];
-                $isDandori = isset($shift['dandori_map'][$mId][$pId]['is_dandori']);
-                if ($ritem['qty_p'] > 0 || $isDandori) {
+                $mId = (int)$ritem['machine_id'];
+                $pId = (int)$ritem['product_id'];
+                // Include baris yang punya target, atau yang merupakan produk baru dari dandori
+                $hasDandoriForProduct = false;
+                foreach (($shift['dandori_map'][$mId] ?? []) as $dSlotId => $dInfo) {
+                    if ($dInfo['product_id'] === $pId) { $hasDandoriForProduct = true; break; }
+                }
+                if ($ritem['qty_p'] > 0 || $hasDandoriForProduct) {
                     $shift['items'][] = $ritem;
                 }
             }

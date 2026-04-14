@@ -117,6 +117,7 @@
 .slot-header-active{ background:#fde68a !important; }
 .slot-rest { background-color: #cbd5e1 !important; opacity: 0.7; }
 .slot-locked input, .slot-locked select { background-color: #f1f5f9; }
+.slot-after-dandori td, td.slot-after-dandori { background: #f0fdf4 !important; }
 
 .production-table input.form-control, .production-table select.form-select{ min-width:80px; padding:6px 8px; }
 
@@ -219,35 +220,50 @@
             </td>
 
             <?php foreach ($shift['slots'] as $slot):
+              $slotId    = (int)$slot['id'];
+              $machineId = (int)$item['machine_id'];
+              $productId = (int)$item['product_id'];
               $targetSlot = $shift['total_minute'] > 0
                 ? (int) round(((int)$item['target_per_shift'] / (float)$shift['total_minute']) * (float)$slot['minute'])
                 : 0;
 
-              $exist = $shift['hourly_map'][(int)$item['machine_id']][(int)$item['product_id']][(int)$slot['id']] ?? null;
-              $ngDetail = $shift['ng_detail_map'][(int)$item['machine_id']][(int)$item['product_id']][(int)$slot['id']] ?? [];
-              $key = $date.'_'.$shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
+              $exist    = $shift['hourly_map'][$machineId][$productId][$slotId] ?? null;
+              $ngDetail = $shift['ng_detail_map'][$machineId][$productId][$slotId] ?? [];
+              $key      = $date.'_'.$shift['id'].'_'.$machineId.'_'.$productId.'_'.$slotId;
               $inputNamePrefix = "items[{$key}]";
-              $isProductDandori = isset($shift['dandori_map'][(int)$item['machine_id']][(int)$item['product_id']]['is_dandori']);
+
+              // Cek apakah slot ini adalah slot DANDORI untuk mesin ini
+              $dandoriOnThisSlot = $shift['dandori_map'][$machineId][$slotId] ?? null;
+              // Cek apakah slot ini berada SETELAH slot dandori untuk produk baru ini
+              $isAfterDandoriSlot = false;
+              foreach (($shift['dandori_map'][$machineId] ?? []) as $dSlotId => $dInfo) {
+                  if ($slotId > $dSlotId && $dInfo['product_id'] === $productId) {
+                      $isAfterDandoriSlot = true;
+                  }
+              }
             ?>
             
-            <?php if ($isProductDandori && $item['target_per_shift'] <= 0): ?>
-                <td colspan="5" class="bg-warning text-dark text-center fw-bold align-middle bg-opacity-25" style="border-right: 2px solid #e5e7eb;">
-                    <i class="bi bi-tools"></i> <span>DANDORI</span>
-                    <input type="hidden" name="<?= $inputNamePrefix ?>[date]" value="<?= esc($date) ?>">
-                    <input type="hidden" name="<?= $inputNamePrefix ?>[shift_id]" value="<?= $shift['id'] ?>">
-                    <input type="hidden" name="<?= $inputNamePrefix ?>[machine_id]" value="<?= $item['machine_id'] ?>">
-                    <input type="hidden" name="<?= $inputNamePrefix ?>[product_id]" value="<?= $item['product_id'] ?>">
-                    <input type="hidden" name="<?= $inputNamePrefix ?>[time_slot_id]" value="<?= $slot['id'] ?>">
-                    <input type="hidden" name="<?= $inputNamePrefix ?>[fg]" value="0">
+            <?php if ($dandoriOnThisSlot !== null): ?>
+                <td colspan="5" class="bg-warning bg-opacity-25 text-dark text-center fw-bold align-middle" style="border-right: 2px solid #ffc107; border-left: 3px solid #ffc107;">
+                    <span class="badge bg-warning text-dark"><i class="bi bi-tools"></i> DANDORI</span>
+                    <small class="text-muted d-block mt-1" style="font-size:0.7rem; white-space:normal; max-width:200px; margin:auto;"><?= esc($dandoriOnThisSlot['activity']) ?></small>
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[date]"              value="<?= esc($date) ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[shift_id]"          value="<?= $shift['id'] ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[machine_id]"        value="<?= $machineId ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[product_id]"        value="<?= $productId ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[time_slot_id]"      value="<?= $slotId ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[fg]"               value="0">
                     <input type="hidden" name="<?= $inputNamePrefix ?>[downtime_category_id]" value="0">
                 </td>
             <?php else: ?>
+              <?php $slotClass = $isAfterDandoriSlot ? 'slot-after-dandori' : ''; ?>
 
-              <td class="slot-target-cell fw-bold bg-light text-center" data-slot-id="<?= $slot['id'] ?>">
+
+              <td class="slot-target-cell fw-bold bg-light text-center <?= $slotClass ?>" data-slot-id="<?= $slot['id'] ?>">
                  <span class="slot-target-display"><?= (int)$targetSlot ?></span>
               </td>
 
-              <td>
+              <td class="<?= $slotClass ?>">
                 <input type="number"
                        class="form-control form-control-sm slot-input fg val-fg"
                        data-date="<?= esc($date) ?>"
@@ -259,7 +275,7 @@
                        name="<?= $inputNamePrefix ?>[fg]">
               </td>
 
-              <td>
+              <td class="<?= $slotClass ?>">
                 <input type="number"
                        class="form-control form-control-sm slot-input ng val-ng"
                        readonly

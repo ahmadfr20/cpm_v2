@@ -129,15 +129,24 @@
             <th rowspan="2" class="sticky-left-2 col-part th-sticky-left">Part</th>
             <th rowspan="2" class="sticky-left-3 col-target-shift th-sticky-left">Target<br>Shift</th>
 
-            <?php foreach ($shift['slots'] as $slot): ?>
+            <?php foreach ($shift['slots'] as $slot):
+              // Cek apakah ada dandori di slot ini untuk mesin manapun dalam shift ini
+              $slotHasDandori = false;
+              foreach ($shift['dandori_map'] as $mId => $slotArr) {
+                  if (isset($slotArr[(int)$slot['id']])) { $slotHasDandori = true; break; }
+              }
+              $headerClass = $slotHasDandori ? 'bg-warning text-dark' : '';
+            ?>
               <th colspan="5"
-                  class="slot-header"
+                  class="slot-header <?= $headerClass ?>"
                   data-start="<?= esc($slot['time_start']) ?>"
                   data-end="<?= esc($slot['time_end']) ?>"
                   data-shift-id="<?= $shift['id'] ?>"
                   data-slot-id="<?= $slot['id'] ?>">
                 <div class="mb-1"><?= esc(substr((string)$slot['time_start'],0,5)) ?> - <?= esc(substr((string)$slot['time_end'],0,5)) ?></div>
-                
+                <?php if ($slotHasDandori): ?>
+                  <div class="mb-1"><span class="badge bg-warning text-dark border border-dark" style="font-size:0.6rem"><i class="bi bi-tools"></i> DANDORI</span></div>
+                <?php else: ?>
                 <div class="form-check form-switch d-flex justify-content-center m-0 pb-1">
                   <input class="form-check-input rest-toggle border-secondary" type="checkbox" 
                          id="rest_<?= $shift['id'] ?>_<?= $slot['id'] ?>" 
@@ -147,8 +156,10 @@
                          title="Tandai sebagai Jam Istirahat">
                   <label class="form-check-label ms-1 text-muted fw-normal" style="font-size: 11px; cursor:pointer;" for="rest_<?= $shift['id'] ?>_<?= $slot['id'] ?>">Rest</label>
                 </div>
+                <?php endif; ?>
               </th>
             <?php endforeach ?>
+
           </tr>
 
           <tr class="thead-row-2">
@@ -179,40 +190,46 @@
               </td>
 
               <?php foreach ($shift['slots'] as $slot):
+                $slotId    = (int)$slot['id'];
+                $machineId = (int)$item['machine_id'];
+                $productId = (int)$item['product_id'];
 
                 $targetSlot = $shift['total_minute'] > 0
                   ? (int) round(((int)$item['qty_p'] / (float)$shift['total_minute']) * (float)$slot['minute'])
                   : 0;
 
-                $exist = $shift['hourly_map']
-                  [(int)$item['machine_id']]
-                  [(int)$item['product_id']]
-                  [(int)$slot['id']] ?? null;
+                $exist = $shift['hourly_map'][$machineId][$productId][$slotId] ?? null;
+                $ngDetail = $shift['ng_detail_map'][$machineId][$productId][$slotId] ?? [];
+                $key = $shift['id'].'_'.$machineId.'_'.$productId.'_'.$slotId;
 
-                $ngDetail = $shift['ng_detail_map']
-                  [(int)$item['machine_id']]
-                  [(int)$item['product_id']]
-                  [(int)$slot['id']] ?? [];
-
-                $key = $shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
-                
-                $isProductDandori = isset($shift['dandori_map'][(int)$item['machine_id']][(int)$item['product_id']]['is_dandori']);
+                // Cek apakah slot ini adalah slot DANDORI untuk mesin ini
+                $dandoriOnThisSlot = $shift['dandori_map'][$machineId][$slotId] ?? null;
+                // Cek apakah slot ini berada SETELAH slot dandori untuk produk baru ini
+                $isAfterDandoriSlot = false;
+                foreach (($shift['dandori_map'][$machineId] ?? []) as $dSlotId => $dInfo) {
+                    if ($slotId > $dSlotId && $dInfo['product_id'] === $productId) {
+                        $isAfterDandoriSlot = true;
+                    }
+                }
               ?>
               
-              <?php if ($isProductDandori && $item['qty_p'] <= 0): ?>
-                  <td colspan="5" class="bg-warning text-dark text-center fw-bold align-middle bg-opacity-25" style="border-right: 2px solid #e5e7eb;">
-                      <i class="bi bi-tools"></i> <span>DANDORI</span>
+              <?php if ($dandoriOnThisSlot !== null): ?>
+                  <td colspan="5" class="bg-warning bg-opacity-25 text-dark text-center fw-bold align-middle" style="border-left: 3px solid #ffc107; border-right: 2px solid #ffc107;">
+                      <span class="badge bg-warning text-dark"><i class="bi bi-tools"></i> DANDORI</span>
+                      <small class="text-muted d-block mt-1" style="font-size:0.7rem; white-space:normal; max-width:200px; margin:auto;"><?= esc($dandoriOnThisSlot['activity']) ?></small>
                       <input type="hidden" name="items[<?= esc($key) ?>][fg]" value="0">
                       <input type="hidden" name="items[<?= esc($key) ?>][ng]" value="0">
                       <input type="hidden" name="items[<?= esc($key) ?>][downtime_category_id]" value="0">
                   </td>
               <?php else: ?>
+              <?php $slotClass = $isAfterDandoriSlot ? 'bg-success bg-opacity-10' : ''; ?>
 
-                <td class="slot-target-cell fw-bold bg-light text-center" data-slot-id="<?= $slot['id'] ?>">
+
+                <td class="slot-target-cell fw-bold bg-light text-center <?= $slotClass ?>" data-slot-id="<?= $slot['id'] ?>">
                   <span class="slot-target-display"><?= (int)$targetSlot ?></span>
                 </td>
 
-                <td>
+                <td class="<?= $slotClass ?>">
                   <input type="number"
                          class="form-control form-control-sm slot-input fg val-fg"
                          data-date="<?= esc($date) ?>"
@@ -224,7 +241,7 @@
                          name="items[<?= esc($key) ?>][fg]">
                 </td>
 
-                <td>
+                <td class="<?= $slotClass ?>">
                   <input type="number"
                          class="form-control form-control-sm slot-input ng val-ng"
                          readonly
@@ -233,7 +250,7 @@
                          name="items[<?= esc($key) ?>][ng]">
                 </td>
 
-                <td class="text-start">
+                <td class="text-start <?= $slotClass ?>">
                   <div class="ng-inline" data-key="<?= esc($key) ?>">
                     <div class="ng-inline-head">
                       <div class="meta">
@@ -272,7 +289,7 @@
                   </div>
                 </td>
 
-                <td>
+                <td class="<?= $slotClass ?>">
                   <select class="form-select form-select-sm dt-sel text-danger" 
                           name="items[<?= esc($key) ?>][downtime_category_id]" 
                           data-shift-id="<?= $shift['id'] ?>" 

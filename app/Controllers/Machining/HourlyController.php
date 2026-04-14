@@ -608,16 +608,22 @@ class HourlyController extends BaseController
             $shift['slots'] = $filteredSlots;
             $shift['total_minute'] = $totalMinute;
 
-            // Dandori Map
+            // Dandori Map: machine_id => time_slot_id => { activity, product_id }
             $dandoriRecords = $db->table('machining_dandori')
                 ->where('dandori_date', $date)
                 ->where('shift_id', $shift['id'])
                 ->get()->getResultArray();
 
-            $shift['dandori_map'] = [];
+            $shift['dandori_map'] = []; // machine_id => time_slot_id => info
             foreach ($dandoriRecords as $d) {
-                $shift['dandori_map'][$d['machine_id']][$d['product_id']][$d['time_slot_id']] = true;
-                $shift['dandori_map'][$d['machine_id']][$d['product_id']]['is_dandori'] = true;
+                $mId = (int)$d['machine_id'];
+                $tId = (int)($d['time_slot_id'] ?? 0);
+                if ($tId > 0) {
+                    $shift['dandori_map'][$mId][$tId] = [
+                        'activity'   => $d['activity'] ?? 'Dandori',
+                        'product_id' => (int)$d['product_id'],
+                    ];
+                }
             }
 
             // 3. Items Schedule
