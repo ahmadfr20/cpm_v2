@@ -9,27 +9,44 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
 
 <h4 class="mb-3">MACHINING – ASSY BUSHING DAILY PRODUCTION PER HOUR</h4>
 
-<div class="mb-3">
-  <strong>Tanggal:</strong> <?= esc($date) ?><br>
-  <strong>Operator:</strong> <?= esc($operator) ?><br>
-  <strong>Role:</strong> <?= esc(strtoupper((string)(session()->get('role') ?? '-'))) ?>
+<div class="d-flex flex-wrap align-items-end gap-4 mb-4">
+  <div>
+    <form method="get" class="mb-0">
+      <label class="fw-bold me-2">Tanggal Produksi:</label>
+      <input type="date"
+             name="date"
+             value="<?= esc($date) ?>"
+             class="form-control d-inline-block"
+             style="width:180px"
+             onchange="this.form.submit()">
+    </form>
+  </div>
+  <div>
+    <strong>Operator:</strong> <span class="text-primary"><?= esc($operator) ?></span><br>
+    <strong>Role:</strong> <?= esc(strtoupper((string)(session()->get('role') ?? '-'))) ?>
+  </div>
+
+  <?php if ($isAdmin): ?>
+  <div class="form-check form-switch mb-1">
+    <input class="form-check-input border-danger" type="checkbox" id="adminOverrideToggle" role="switch" style="cursor: pointer; transform: scale(1.2);">
+    <label class="form-check-label fw-bold text-danger ms-2" for="adminOverrideToggle" style="cursor: pointer;">
+      <i class="bi bi-unlock-fill"></i> Unlock Semua Slot Waktu (Admin)
+    </label>
+  </div>
+  <?php endif; ?>
 </div>
 
-<form method="get" class="mb-3">
-  <label class="fw-bold me-2">Tanggal Produksi:</label>
-  <input type="date"
-         name="date"
-         value="<?= esc($date) ?>"
-         class="form-control d-inline-block"
-         style="width:180px"
-         onchange="this.form.submit()">
-</form>
-
 <?php if (session()->getFlashdata('success')): ?>
-  <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
+    <strong><i class="bi bi-check-circle"></i> Berhasil!</strong> <?= esc(session()->getFlashdata('success')) ?>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
 <?php endif ?>
 <?php if (session()->getFlashdata('error')): ?>
-  <div class="alert alert-danger"><?= esc(session()->getFlashdata('error')) ?></div>
+  <div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <strong><i class="bi bi-exclamation-triangle"></i> Gagal!</strong> <?= esc(session()->getFlashdata('error')) ?>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
 <?php endif ?>
 
 <style>
@@ -59,6 +76,7 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
   box-sizing:border-box;
   line-height:1.2;
   background:#fff;
+  transition: background 0.3s;
 }
 .production-table th,
 .production-table td{
@@ -95,9 +113,9 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
 
 .slot-active{ background:#dcfce7 !important; }
 .slot-header-active{ background:#fde68a !important; }
-.slot-locked{ opacity:.55; }
-
-.slot-target{ background:#f9fafb; font-weight:900; }
+.slot-locked input, .slot-locked select, .slot-locked button { opacity:.55; cursor: not-allowed; }
+.slot-locked { background-color: #f1f5f9 !important; }
+.slot-rest { background-color: #cbd5e1 !important; opacity: 0.7; }
 
 /* ===== NG INLINE ===== */
 .ng-inline{ display:flex; flex-direction:column; gap:8px; }
@@ -131,6 +149,8 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
   text-align:center; padding:8px 0;
   border:1px dashed #cbd5e1; border-radius:8px;
 }
+
+.rest-toggle { transform: scale(0.9); margin-top: 0.25rem !important; }
 </style>
 
 <form method="post" action="/machining/assy-bushing/hourly/store" id="assyBushingForm">
@@ -138,11 +158,22 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
   <input type="hidden" name="date" value="<?= esc($date) ?>">
 
   <?php foreach ($shifts as $shift): ?>
-    <?php $shiftId = (int)$shift['id']; ?>
+    <?php 
+      if (empty($shift['slots'])) continue; 
+      $shiftId = (int)$shift['id']; 
+    ?>
 
-    <h5 class="mt-4 mb-2 d-flex align-items-center justify-content-between">
-      <span><?= esc($shift['shift_name']) ?></span>
-    </h5>
+    <div class="d-flex flex-column gap-1 mt-4 mb-2">
+      <div class="d-flex align-items-center justify-content-between">
+        <h5 class="m-0 text-primary border-start border-4 border-primary ps-2"><?= esc($shift['shift_name']) ?></h5>
+      </div>
+      <small class="text-muted ms-3">
+        <i class="bi bi-clock-history"></i> Total Waktu Produksi (Slot Aktif): 
+        <strong class="shift-active-minutes-display" data-shift-id="<?= $shift['id'] ?>" data-original-minutes="<?= $shift['total_minute'] ?>">
+          <?= $shift['total_minute'] ?> Menit
+        </strong>
+      </small>
+    </div>
 
     <div class="table-scroll">
       <table class="production-table table table-sm align-middle">
@@ -157,8 +188,20 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
               <th colspan="4"
                   class="slot-header"
                   data-start="<?= esc($slot['time_start']) ?>"
-                  data-end="<?= esc($slot['time_end']) ?>">
-                <?= esc(substr((string)$slot['time_start'],0,5)) ?> - <?= esc(substr((string)$slot['time_end'],0,5)) ?>
+                  data-end="<?= esc($slot['time_end']) ?>"
+                  data-shift-id="<?= $shift['id'] ?>"
+                  data-slot-id="<?= $slot['id'] ?>">
+                <div class="mb-1"><?= esc(substr((string)$slot['time_start'],0,5)) ?> - <?= esc(substr((string)$slot['time_end'],0,5)) ?></div>
+                
+                <div class="form-check form-switch d-flex justify-content-center m-0 pb-1">
+                  <input class="form-check-input rest-toggle border-secondary" type="checkbox" 
+                         id="rest_ab_<?= $shift['id'] ?>_<?= $slot['id'] ?>" 
+                         data-shift-id="<?= $shift['id'] ?>" 
+                         data-slot-id="<?= $slot['id'] ?>" 
+                         data-slot-minutes="<?= $slot['minute'] ?>"
+                         title="Tandai sebagai Jam Istirahat">
+                  <label class="form-check-label ms-1 text-muted fw-normal" style="font-size: 11px; cursor:pointer;" for="rest_ab_<?= $shift['id'] ?>_<?= $slot['id'] ?>">Rest</label>
+                </div>
               </th>
             <?php endforeach ?>
           </tr>
@@ -173,13 +216,15 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
           </tr>
         </thead>
 
-        <tbody class="shift-body">
+        <tbody class="shift-body" data-shift-id="<?= $shift['id'] ?>">
         <?php foreach ($shift['items'] as $item): ?>
-          <tr>
+          <tr class="item-row" data-original-target="<?= (int)$item['target_per_shift'] ?>">
             <td class="sticky-left fw-bold text-center"><?= esc($item['line_position']) ?></td>
             <td class="sticky-left-2 text-center fw-bold"><?= esc($item['machine_code']) ?></td>
             <td class="sticky-left-3 text-start fw-bold"><?= esc($item['part_no'].' - '.$item['part_name']) ?></td>
-            <td class="sticky-left-4 fw-bold text-center target-shift"><?= (int)$item['target_per_shift'] ?></td>
+            <td class="sticky-left-4 fw-bold text-center text-primary fs-6 target-shift">
+                <span class="target-shift-display"><?= (int)$item['target_per_shift'] ?></span>
+            </td>
 
             <?php foreach ($shift['slots'] as $slot):
               $targetSlot = $shift['total_minute'] > 0
@@ -192,20 +237,24 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
               $key = $shiftId.'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
             ?>
 
-              <td class="slot-target fw-bold bg-light text-center"><?= (int)$targetSlot ?></td>
+              <td class="slot-target-cell fw-bold bg-light text-center" data-slot-id="<?= $slot['id'] ?>">
+                 <span class="slot-target-display"><?= (int)$targetSlot ?></span>
+              </td>
 
               <td>
                 <input type="number"
-                       class="form-control form-control-sm slot-input ok"
+                       class="form-control form-control-sm slot-input ok val-ok"
                        data-start="<?= esc($slot['time_start']) ?>"
                        data-end="<?= esc($slot['time_end']) ?>"
+                       data-shift-id="<?= $shift['id'] ?>"
+                       data-slot-id="<?= $slot['id'] ?>"
                        value="<?= (int)($exist['qty_fg'] ?? 0) ?>"
                        name="items[<?= esc($key) ?>][ok]">
               </td>
 
               <td>
                 <input type="number"
-                       class="form-control form-control-sm slot-input ng"
+                       class="form-control form-control-sm slot-input ng val-ng"
                        readonly
                        id="ngTotalInput_<?= esc($key) ?>"
                        value="<?= (int)($exist['qty_ng'] ?? 0) ?>"
@@ -216,14 +265,16 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
                 <div class="ng-inline" data-key="<?= esc($key) ?>">
                   <div class="ng-inline-head">
                     <div class="meta">
-                      Total NG: <span class="fw-bold" id="ngTotalBadge_<?= esc($key) ?>">0</span>
+                      Total NG: <span class="fw-bold text-danger" id="ngTotalBadge_<?= esc($key) ?>">0</span>
                     </div>
                     <button type="button"
-                            class="btn btn-sm btn-outline-primary ng-add-btn"
-                            onclick="addNgRowInline('<?= esc($key) ?>')"
+                            class="btn btn-sm btn-outline-danger fw-bold ng-add-btn"
+                            onclick="addNgRowInline('<?= esc($key) ?>', <?= $shift['id'] ?>)"
                             data-start="<?= esc($slot['time_start']) ?>"
-                            data-end="<?= esc($slot['time_end']) ?>">
-                      + Add NG
+                            data-end="<?= esc($slot['time_end']) ?>"
+                            data-shift-id="<?= $shift['id'] ?>"
+                            data-slot-id="<?= $slot['id'] ?>">
+                      + NG
                     </button>
                   </div>
 
@@ -275,18 +326,29 @@ $finishTitleUI = $isAdmin ? 'Admin: Finish Shift kapan saja' : (!(bool)($canFini
       </table>
     </div>
 
-    <div class="shift-summary mt-2 mb-4 p-2 border rounded bg-light">
+    <div class="shift-summary mt-2 mb-4 p-3 border rounded bg-light summary-box" data-shift-id="<?= $shift['id'] ?>">
       <strong>SUMMARY <?= esc($shift['shift_name']) ?> :</strong>
-      <span class="ms-3">OK: <span class="total-ok">0</span></span>
-      <span class="ms-3">NG: <span class="total-ng">0</span></span>
-      <span class="ms-3">Efficiency: <span class="eff">0%</span></span>
+      <span class="ms-4">TOTAL TARGET: <span class="total-target fw-bold text-dark fs-5">0</span></span>
+      <span class="ms-4">TOTAL OK: <span class="total-ok fw-bold text-success fs-5">0</span></span>
+      <span class="ms-4">TOTAL NG: <span class="total-ng fw-bold text-danger fs-5">0</span></span>
+      <span class="ms-4 border-start ps-4">EFISIENSI (Ach): <span class="eff fw-bold text-primary fs-5">0%</span></span>
     </div>
 
   <?php endforeach ?>
 
-  <div class="d-flex gap-2 mt-3">
-    <button class="btn btn-success" type="submit">
-      <i class="bi bi-save"></i> Simpan
+  <div class="position-sticky bottom-0 bg-white p-3 border-top shadow-sm d-flex gap-2 justify-content-end mt-3 z-3">
+    <?php if ($canFinishUI): ?>
+      <button type="button" class="btn btn-danger fw-bold shadow-sm px-4" onclick="confirmFinishShift()" title="<?= esc($finishTitleUI) ?>">
+        <i class="bi bi-box-arrow-right me-1"></i> Finish Shift (Transfer)
+      </button>
+    <?php else: ?>
+      <button type="button" class="btn btn-secondary fw-bold shadow-sm px-4" disabled title="<?= esc($finishTitleUI) ?>">
+        <i class="bi bi-lock me-1"></i> Finish Shift (Locked)
+      </button>
+    <?php endif; ?>
+
+    <button class="btn btn-success fw-bold shadow-sm px-5" id="btnSave" type="submit">
+      <i class="bi bi-save me-1"></i> Simpan
     </button>
   </div>
 </form>
@@ -374,15 +436,18 @@ function calcTotalNg(rows){
   },0);
 }
 
-function updateNgTotalUI(key, total){
+function updateNgTotalUI(key, total, shiftId){
   const badge = document.getElementById('ngTotalBadge_'+key);
   if(badge) badge.textContent = String(total);
 
   const ngInp = document.getElementById('ngTotalInput_'+key);
-  if(ngInp) ngInp.value = String(total);
+  if(ngInp) {
+      ngInp.value = String(total);
+      if(shiftId) recalcShiftSummary(shiftId);
+  }
 }
 
-function renderNgTable(key){
+function renderNgTable(key, shiftId){
   const tbody = document.getElementById('ngBody_'+key);
   if(!tbody) return;
 
@@ -391,59 +456,70 @@ function renderNgTable(key){
 
   if(rows.length === 0){
     tbody.innerHTML = `<tr><td colspan="4"><div class="ng-empty">Belum ada NG</div></td></tr>`;
-    updateNgTotalUI(key, 0);
-    return;
+    updateNgTotalUI(key, 0, shiftId);
+  } else {
+    rows.forEach((r, idx)=>{
+      const cat = NG_CATEGORIES.find(x=>x.id === (parseInt(r.ng_category_id||0,10))) || null;
+      const code = cat ? cat.ng_code : '-';
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="ng-no">${escapeHtml(code)}</td>
+        <td>
+          <select class="form-select form-select-sm ngSel"
+                  data-key="${escapeHtml(key)}"
+                  data-shift-id="${shiftId}"
+                  data-idx="${idx}">
+            ${buildNgSelectOptions(r.ng_category_id)}
+          </select>
+        </td>
+        <td class="ng-qty">
+          <input type="number"
+                 class="form-control form-control-sm ngQty"
+                 min="0"
+                 data-key="${escapeHtml(key)}"
+                 data-shift-id="${shiftId}"
+                 data-idx="${idx}"
+                 value="${parseInt(r.qty||0,10)}">
+        </td>
+        <td class="ng-act">
+          <button type="button"
+                  class="btn btn-sm btn-danger py-0 px-2 ng-del-btn"
+                  onclick="deleteNgRowInline('${escapeHtml(key)}', ${idx}, ${shiftId})">
+            <i class="bi bi-x"></i>
+          </button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+
+    updateNgTotalUI(key, calcTotalNg(rows), shiftId);
   }
 
-  rows.forEach((r, idx)=>{
-    const cat = NG_CATEGORIES.find(x=>x.id === (parseInt(r.ng_category_id||0,10))) || null;
-    const code = cat ? cat.ng_code : '-';
-
-    const tr = document.createElement('tr');
-    tr.innerHTML = `
-      <td class="ng-no">${escapeHtml(code)}</td>
-      <td>
-        <select class="form-select form-select-sm ngSel"
-                data-key="${escapeHtml(key)}"
-                data-idx="${idx}">
-          ${buildNgSelectOptions(r.ng_category_id)}
-        </select>
-      </td>
-      <td class="ng-qty">
-        <input type="number"
-               class="form-control form-control-sm ngQty"
-               min="0"
-               data-key="${escapeHtml(key)}"
-               data-idx="${idx}"
-               value="${parseInt(r.qty||0,10)}">
-      </td>
-      <td class="ng-act">
-        <button type="button"
-                class="btn btn-sm btn-danger"
-                onclick="deleteNgRowInline('${escapeHtml(key)}', ${idx})">
-          Del
-        </button>
-      </td>
-    `;
-    tbody.appendChild(tr);
-  });
-
-  updateNgTotalUI(key, calcTotalNg(rows));
+  // Handle slot lock if in Rest state or Not Active
+  const inlineDiv = document.querySelector(`.ng-inline[data-key="${key}"]`);
+  if (inlineDiv) {
+     const td = inlineDiv.closest('td.outer-td');
+     if (td && td.classList.contains('slot-locked')) {
+         inlineDiv.querySelectorAll('input.ngQty').forEach(el => el.readOnly = true);
+         inlineDiv.querySelectorAll('select.ngSel, button.ng-del-btn').forEach(el => el.disabled = true);
+     }
+  }
 }
 
-function addNgRowInline(key){
+function addNgRowInline(key, shiftId){
   const rows = readNgHidden(key);
   rows.push({ ng_category_id: 0, qty: 0 });
   writeNgHiddenFromRows(key, rows);
-  renderNgTable(key);
+  renderNgTable(key, shiftId);
   recalcAll();
 }
 
-function deleteNgRowInline(key, idx){
+function deleteNgRowInline(key, idx, shiftId){
   const rows = readNgHidden(key);
   rows.splice(idx, 1);
   writeNgHiddenFromRows(key, rows);
-  renderNgTable(key);
+  renderNgTable(key, shiftId);
   recalcAll();
 }
 
@@ -452,6 +528,7 @@ document.addEventListener('change', function(e){
   if(!sel) return;
 
   const key = sel.dataset.key;
+  const shiftId = sel.dataset.shiftId;
   const idx = parseInt(sel.dataset.idx||'0',10);
 
   const rows = readNgHidden(key);
@@ -460,13 +537,12 @@ document.addEventListener('change', function(e){
   rows[idx].ng_category_id = parseInt(sel.value||'0',10);
   writeNgHiddenFromRows(key, rows);
 
-  // update code display
   const cat = NG_CATEGORIES.find(x=>x.id === rows[idx].ng_category_id) || null;
   const tr = sel.closest('tr');
   const codeTd = tr ? tr.querySelector('.ng-no') : null;
   if(codeTd) codeTd.textContent = cat ? cat.ng_code : '-';
 
-  updateNgTotalUI(key, calcTotalNg(rows));
+  updateNgTotalUI(key, calcTotalNg(rows), shiftId);
   recalcAll();
 });
 
@@ -475,6 +551,7 @@ document.addEventListener('input', function(e){
   if(!inp) return;
 
   const key = inp.dataset.key;
+  const shiftId = inp.dataset.shiftId;
   const idx = parseInt(inp.dataset.idx||'0',10);
 
   let v = parseInt(inp.value||'0',10);
@@ -487,18 +564,101 @@ document.addEventListener('input', function(e){
   rows[idx].qty = v;
   writeNgHiddenFromRows(key, rows);
 
-  updateNgTotalUI(key, calcTotalNg(rows));
+  updateNgTotalUI(key, calcTotalNg(rows), shiftId);
   recalcAll();
 });
 
-/* init semua slot NG */
-document.querySelectorAll('.ng-inline[data-key]').forEach(box=>{
-  const key = box.getAttribute('data-key');
-  renderNgTable(key);
-});
+/* ========= TIME SLOT LOCK, REST TIME & DYNAMIC TARGET RECALCULATION ========= */
+function recalculateTargets(shiftId) {
+    const shiftMinutesEl = document.querySelector(`.shift-active-minutes-display[data-shift-id="${shiftId}"]`);
+    if (!shiftMinutesEl) return;
 
+    const originalMinutes = parseInt(shiftMinutesEl.dataset.originalMinutes || 0, 10);
+    if (originalMinutes <= 0) return;
 
-/* ========= ACTIVE SLOT LOCK + HIGHLIGHT ========= */
+    let restMinutes = 0;
+    const toggles = document.querySelectorAll(`.rest-toggle[data-shift-id="${shiftId}"]`);
+    toggles.forEach(t => {
+        if (t.checked) {
+            restMinutes += parseInt(t.dataset.slotMinutes || 0, 10);
+        }
+    });
+
+    const activeMinutes = originalMinutes - restMinutes;
+    shiftMinutesEl.innerText = `${activeMinutes} Menit`;
+
+    const rows = document.querySelectorAll(`tbody[data-shift-id="${shiftId}"] .item-row`);
+    rows.forEach(row => {
+        const originalTarget = parseInt(row.dataset.originalTarget || 0, 10);
+        
+        let newShiftTarget = 0;
+        if (activeMinutes > 0) {
+            newShiftTarget = Math.round(originalTarget * (activeMinutes / originalMinutes));
+        }
+        
+        const shiftTargetDisplay = row.querySelector('.target-shift-display');
+        if (shiftTargetDisplay) shiftTargetDisplay.innerText = newShiftTarget;
+
+        toggles.forEach(t => {
+            const slotId = t.dataset.slotId;
+            const slotMinutes = parseInt(t.dataset.slotMinutes || 0, 10);
+            const slotTargetCell = row.querySelector(`.slot-target-cell[data-slot-id="${slotId}"] .slot-target-display`);
+            
+            if (slotTargetCell) {
+                if (t.checked || activeMinutes <= 0) {
+                    slotTargetCell.innerText = '0';
+                } else {
+                    const newSlotTarget = Math.round(newShiftTarget * (slotMinutes / activeMinutes));
+                    slotTargetCell.innerText = newSlotTarget;
+                }
+            }
+        });
+    });
+
+    recalcShiftSummary(shiftId);
+    calcSlotTotals();
+}
+
+/* ========= AUTO CALCULATE SHIFT SUMMARY & EFFICIENCY ========= */
+function recalcShiftSummary(shiftId) {
+    const tbody = document.querySelector(`tbody[data-shift-id="${shiftId}"]`);
+    if(!tbody) return;
+
+    let totalTarget = 0;
+    let totalOk = 0;
+    let totalNg = 0;
+
+    tbody.querySelectorAll('.target-shift-display').forEach(span => {
+        totalTarget += parseInt(span.innerText.trim() || 0, 10);
+    });
+
+    tbody.querySelectorAll('.val-ok').forEach(inp => {
+        totalOk += parseInt(inp.value || 0, 10);
+    });
+
+    tbody.querySelectorAll('.val-ng').forEach(inp => {
+        totalNg += parseInt(inp.value || 0, 10);
+    });
+
+    const box = document.querySelector(`.summary-box[data-shift-id="${shiftId}"]`);
+    if(box) {
+        box.querySelector('.total-target').innerText = totalTarget.toLocaleString('id-ID');
+        box.querySelector('.total-ok').innerText = totalOk.toLocaleString('id-ID');
+        box.querySelector('.total-ng').innerText = totalNg.toLocaleString('id-ID');
+
+        let efficiency = 0;
+        if(totalTarget > 0) {
+            efficiency = (totalOk / totalTarget) * 100;
+        }
+
+        const effSpan = box.querySelector('.eff');
+        if(effSpan) {
+            effSpan.innerText = efficiency.toFixed(2) + '%';
+            effSpan.className = 'eff fw-bold fs-5 ' + (efficiency >= 90 ? 'text-success' : (efficiency >= 75 ? 'text-warning' : 'text-danger'));
+        }
+    }
+}
+
 function parseTimeOnDate(dateISO, hhmmss){
   const t = String(hhmmss || '').slice(0,5);
   return new Date(`${dateISO}T${t}:00`);
@@ -509,98 +669,101 @@ function isSlotActive(prodDateISO, start, end){
   let s = parseTimeOnDate(prodDateISO, start);
   let e = parseTimeOnDate(prodDateISO, end);
 
-  // Ambil jam (hour) saja dari slot
   const startHour = parseInt(String(start).split(':')[0], 10);
   const endHour = parseInt(String(end).split(':')[0], 10);
 
   // LOGIKA SHIFT MALAM:
-  // Asumsi pabrik ganti hari di jam 07:00 Pagi.
-  // Maka jam 00:00 s/d 06:59 sudah masuk Hari Esok (Next Day)
-  if (startHour >= 0 && startHour < 7) {
-    s.setDate(s.getDate() + 1);
-  }
-  
-  if (endHour >= 0 && endHour < 7) {
-    e.setDate(e.getDate() + 1);
-  }
-
-  // Jika masih terbalik (Misal rentang 23:00 ke 00:00, atau 06:00 ke 07:00)
-  if (e <= s) {
-    e.setDate(e.getDate() + 1);
-  }
+  if (startHour >= 0 && startHour < 7) s.setDate(s.getDate() + 1);
+  if (endHour >= 0 && endHour < 7) e.setDate(e.getDate() + 1);
+  if (e <= s) e.setDate(e.getDate() + 1);
 
   return now >= s && now <= e;
 }
 
 function applySlotLock(){
   const prodDateISO = "<?= esc($date) ?>";
+  const overrideToggle = document.getElementById('adminOverrideToggle');
+  const isAdminOverride = overrideToggle ? overrideToggle.checked : false;
 
-  // OK editable hanya slot aktif
-  document.querySelectorAll('input.ok.slot-input').forEach(inp=>{
-    const active = isSlotActive(prodDateISO, inp.dataset.start, inp.dataset.end);
-    inp.disabled = !active;
+  document.querySelectorAll('th.slot-header').forEach(th => {
+     const shiftId = th.dataset.shiftId;
+     const slotId = th.dataset.slotId;
+     const isCurrentTime = isSlotActive(prodDateISO, th.dataset.start, th.dataset.end);
+     
+     const restToggle = document.getElementById(`rest_ab_${shiftId}_${slotId}`);
+     const isRest = restToggle ? restToggle.checked : false;
+     
+     const canEdit = !isRest && (isAdminOverride || isCurrentTime);
 
-    const td = inp.closest('td');
-    if(td){
-      td.classList.toggle('slot-active', active);
-      td.classList.toggle('slot-locked', !active);
-    }
-  });
+     th.classList.toggle('slot-header-active', isCurrentTime && !isRest);
+     th.classList.toggle('bg-secondary', isRest);
+     th.classList.toggle('bg-opacity-25', isRest);
 
-  // Add NG ikut lock (Cari parent outer-td)
-  document.querySelectorAll('.ng-add-btn').forEach(btn=>{
-    const active = isSlotActive(prodDateISO, btn.dataset.start, btn.dataset.end);
-    btn.disabled = !active;
-    const td = btn.closest('td.outer-td');
-    if(td) td.classList.toggle('slot-locked', !active);
-  });
+     document.querySelectorAll(`.ok[data-shift-id="${shiftId}"][data-slot-id="${slotId}"]`).forEach(inp => {
+         inp.readOnly = !canEdit; 
+         
+         const tdOk = inp.closest('td');
+         if(tdOk) {
+             const tdTarget = tdOk.previousElementSibling;
+             const tdNg = tdOk.nextElementSibling;
+             const tdNgInline = tdNg.nextElementSibling;
+             
+             [tdTarget, tdOk, tdNg, tdNgInline].forEach(td => {
+                 if(td) {
+                     td.classList.toggle('slot-active', isCurrentTime && !isRest);
+                     td.classList.toggle('slot-locked', !canEdit);
+                     td.classList.toggle('slot-rest', isRest);
+                 }
+             });
+         }
+     });
 
-  // Lock select & qty ikut status tombol Add NG
-  document.querySelectorAll('.ngSel, .ngQty, .btn-danger').forEach(el=>{
-    const wrap = el.closest('td.outer-td');
-    const btn = wrap?.querySelector('.ng-add-btn');
-    const locked = btn ? btn.disabled : false;
-    el.disabled = locked;
-  });
-
-  // header highlight
-  document.querySelectorAll('th.slot-header').forEach(th=>{
-    th.classList.toggle('slot-header-active', isSlotActive(prodDateISO, th.dataset.start, th.dataset.end));
+     document.querySelectorAll(`.ng-add-btn[data-shift-id="${shiftId}"][data-slot-id="${slotId}"]`).forEach(btn => {
+         btn.disabled = !canEdit;
+         
+         const key = btn.closest('.ng-inline').dataset.key;
+         const ngBody = document.getElementById(`ngBody_${key}`);
+         if(ngBody) {
+             ngBody.querySelectorAll('input.ngQty').forEach(el => el.readOnly = !canEdit);
+             ngBody.querySelectorAll('select.ngSel, button.ng-del-btn').forEach(el => el.disabled = !canEdit);
+         }
+     });
   });
 }
 
-/* ========= TOTALS (SUMMARY + SLOT TOTAL) ========= */
-function calcTotals(){
-  document.querySelectorAll('.production-table').forEach(t=>{
-    let ok=0,ng=0,target=0;
-    t.querySelectorAll('.ok').forEach(i=>ok+=+i.value||0);
-    t.querySelectorAll('.ng').forEach(i=>ng+=+i.value||0);
-    t.querySelectorAll('.target-shift').forEach(td=>target+=+td.innerText||0);
+document.querySelectorAll('.rest-toggle').forEach(t => {
+   const storageKey = `rest_ab_<?= esc($date) ?>_${t.dataset.shiftId}_${t.dataset.slotId}`;
+   
+   if(localStorage.getItem(storageKey) === '1') {
+       t.checked = true;
+   }
+   
+   t.addEventListener('change', function() {
+       localStorage.setItem(storageKey, this.checked ? '1' : '0');
+       applySlotLock();
+       recalculateTargets(this.dataset.shiftId);
+   });
+});
 
-    const summary = t.closest('.table-scroll')?.nextElementSibling;
-    if (summary) {
-      summary.querySelector('.total-ok').innerText = ok;
-      summary.querySelector('.total-ng').innerText = ng;
-      summary.querySelector('.eff').innerText = target ? ((ok/target)*100).toFixed(1)+'%' : '0%';
-    }
-  });
+const adminOverrideEl = document.getElementById('adminOverrideToggle');
+if (adminOverrideEl) {
+  adminOverrideEl.addEventListener('change', applySlotLock);
 }
 
 function calcSlotTotals(){
   document.querySelectorAll('.production-table').forEach(t=>{
-    // Gunakan children agar tidak menghitung baris tabel NG di dalamnya
     const rows = t.querySelectorAll('tbody.shift-body > tr');
     const slots = t.querySelectorAll('.total-slot-target').length;
-    let tg=Array(slots).fill(0),ok=Array(slots).fill(0),ng=Array(slots).fill(0);
+    let tg=Array(slots).fill(0), ok=Array(slots).fill(0), ng=Array(slots).fill(0);
 
     rows.forEach(r=>{
       const cells = r.children;
-      for(let i=4;i<cells.length;i+=4){
-        const idx=(i-4)/4;
+      for(let i=4; i<cells.length; i+=4){
+        const idx = Math.floor((i-4)/4);
         if(idx < slots) {
-            tg[idx]+=+cells[i].innerText||0;
-            ok[idx]+=+(cells[i+1]?.querySelector('.ok')?.value||0);
-            ng[idx]+=+(cells[i+2]?.querySelector('.ng')?.value||0);
+            tg[idx] += parseInt(cells[i].innerText || 0, 10);
+            ok[idx] += parseInt(cells[i+1]?.querySelector('.ok')?.value || 0, 10);
+            ng[idx] += parseInt(cells[i+2]?.querySelector('.ng')?.value || 0, 10);
         }
       }
     });
@@ -609,19 +772,45 @@ function calcSlotTotals(){
     t.querySelectorAll('.total-slot-ok').forEach((c,i)=>c.innerText=ok[i]);
     t.querySelectorAll('.total-slot-ng').forEach((c,i)=>c.innerText=ng[i]);
     t.querySelectorAll('.total-slot-eff').forEach((c,i)=>{
-      c.innerText=tg[i]?((ok[i]/tg[i])*100).toFixed(1)+'%':'0%';
+      c.innerText = tg[i] ? ((ok[i]/tg[i])*100).toFixed(1)+'%' : '0%';
     });
   });
 }
 
-function recalcAll(){ calcTotals(); calcSlotTotals(); }
+function recalcAll() { 
+    document.querySelectorAll('.shift-body').forEach(tbody => {
+        recalcShiftSummary(tbody.dataset.shiftId);
+    });
+    calcSlotTotals(); 
+}
 
 /* init */
-applySlotLock();
-recalcAll();
-setInterval(applySlotLock, 30000);
-document.addEventListener('input', recalcAll);
+document.querySelectorAll('.ng-inline[data-key]').forEach(box=>{
+  const key = box.getAttribute('data-key');
+  const btn = box.querySelector('.ng-add-btn');
+  const shiftId = btn ? btn.dataset.shiftId : null;
+  renderNgTable(key, shiftId);
+});
 
+applySlotLock();
+document.querySelectorAll('.shift-body').forEach(tbody => {
+    recalculateTargets(tbody.dataset.shiftId);
+});
+setInterval(applySlotLock, 30000);
+
+document.addEventListener('input', function(e) {
+    if (e.target.classList.contains('val-ok') || e.target.classList.contains('val-ng')) {
+        recalcAll();
+    }
+});
+
+function confirmFinishShift() {
+  if (confirm('Yakin akan mengakhiri Shift Assy Bushing? Transaksi akan dikirim ke WIP Proses berikutnya dan jadwal shift ini tidak dapat diubah lagi.')) {
+      const form = document.getElementById('assyBushingForm');
+      form.action = '/machining/assy-bushing/hourly/finish-shift';
+      form.submit();
+  }
+}
 </script>
 
 <?= $this->endSection() ?>

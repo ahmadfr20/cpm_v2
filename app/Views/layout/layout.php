@@ -6,6 +6,7 @@
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <style>
 /* ================= RESET ================= */
@@ -144,6 +145,22 @@ body:not(.sidebar-open) .main-content {
     color: #ffffff !important;
 }
 
+/* ================= PRINT MEDIA ================= */
+@media print {
+    body { background: #fff !important; overflow: visible !important; }
+    .app-header, .sidebar, .sidebar-overlay, footer, .d-print-none, .btn, button, input[type="submit"], form[method="get"] { display: none !important; }
+    .main-content { margin-left: 0 !important; padding: 0 !important; height: auto !important; overflow: visible !important; }
+    .card { border: 1px solid #ccc !important; box-shadow: none !important; margin-bottom: 2rem !important; break-inside: avoid; }
+    .table-responsive { overflow: visible !important; }
+    .table { width: 100% !important; min-width: 0 !important; border-collapse: collapse !important; }
+    
+    /* Make inputs look like text */
+    input[type="number"], input[type="text"], input[type="date"] { border: none !important; background: transparent !important; padding: 0 !important; width: 100% !important; }
+    select { appearance: none !important; border: none !important; background: transparent !important; }
+    .select2-container--default .select2-selection--single { border: none !important; background: transparent !important; }
+    .select2-selection__arrow { display: none !important; }
+    .form-control { border: none !important; }
+}
 </style>
 </head>
 
@@ -192,6 +209,101 @@ function toggleSidebar() {
     icon.className = document.body.classList.contains('sidebar-open')
         ? 'bi bi-x-lg'
         : 'bi bi-list';
+}
+
+// Global Export Function for Schedule & Hourly Pages
+// The buttons are now added manually per page by user request.
+function exportGenericExcel(filename = "Data_Export.xlsx") {
+    if(typeof XLSX === 'undefined') {
+        alert("Library Excel belum siap. Silahkan tunggu...");
+        return;
+    }
+    
+    const tables = document.querySelectorAll('.main-content table');
+    if(tables.length === 0) {
+        alert("Tidak ada tabel data untuk diexport!");
+        return;
+    }
+    
+    const wb = XLSX.utils.book_new();
+    let sheetCounter = 1;
+    
+    tables.forEach(table => {
+        // Abaikan tabel mini seperti ng-mini-table
+        if(table.classList.contains('ng-mini-table')) return;
+        
+        const rows = table.querySelectorAll('tr');
+        const data = [];
+        
+        rows.forEach(tr => {
+            const rowData = [];
+            const cols = tr.querySelectorAll('th, td');
+            cols.forEach(cell => {
+                if(cell.classList.contains('d-none')) return;
+                
+                let val = "";
+                const selects = cell.querySelectorAll('select:not(.d-none)');
+                const inputs = cell.querySelectorAll('input:not([type="hidden"]):not(.d-none):not([type="checkbox"])');
+                const checks = cell.querySelectorAll('input[type="checkbox"]:not(.d-none)');
+                const spans = cell.querySelectorAll('span:not(.d-none)');
+                
+                if (selects.length > 0) {
+                    const parts = [];
+                    selects.forEach(s => {
+                        if(s.selectedIndex >= 0 && s.options[s.selectedIndex].text !== "-- pilih --" && s.options[s.selectedIndex].value !== "") {
+                            parts.push(s.options[s.selectedIndex].text);
+                        }
+                    });
+                    val = parts.join(" | ");
+                } else if (inputs.length > 0) {
+                    const parts = [];
+                    inputs.forEach(inp => parts.push(inp.value));
+                    val = parts.join(" | ");
+                } else if (checks.length > 0) {
+                    const parts = [];
+                    checks.forEach(chk => { if(chk.checked) parts.push("Ya"); });
+                    val = parts.join(" | ") || "";
+                } else {
+                    // special fallback
+                    // remove small buttons texts
+                    let clone = cell.cloneNode(true);
+                    clone.querySelectorAll('button, .btn, .d-none').forEach(e => e.remove());
+                    val = clone.innerText.trim();
+                }
+                
+                rowData.push(val);
+            });
+            
+            if(rowData.length > 0 && rowData.some(v => v !== "")) {
+                data.push(rowData);
+            }
+        });
+        
+        if (data.length > 0) {
+            let sheetName = "Sheet" + sheetCounter;
+            const parentCard = table.closest('.card');
+            if(parentCard && parentCard.querySelector('.card-header')) {
+                const headerText = parentCard.querySelector('.card-header').innerText.trim().replace(/[^a-zA-Z0-9 ]/g, '').substring(0, 30);
+                if(headerText) sheetName = headerText;
+            } else if (table.id) {
+                sheetName = table.id.substring(0,30);
+            }
+            
+            if(wb.SheetNames.includes(sheetName)) {
+                sheetName = sheetName + " " + sheetCounter;
+            }
+            
+            const ws = XLSX.utils.aoa_to_sheet(data);
+            XLSX.utils.book_append_sheet(wb, ws, sheetName);
+            sheetCounter++;
+        }
+    });
+    
+    if(wb.SheetNames.length > 0) {
+        XLSX.writeFile(wb, filename);
+    } else {
+        alert("Tidak ada data untuk diexport!");
+    }
 }
 </script>
 

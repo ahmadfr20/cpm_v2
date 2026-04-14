@@ -2,7 +2,7 @@
 <?= $this->section('content') ?>
 
 <h4 class="mb-2 fw-bold">SHOT BLASTING</h4>
-<h5 class="mb-4 text-muted">DELIVERY EXECUTION (Berdasarkan Schedule)</h5>
+<h5 class="mb-4 text-muted">TRANSFER/PROCESS EXECUTION (Berdasarkan Schedule)</h5>
 
 <?php if (!empty($errorMsg)): ?>
   <div class="alert alert-danger"><?= esc($errorMsg) ?></div>
@@ -33,19 +33,17 @@
     <tr>
       <th style="width:40px">No</th>
       <th style="width:120px">Shift</th>
-      <th style="width:180px">Vendor</th>
       <th>Part No & Name</th>
-      <th style="width:160px">DO Number</th>
-      <th style="width:100px">Target Sched</th>
-      <th style="width:120px">Ready in SB</th>
-      <th style="width:140px">Actual Delivery</th>
+      <th style="width:140px">Target Sched</th>
+      <th style="width:140px">Ready in SB</th>
+      <th style="width:160px">Actual Process</th>
     </tr>
   </thead>
   <tbody>
   <?php if (empty($schedules)): ?>
     <tr>
-      <td colspan="8" class="text-muted py-4">
-        Tidak ada jadwal pengiriman ke Vendor untuk tanggal ini. <br>
+      <td colspan="6" class="text-muted py-4">
+        Tidak ada jadwal proses (In-House) untuk tanggal ini. <br>
         Silakan buat Schedule Shot Blasting terlebih dahulu.
       </td>
     </tr>
@@ -56,18 +54,14 @@
         $availSb = (int)($availableMap[$pid] ?? 0);
         $schedQty = (int)$row['scheduled_qty'];
         // Limit max input ke nilai terkecil antara Target Schedule dan Stock di SB
-        $maxDeliver = min($schedQty, $availSb);
+        $maxProcess = min($schedQty, $availSb);
       ?>
       <tr>
         <td><?= $i + 1 ?></td>
         <td><?= esc($row['shift_name'] ?? '-') ?></td>
-        <td><?= esc($row['vendor_name'] ?? 'Vendor tidak diset') ?></td>
         <td class="text-start">
           <strong><?= esc($row['part_no']) ?></strong><br>
           <small class="text-muted"><?= esc($row['part_name']) ?></small>
-        </td>
-        <td>
-          <input type="text" name="items[<?= $i ?>][do_number]" value="<?= esc($row['vendor_code'] ?? '') ?>" class="form-control form-control-sm text-center" required>
         </td>
         <td class="fw-bold text-primary"><?= number_format($schedQty) ?></td>
         <td class="<?= $availSb > 0 ? 'fw-bold text-success' : 'text-danger fw-bold' ?>">
@@ -76,8 +70,8 @@
         <td>
           <input type="hidden" name="items[<?= $i ?>][schedule_item_id]" value="<?= $row['schedule_item_id'] ?>">
           <input type="number" name="items[<?= $i ?>][qty]" class="form-control form-control-sm text-center qty-input" 
-                 min="0" max="<?= max(0, $maxDeliver) ?>" data-max="<?= max(0, $maxDeliver) ?>"
-                 placeholder="0 - <?= max(0, $maxDeliver) ?>" <?= $maxDeliver <= 0 ? 'readonly' : '' ?>>
+                 min="0" max="<?= max(0, $maxProcess) ?>" data-max="<?= max(0, $maxProcess) ?>"
+                 placeholder="0 - <?= max(0, $maxProcess) ?>" <?= $maxProcess <= 0 ? 'readonly' : '' ?>>
         </td>
       </tr>
     <?php endforeach ?>
@@ -87,7 +81,7 @@
 
 <?php if (!empty($schedules)): ?>
   <button class="btn btn-success btn-sm mt-3">
-    <i class="bi bi-truck"></i> Simpan Actual Delivery
+    <i class="bi bi-gear-fill"></i> Simpan Actual Process
   </button>
 <?php endif; ?>
 

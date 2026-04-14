@@ -89,8 +89,20 @@ class DailyProductionController extends BaseController
             }
             $shift['total_minute'] = $totalMinute;
 
+            // dandori map
+            $dandoriRecords = $db->table('die_casting_dandori')
+                ->where('dandori_date', $date)
+                ->where('shift_id', $shift['id'])
+                ->get()->getResultArray();
+            
+            $shift['dandori_map'] = [];
+            foreach ($dandoriRecords as $d) {
+                $shift['dandori_map'][$d['machine_id']][$d['product_id']][$d['time_slot_id']] = true;
+                $shift['dandori_map'][$d['machine_id']][$d['product_id']]['is_dandori'] = true;
+            }
+
             // items (plan)
-            $shift['items'] = $db->table('die_casting_production dcp')
+            $rawItems = $db->table('die_casting_production dcp')
                 ->select('
                     dcp.id AS dcp_id,
                     dcp.machine_id,
@@ -105,9 +117,18 @@ class DailyProductionController extends BaseController
                 ->join('products p', 'p.id = dcp.product_id')
                 ->where('dcp.production_date', $date)
                 ->where('dcp.shift_id', $shift['id'])
-                ->where('dcp.qty_p >', 0)
                 ->orderBy('m.line_position', 'ASC')
                 ->get()->getResultArray();
+
+            $shift['items'] = [];
+            foreach ($rawItems as $ritem) {
+                $mId = $ritem['machine_id'];
+                $pId = $ritem['product_id'];
+                $isDandori = isset($shift['dandori_map'][$mId][$pId]['is_dandori']);
+                if ($ritem['qty_p'] > 0 || $isDandori) {
+                    $shift['items'][] = $ritem;
+                }
+            }
 
             // hourly map
             $hourly = $db->table('die_casting_hourly')

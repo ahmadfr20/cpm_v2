@@ -2,6 +2,14 @@
 <?= $this->section('content') ?>
 
 <h4 class="mb-3">DIE CASTING – DAILY PRODUCTION PER HOUR</h4>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
+</div>
 
 <div class="d-flex flex-wrap align-items-end gap-4 mb-4">
   <div>
@@ -187,7 +195,18 @@
                   [(int)$slot['id']] ?? [];
 
                 $key = $shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
+                
+                $isProductDandori = isset($shift['dandori_map'][(int)$item['machine_id']][(int)$item['product_id']]['is_dandori']);
               ?>
+              
+              <?php if ($isProductDandori && $item['qty_p'] <= 0): ?>
+                  <td colspan="5" class="bg-warning text-dark text-center fw-bold align-middle bg-opacity-25" style="border-right: 2px solid #e5e7eb;">
+                      <i class="bi bi-tools"></i> <span>DANDORI</span>
+                      <input type="hidden" name="items[<?= esc($key) ?>][fg]" value="0">
+                      <input type="hidden" name="items[<?= esc($key) ?>][ng]" value="0">
+                      <input type="hidden" name="items[<?= esc($key) ?>][downtime_category_id]" value="0">
+                  </td>
+              <?php else: ?>
 
                 <td class="slot-target-cell fw-bold bg-light text-center" data-slot-id="<?= $slot['id'] ?>">
                   <span class="slot-target-display"><?= (int)$targetSlot ?></span>
@@ -267,6 +286,7 @@
                       <?php endforeach; ?>
                   </select>
                 </td>
+              <?php endif; ?>
 
               <?php endforeach ?>
             </tr>

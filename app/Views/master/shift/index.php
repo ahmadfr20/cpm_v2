@@ -80,11 +80,22 @@
     min-width: 22px;
     text-align: center;
   }
+
+  @media print {
+    body { background: #fff !important; }
+    #sidebar, header, nav, footer, .modal, .btn, .w-action, .btn-remove-slot, .btn-add-slot, form[method="get"] { display: none !important; }
+    .shift-wrap { border: none !important; overflow: visible !important; }
+    .shift-table { min-width: 100% !important; margin: 0; }
+    .select2-container--default .select2-selection--single { border: none !important; background: transparent !important; }
+    .select2-container--default .select2-selection--single .select2-selection__arrow { display: none !important; }
+    .badge { border: 1px solid #000; color: #000 !important; background: transparent !important; }
+  }
 </style>
 
 <link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
 
 <?php 
 $optsHtml = '<option value="">-- pilih --</option>';
@@ -113,14 +124,22 @@ foreach ($timeSlots as $ts) {
 <div class="d-flex align-items-center justify-content-between mb-3">
   <div>
     <h4 class="mb-0">Master Shift</h4>
-    <small class="text-muted">
+    <small class="text-muted d-print-none">
       Slot bebas ditambahkan/dihapus sesuai kebutuhan shift.
     </small>
   </div>
 
-  <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modalAddShift">
-    + Tambah Shift
-  </button>
+  <div class="d-flex gap-2">
+    <button class="btn btn-outline-success fw-bold" onclick="exportExcel()">
+      <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button class="btn btn-outline-danger fw-bold" onclick="window.print()">
+      <i class="bi bi-printer"></i> Print / PDF
+    </button>
+    <button class="btn btn-primary fw-bold" data-bs-toggle="modal" data-bs-target="#modalAddShift">
+      + Tambah Shift
+    </button>
+  </div>
 </div>
 
 <?php if (session()->getFlashdata('success')): ?>
@@ -356,6 +375,37 @@ foreach ($timeSlots as $ts) {
     if (el) el.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
   }
 })();
+
+function exportExcel() {
+    const data = [];
+    data.push(['Section', 'Days', 'Shift', 'Begin', 'End', 'Time Slots', 'Total Minutes']);
+    
+    document.querySelectorAll('.shift-table tbody tr').forEach(tr => {
+        if(tr.querySelector('td.text-center.text-muted')) return;
+        
+        const sec = tr.querySelector('.w-sec')?.innerText.trim() || '';
+        const days = tr.querySelector('.w-days')?.innerText.trim() || '';
+        const shift = tr.querySelector('.w-shift')?.innerText.trim() || '';
+        const begin = tr.querySelector('.beginTxt')?.innerText.trim() || '';
+        const end = tr.querySelector('.endTxt')?.innerText.trim() || '';
+        const total = tr.querySelector('.totalMinutes')?.innerText.trim() || '';
+        
+        let slots = [];
+        tr.querySelectorAll('.slotSelect').forEach(sel => {
+            if(sel.selectedIndex >= 0 && sel.value !== "") {
+                const optText = sel.options[sel.selectedIndex].text;
+                if(optText !== "-- pilih --") slots.push(optText);
+            }
+        });
+        
+        data.push([sec, days, shift, begin, end, slots.join(', '), total]);
+    });
+    
+    const ws = XLSX.utils.aoa_to_sheet(data);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Master Shift");
+    XLSX.writeFile(wb, "Master_Shift.xlsx");
+}
 </script>
 
 <?= $this->endSection() ?>

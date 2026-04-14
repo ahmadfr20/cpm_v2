@@ -35,9 +35,11 @@ class DandoriController extends BaseController
         }
 
         // 3. Ambil Master Mesin & Produk (Untuk menambah baris manual)
-        $machines = $db->table('machines')
-            ->where('production_line', 'Die Casting')
-            ->orderBy('line_position')
+        $machines = $db->table('machines m')
+            ->select('m.*')
+            ->join('production_processes pp', 'pp.id = m.process_id')
+            ->where('pp.process_name', 'Die Casting')
+            ->orderBy('m.line_position', 'ASC')
             ->get()->getResultArray();
 
         $products = $db->table('products')
@@ -45,7 +47,7 @@ class DandoriController extends BaseController
             ->orderBy('part_no', 'ASC')
             ->get()->getResultArray();
 
-        // 4. Ambil Data Dandori yang disubmit dari Daily Schedule
+        // 4. Ambil Data Dandori
         $dandoriRecords = [];
         if ($db->tableExists('die_casting_dandori')) {
             $dandoriRecords = $db->table('die_casting_dandori d')
@@ -91,24 +93,71 @@ class DandoriController extends BaseController
 
             // Insert ulang data yang ada di form
             if (!empty($items) && is_array($items)) {
+                $checkDuplicate = []; // Array untuk melacak duplikasi mesin & jam
+
                 foreach ($items as $row) {
                     if (empty($row['shift_id']) || empty($row['machine_id']) || empty($row['product_id'])) continue;
 
+                    $shiftId = (int)$row['shift_id'];
+                    $machineId = (int)$row['machine_id'];
+                    $productId = (int)$row['product_id'];
+                    $timeSlotId = !empty($row['time_slot_id']) ? (int)$row['time_slot_id'] : null;
+
+                    // Validasi Duplikasi: 1 Mesin tidak boleh ada 2 setup di jam yang sama pada shift yang sama
+                    if ($timeSlotId) {
+                        $duplicateKey = $shiftId . '_' . $machineId . '_' . $timeSlotId;
+                        if (isset($checkDuplicate[$duplicateKey])) {
+                            throw new \Exception("Duplikasi data terdeteksi! Mesin tidak dapat disetup 2 kali pada slot waktu yang sama.");
+                        }
+                        $checkDuplicate[$duplicateKey] = true;
+                    }
+
                     $db->table('die_casting_dandori')->insert([
                         'dandori_date' => $date,
-                        'shift_id'     => (int)$row['shift_id'],
-                        'machine_id'   => (int)$row['machine_id'],
-                        'product_id'   => (int)$row['product_id'],
-                        'time_slot_id' => !empty($row['time_slot_id']) ? (int)$row['time_slot_id'] : null,
+                        'shift_id'     => $shiftId,
+                        'machine_id'   => $machineId,
+                        'product_id'   => $productId,
+                        'time_slot_id' => $timeSlotId,
                         'activity'     => $row['activity'] ?? 'Setup/Dandori Preparation',
                         'created_at'   => date('Y-m-d H:i:s')
                     ]);
+
+                    // Generate form baru di daily production
+                    $processIdRow = $db->table('production_processes')->where('process_name', 'Die Casting')->get()->getRowArray();
+                    $processIdDC = $processIdRow ? (int)$processIdRow['id'] : 1;
+
+                    $existProd = $db->table('die_casting_production')
+                        ->where([
+                            'production_date' => $date,
+                            'shift_id' => $shiftId,
+                            'machine_id' => $machineId,
+                            'product_id' => $productId
+                        ])->get()->getRowArray();
+
+                    if (!$existProd) {
+                        $db->table('die_casting_production')->insert([
+                            'production_date' => $date,
+                            'shift_id' => $shiftId,
+                            'machine_id' => $machineId,
+                            'product_id' => $productId,
+                            'part_label' => '',
+                            'qty_p' => 0,
+                            'qty_a' => 0,
+                            'qty_ng' => 0,
+                            'status' => 'Dandori',
+                            'process_id' => $processIdDC,
+                            'is_completed' => 0,
+                            'created_at' => date('Y-m-d H:i:s')
+                        ]);
+                    }
                 }
             }
 
-            if ($db->transStatus() === false) throw new \Exception('Terjadi kesalahan saat update database.');
-            $db->transCommit();
+            if ($db->transStatus() === false) {
+                throw new \Exception('Terjadi kesalahan saat update database.');
+            }
 
+            $db->transCommit();
             return redirect()->back()->with('success', 'Jadwal Dandori Die Casting berhasil diperbarui.');
         } catch (\Throwable $e) {
             $db->transRollback();

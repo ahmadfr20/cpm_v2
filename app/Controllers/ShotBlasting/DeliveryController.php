@@ -118,10 +118,6 @@ class DeliveryController extends BaseController
             $query = $db->table('daily_schedule_items dsi')
                 ->select('dsi.id as schedule_item_id, dsi.product_id, p.part_no, p.part_name, dsi.target_per_shift as scheduled_qty, ds.shift_id, s.shift_name');
             
-            if ($db->fieldExists('vendor_id', 'daily_schedule_items')) {
-                $query->select('dsi.vendor_id, v.vendor_name, v.vendor_code')->join('vendors v', 'v.id = dsi.vendor_id', 'left');
-            }
-
             $schedules = $query->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
                 ->join('products p', 'p.id = dsi.product_id')
                 ->join('shifts s', 's.id = ds.shift_id', 'left')
@@ -148,7 +144,7 @@ class DeliveryController extends BaseController
     }
 
     /* =====================================================
-     * STORE (Deduct Shot Blasting Stock & Vendor Out)
+     * STORE (Deduct Shot Blasting Stock Internal)
      * ===================================================== */
 
     public function store()
@@ -157,7 +153,7 @@ class DeliveryController extends BaseController
         $date  = date('Y-m-d');
         $items = $this->request->getPost('items');
 
-        if (!is_array($items) || empty($items)) return redirect()->back()->with('error', 'Tidak ada data item untuk dikirim.');
+        if (!is_array($items) || empty($items)) return redirect()->back()->with('error', 'Tidak ada data item untuk diproses.');
 
         $sbId = $this->getSandBlastingProcessId($db);
         if (!$sbId) return redirect()->back()->with('error', 'Process Shot Blasting tidak ditemukan.');
@@ -172,22 +168,18 @@ class DeliveryController extends BaseController
             foreach ($items as $row) {
                 $scheduleItemId = (int)($row['schedule_item_id'] ?? 0);
                 $qty            = (int)($row['qty'] ?? 0);
-                $do             = (string)($row['do_number'] ?? '');
                 
                 if ($scheduleItemId <= 0 || $qty <= 0) continue;
 
                 $dsi = $db->table('daily_schedule_items dsi')
-                    ->select('dsi.product_id, dsi.vendor_id, ds.shift_id')
+                    ->select('dsi.product_id, ds.shift_id')
                     ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
                     ->where('dsi.id', $scheduleItemId)->get()->getRowArray();
 
                 if (!$dsi) throw new \Exception("Jadwal ID {$scheduleItemId} tidak valid.");
 
                 $productId = (int)$dsi['product_id'];
-                $vendorId  = (int)($dsi['vendor_id'] ?? 0);
                 $shiftId   = (int)$dsi['shift_id'];
-
-                if ($vendorId <= 0) throw new \Exception("Vendor untuk produk ID {$productId} tidak tersetting di jadwal.");
 
                 // 1. Cek Stock Langsung di Shot Blasting
                 $sbSnap      = $this->getLatestSnapshot($db, $date, $sbId, $productId);
@@ -195,37 +187,28 @@ class DeliveryController extends BaseController
                 $sbTransfer  = (int)($sbSnap['transfer'] ?? 0);
 
                 if ($qty > $availableSb) {
-                    throw new \Exception("Gagal: Qty delivery ($qty) melebihi Ready Stock di Shot Blasting ($availableSb) untuk produk ID {$productId}.");
+                    throw new \Exception("Gagal: Qty proses ($qty) melebihi Ready Stock di Shot Blasting ($availableSb) untuk produk ID {$productId}.");
                 }
 
-                // 2. Transaksi: VENDOR_OUT (Keluar dari SB ke Vendor)
+                // 2. Transaksi: TRANSFER (Proses Internal Shot Blasting)
                 $trxPayload = [
                     'transaction_date' => $date, 
                     'shift_id'         => $shiftId, 
                     'product_id'       => $productId, 
                     'qty'              => $qty,
-                    'transaction_type' => 'VENDOR_OUT', 
-                    'process_from'     => $sbId, // Barang keluar dari SB
+                    'transaction_type' => 'TRANSFER', 
+                    'process_from'     => $sbId, 
+                    'process_to'       => $sbId, // Proses di tempat
                     'created_at'       => $now,
+                    'source_table'     => 'daily_schedule_items',
+                    'source_id'        => $scheduleItemId
                 ];
-
-                // Cek ketersediaan kolom vendor di material_transactions
-                $hasVendorCol = $db->fieldExists('vendor_id', 'material_transactions');
-                if ($hasVendorCol) {
-                    $trxPayload['vendor_id']  = $vendorId;
-                } else {
-                    $trxPayload['process_to'] = $vendorId; // Fallback jika tidak ada kolom vendor_id
-                }
-
-                $trxPayload['do_number']    = $do;
-                $trxPayload['source_table'] = 'daily_schedule_items';
-                $trxPayload['source_id']    = $scheduleItemId;
 
                 $db->table('material_transactions')->insert($this->onlyExistingColumns($db, 'material_transactions', $trxPayload));
                 $trxId = (int)$db->insertID();
 
                 // 3. Update Stock Shot Blasting (WIP: SB -> Out)
-                // Stock di SB BERKURANG dan dipindahkan ke Transfer SB (sebagai penanda sedang di subcon)
+                // Stock antrean di SB BERKURANG dan dipindahkan ke Transfer SB (sebagai penanda sedang dikerjakan/sudah diproses)
                 $sbAfterStock    = max(0, $availableSb - $qty);
                 $sbAfterTransfer = $sbTransfer + $qty;
 
@@ -237,25 +220,25 @@ class DeliveryController extends BaseController
                     $wipDateCol       => $date, 
                     'product_id'      => $productId, 
                     'from_process_id' => $sbId, 
-                    'to_process_id'   => $sbId, // Status masih di SB (tapi di kolom transfer)
+                    'to_process_id'   => $sbId, 
                     'qty'             => $qty, 
                     'qty_in'          => 0, 
-                    'qty_out'         => $qty, // Dicatat sebagai Barang Keluar dari Stock
-                    $stockCol         => $sbAfterStock, // Nilai stock setelah dikurangi
+                    'qty_out'         => $qty, 
+                    $stockCol         => $sbAfterStock, 
                     'source_table'    => 'material_transactions', 
                     'source_id'       => $trxId, 
                     'status'          => 'DONE', 
                     'created_at'      => $now,
                 ];
-                if ($transferCol) $sbWip[$transferCol] = $sbAfterTransfer; // Nilai transfer setelah ditambah
+                if ($transferCol) $sbWip[$transferCol] = $sbAfterTransfer;
                 
                 $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $sbWip));
             }
 
-            if ($db->transStatus() === false) throw new \Exception('DB error saat proses delivery.');
+            if ($db->transStatus() === false) throw new \Exception('DB error saat proses eksekusi.');
 
             $db->transCommit();
-            return redirect()->back()->with('success', 'Delivery Shot Blasting tersimpan. Stock telah dikurangi & dialihkan ke antrean Vendor.');
+            return redirect()->back()->with('success', 'Eksekusi Shot Blasting tersimpan. Stock telah diproses (Transfer).');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());

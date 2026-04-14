@@ -5,8 +5,11 @@
   .wrapx{ background:#fff;border:1px solid #e5e7eb;border-radius:12px;padding:14px; }
   .title{ font-weight:900;font-size:18px; }
   .sub{ color:#64748b;font-weight:600;margin-top:2px; }
-  .grid{ display:grid;grid-template-columns: 140px 140px 200px 1fr 120px;gap:10px; }
+  
+  /* Update grid template columns karena vendor dihilangkan */
+  .grid{ display:grid;grid-template-columns: 140px 140px 1fr 120px;gap:10px; }
   @media(max-width:1100px){ .grid{ grid-template-columns:1fr; } }
+  
   label{ font-size:12px;font-weight:800;color:#64748b; }
   .hint{ font-size:12px;color:#64748b;margin-top:6px; }
   table.tbl{ width:100%; border-collapse:separate;border-spacing:0; }
@@ -17,7 +20,15 @@
 
 <div class="mb-2">
   <div class="title">SHOT BLASTING – Schedule</div>
-  <div class="sub">Buat schedule berdasarkan stock sebelumnya dan alokasikan ke Vendor.</div>
+  <div class="sub">Buat schedule berdasarkan stock sebelumnya dan alokasikan ke proses internal.</div>
+</div>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
 </div>
 
 <form method="get" class="d-flex gap-2 align-items-end mb-3">
@@ -52,21 +63,11 @@
       </div>
 
       <div>
-        <label>Shift (dari DC)</label>
+        <label>Shift (dari Die Casting)</label>
         <select name="shift_id" class="form-select form-select-sm" required>
           <option value="">-- shift --</option>
           <?php foreach ($shifts as $s): ?>
             <option value="<?= $s['id'] ?>"><?= esc($s['shift_name']) ?></option>
-          <?php endforeach; ?>
-        </select>
-      </div>
-
-      <div>
-        <label>Vendor</label>
-        <select name="vendor_id" class="form-select form-select-sm" required>
-          <option value="">-- vendor --</option>
-          <?php foreach ($vendors as $v): ?>
-            <option value="<?= $v['id'] ?>"><?= esc($v['vendor_name']) ?></option>
           <?php endforeach; ?>
         </select>
       </div>
@@ -112,20 +113,18 @@
       <tr>
         <th>Date</th>
         <th>Shift</th>
-        <th>Vendor</th>
         <th>Part</th>
         <th>Target</th>
       </tr>
     </thead>
     <tbody>
       <?php if (empty($schedules)): ?>
-        <tr><td colspan="5" class="text-center text-muted py-4">Belum ada schedule untuk tanggal ini.</td></tr>
+        <tr><td colspan="4" class="text-center text-muted py-4">Belum ada schedule untuk tanggal ini.</td></tr>
       <?php else: ?>
         <?php foreach ($schedules as $r): ?>
           <tr>
             <td class="text-center"><?= esc(date('d/m', strtotime($r['schedule_date']))) ?></td>
             <td class="text-center"><?= esc($r['shift_name'] ?? '-') ?></td>
-            <td><?= esc($r['vendor_name'] ?? 'Vendor tidak diset') ?></td>
             <td>
               <div style="font-weight:900"><?= esc($r['part_no'] ?? '') ?></div>
               <div style="color:#64748b;font-weight:700;font-size:12px;margin-top:2px"><?= esc($r['part_name'] ?? '') ?></div>

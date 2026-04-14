@@ -19,6 +19,14 @@
   <div class="title">BARITORI – Schedule</div>
   <div class="sub">Buat schedule berdasarkan stock sebelumnya dan alokasikan ke Vendor.</div>
 </div>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
+</div>
 
 <form method="get" class="d-flex gap-2 align-items-end mb-3">
   <div>

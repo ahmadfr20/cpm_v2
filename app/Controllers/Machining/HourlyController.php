@@ -608,8 +608,20 @@ class HourlyController extends BaseController
             $shift['slots'] = $filteredSlots;
             $shift['total_minute'] = $totalMinute;
 
+            // Dandori Map
+            $dandoriRecords = $db->table('machining_dandori')
+                ->where('dandori_date', $date)
+                ->where('shift_id', $shift['id'])
+                ->get()->getResultArray();
+
+            $shift['dandori_map'] = [];
+            foreach ($dandoriRecords as $d) {
+                $shift['dandori_map'][$d['machine_id']][$d['product_id']][$d['time_slot_id']] = true;
+                $shift['dandori_map'][$d['machine_id']][$d['product_id']]['is_dandori'] = true;
+            }
+
             // 3. Items Schedule
-            $shift['items'] = $db->table('daily_schedule_items dsi')
+            $rawItems = $db->table('daily_schedule_items dsi')
                 ->select('
                     dsi.id AS dsi_id,
                     dsi.machine_id,
@@ -626,10 +638,19 @@ class HourlyController extends BaseController
                 ->where('ds.schedule_date', $date)
                 ->where('ds.shift_id', $shift['id'])
                 ->where('ds.section', 'Machining')
-                ->where('dsi.target_per_shift >', 0)
                 ->orderBy('m.line_position')
                 ->get()
                 ->getResultArray();
+
+            $shift['items'] = [];
+            foreach ($rawItems as $ritem) {
+                $mId = $ritem['machine_id'];
+                $pId = $ritem['product_id'];
+                $isDandori = isset($shift['dandori_map'][$mId][$pId]['is_dandori']);
+                if ($ritem['target_per_shift'] > 0 || $isDandori) {
+                    $shift['items'][] = $ritem;
+                }
+            }
 
             // 4. Hourly Maps
             $hourly = $db->table('machining_hourly')

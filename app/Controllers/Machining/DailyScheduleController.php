@@ -143,6 +143,10 @@ class DailyScheduleController extends BaseController
             $dandoriMap[$d['shift_id']][$d['machine_id']][$d['product_id']] = $d['time_slot_id'];
         }
 
+        // Cek Role Admin
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+
         return view('machining/schedule/index', [
             'date'          => $date,
             'shifts'        => $shifts,
@@ -151,7 +155,8 @@ class DailyScheduleController extends BaseController
             'machines'      => $machines,
             'planMap'       => $planMap,
             'actualMap'     => $actualMap,
-            'dandoriMap'    => $dandoriMap // Passing Dandori ke View
+            'dandoriMap'    => $dandoriMap,
+            'isAdmin'       => $isAdmin // Pass ke view
         ]);
     }
 

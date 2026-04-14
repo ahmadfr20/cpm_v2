@@ -204,8 +204,22 @@ function isActive($path, $currentUrl)
 
 <li class="nav-item mt-3">
     <a class="nav-link <?= $currentUrl === 'qc' ? 'active' : '' ?>"
-       href="final-inspection/daily-production">
-        <i class="bi bi-hand-thumbs-up me-2"></i> QC
+       href="/qc">
+        <i class="bi bi-shield-check me-2"></i> Quality Control
+    </a>
+</li>
+
+<!-- <li class="nav-item mt-3">
+    <a class="nav-link <?= $currentUrl === 'final-inspection/daily-production' ? 'active' : '' ?>"
+       href="/final-inspection/daily-production">
+        <i class="bi bi-hand-thumbs-up me-2"></i> Final Inspection (Old)
+    </a>
+</li> -->
+
+<li class="nav-item mt-3">
+    <a class="nav-link <?= $currentUrl === 'finished-good/delivery' ? 'active' : '' ?>"
+       href="/finished-good/delivery">
+        <i class="bi bi-box-seam me-2"></i> FG Delivery
     </a>
 </li>
 

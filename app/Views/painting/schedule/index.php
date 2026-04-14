@@ -4,6 +4,14 @@
 <h4 class="mb-3">
     <i class="bi bi-palette me-2"></i> Jadwal Harian Painting
 </h4>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
+</div>
 
 <form method="post" action="/painting/schedule/store" class="card p-3">
 <?= csrf_field() ?>

@@ -93,24 +93,86 @@ class DandoriController extends BaseController
 
             // Insert ulang data yang ada di form
             if (!empty($items) && is_array($items)) {
+                $checkDuplicate = []; // Array untuk melacak duplikasi mesin & jam
+
                 foreach ($items as $row) {
                     if (empty($row['shift_id']) || empty($row['machine_id']) || empty($row['product_id'])) continue;
 
+                    $shiftId = (int)$row['shift_id'];
+                    $machineId = (int)$row['machine_id'];
+                    $productId = (int)$row['product_id'];
+                    $timeSlotId = !empty($row['time_slot_id']) ? (int)$row['time_slot_id'] : null;
+
+                    // Validasi Duplikasi: 1 Mesin tidak boleh ada 2 setup di jam yang sama pada shift yang sama
+                    if ($timeSlotId) {
+                        $duplicateKey = $shiftId . '_' . $machineId . '_' . $timeSlotId;
+                        if (isset($checkDuplicate[$duplicateKey])) {
+                            throw new \Exception("Duplikasi data terdeteksi! Mesin tidak dapat disetup 2 kali pada slot waktu yang sama.");
+                        }
+                        $checkDuplicate[$duplicateKey] = true;
+                    }
+
                     $db->table('machining_dandori')->insert([
                         'dandori_date' => $date,
-                        'shift_id'     => (int)$row['shift_id'],
-                        'machine_id'   => (int)$row['machine_id'],
-                        'product_id'   => (int)$row['product_id'],
-                        'time_slot_id' => !empty($row['time_slot_id']) ? (int)$row['time_slot_id'] : null,
+                        'shift_id'     => $shiftId,
+                        'machine_id'   => $machineId,
+                        'product_id'   => $productId,
+                        'time_slot_id' => $timeSlotId,
                         'activity'     => $row['activity'] ?? 'Setup/Dandori Preparation',
                         'created_at'   => date('Y-m-d H:i:s')
                     ]);
+
+                    // Generate form baru di daily schedule
+                    $processIdRow = $db->table('production_processes')->where('process_name', 'Machining')->get()->getRowArray();
+                    $processIdMC = $processIdRow ? (int)$processIdRow['id'] : 2;
+
+                    $schedule = $db->table('daily_schedules')
+                        ->where([
+                            'schedule_date' => $date, 
+                            'shift_id'      => $shiftId, 
+                            'section'       => 'Machining',
+                            'process_id'    => $processIdMC
+                        ])->get()->getRowArray();
+
+                    if (!$schedule) {
+                        $db->table('daily_schedules')->insert([
+                            'schedule_date' => $date,
+                            'process_id'    => $processIdMC, 
+                            'shift_id'      => $shiftId,
+                            'section'       => 'Machining',
+                            'is_completed'  => 0,
+                            'created_at'    => date('Y-m-d H:i:s')
+                        ]);
+                        $scheduleId = (int)$db->insertID();
+                    } else {
+                        $scheduleId = (int)$schedule['id'];
+                    }
+
+                    $existItem = $db->table('daily_schedule_items')
+                        ->where(['daily_schedule_id' => $scheduleId, 'machine_id' => $machineId, 'product_id' => $productId])
+                        ->get()->getRowArray();
+
+                    if (!$existItem) {
+                        $db->table('daily_schedule_items')->insert([
+                            'daily_schedule_id' => $scheduleId,
+                            'shift_id'          => $shiftId,
+                            'machine_id'        => $machineId,
+                            'product_id'        => $productId,
+                            'cycle_time'        => 0,
+                            'cavity'            => 0,
+                            'target_per_hour'   => 0,
+                            'target_per_shift'  => 0,
+                            'is_selected'       => 1
+                        ]);
+                    }
                 }
             }
 
-            if ($db->transStatus() === false) throw new \Exception('Terjadi kesalahan saat update database.');
-            $db->transCommit();
+            if ($db->transStatus() === false) {
+                throw new \Exception('Terjadi kesalahan saat update database.');
+            }
 
+            $db->transCommit();
             return redirect()->back()->with('success', 'Jadwal Dandori Machining berhasil diperbarui.');
         } catch (\Throwable $e) {
             $db->transRollback();

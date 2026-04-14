@@ -36,6 +36,14 @@
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
   <div>
       <h4 class="mb-0 text-dark fw-bold">DAILY SCHEDULE – ASSY BUSHING</h4>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
+</div>
       <small class="text-muted">Mengambil data dari proses WIP sebelumnya</small>
   </div>
   <div>
@@ -59,7 +67,18 @@
                 <label class="form-label fw-bold text-muted small">PILIH TANGGAL JADWAL</label>
                 <input type="date" name="date" value="<?= esc($date) ?>" class="form-control form-control-sm" onchange="this.form.submit()">
             </div>
-        </form>
+
+            <?php if (isset($isAdmin) && $isAdmin): ?>
+            <div class="col-md-4 ms-auto text-end">
+                <div class="form-check form-switch d-inline-block text-start" style="transform: scale(1.1); transform-origin: right;">
+                    <input class="form-check-input bg-danger border-danger" type="checkbox" id="bypassStockToggle" style="cursor: pointer;">
+                    <label class="form-check-label fw-bold text-danger ms-1" for="bypassStockToggle" style="cursor: pointer;">
+                        <i class="bi bi-unlock-fill"></i> Admin: Bypass Validasi Stok
+                    </label>
+                </div>
+            </div>
+            <?php endif; ?>
+            </form>
     </div>
 </div>
 
@@ -276,6 +295,13 @@ function validatePlanAgainstStock(row, showAlert = true) {
   if (!selectEl || !planEl) return true;
   if (!selectEl.value) return true;
 
+  // --- CEK TOGGLE BYPASS ADMIN ---
+  const bypassToggle = document.getElementById('bypassStockToggle');
+  if (bypassToggle && bypassToggle.checked) {
+      return true; // Langsung lolos tanpa memotong / memvalidasi stok
+  }
+  // -------------------------------
+
   const opt = selectEl.selectedOptions[0];
   const stockPrev = parseInt(planEl.dataset.stockPrev || opt.dataset.stockPrev || '0', 10);
   let v = parseInt(planEl.value || '0', 10);
@@ -366,11 +392,16 @@ $(document).on('change', '.product-select', function() {
 
   setStockBadge(row, stockPrev);
 
-  if (stockPrev <= 0) {
+  // --- TAMBAHAN CEK BYPASS UNTUK ALERT SAAT GANTI PRODUK ---
+  const bypassToggle = document.getElementById('bypassStockToggle');
+  const isBypass = bypassToggle && bypassToggle.checked;
+
+  if (stockPrev <= 0 && !isBypass) {
     alert('Stock kosong pada proses sebelumnya. Tidak bisa scheduling product ini.');
     planEl.value = 0;
     return;
   }
+  // ---------------------------------------------------------
 
   if (!planEl.value || planEl.value == 0) {
       planEl.dataset.manual = ""; 
@@ -383,6 +414,16 @@ $(document).on('input', '.plan-input', function() {
   this.dataset.manual = "1";
   const row = this.closest('tr');
   validatePlanAgainstStock(row, true);
+});
+
+// Aksi ketika Toggle Bypass dinyalakan/dimatikan
+$(document).on('change', '#bypassStockToggle', function() {
+    if (!this.checked) {
+        // Jika Bypass dimatikan, jalankan validasi ulang di semua baris
+        document.querySelectorAll('tr.schedule-row').forEach(row => {
+            validatePlanAgainstStock(row, false);
+        });
+    }
 });
 
 $(document).on('click', '.btn-remove-row', function() {
@@ -441,7 +482,7 @@ $(document).on('click', '.btn-add-machine', function() {
     $(newRow.querySelector('.machine-select')).trigger('change');
 });
 
-// PERBAIKAN JAVASCRIPT: Update text line saat dropdown mesin diubah
+// Update text line saat dropdown mesin diubah
 $(document).on('change', '.machine-select', function() {
     const sel = this.closest('tr').querySelector('.product-select');
     const opt = this.selectedOptions[0]; // Ambil <option> terpilih

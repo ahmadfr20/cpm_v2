@@ -174,7 +174,7 @@ class AssyShaftDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * WIP HELPERS (punyamu, dipertahankan)
+     * WIP HELPERS
      * ===================================================== */
 
     private function normalizeSourceTableValue($db, string $value): string
@@ -361,13 +361,9 @@ class AssyShaftDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * NG DETAIL HELPERS (BARU)
+     * NG DETAIL HELPERS
      * ===================================================== */
 
-    /**
-     * Simpan detail NG (hapus dulu per slot-key, insert ulang)
-     * lalu update qty_ng di hourly = SUM detail
-     */
     private function saveNgDetailsAndUpdateHourlyNg($db, array $items): void
     {
         if (!$db->tableExists('machining_assy_shaft_hourly_ng_details')) return;
@@ -428,7 +424,7 @@ class AssyShaftDailyProductionController extends BaseController
                 if ($ok === false) $this->throwDbError($db, 'Insert NG details gagal');
             }
 
-            // update hourly qty_ng = totalNg (auto)
+            // update hourly qty_ng
             $upd = ['qty_ng' => $totalNg];
             if ($db->fieldExists('updated_at', 'machining_assy_shaft_hourly')) $upd['updated_at'] = $now;
 
@@ -446,7 +442,7 @@ class AssyShaftDailyProductionController extends BaseController
     }
 
     /* =====================================================
-     * HOURLY SAVE (diubah sedikit: qty_ng diabaikan, pakai detail)
+     * HOURLY SAVE
      * ===================================================== */
 
     private function saveHourlyRows($db, array $items): void
@@ -470,7 +466,6 @@ class AssyShaftDailyProductionController extends BaseController
 
             $newFg = (int)($row['ok'] ?? $row['fg'] ?? 0);
 
-            // NG jangan dipakai dari input manual (akan diupdate oleh detail)
             $oldHourly = $db->table('machining_assy_shaft_hourly')
                 ->where([
                     'production_date' => $date,
@@ -490,7 +485,6 @@ class AssyShaftDailyProductionController extends BaseController
                 'product_id'      => $productId,
                 'time_slot_id'    => $timeSlotId,
                 'qty_fg'          => $newFg,
-                // qty_ng biarkan nilai lama; nanti saveNgDetailsAndUpdateHourlyNg() yang set
                 'qty_ng'          => (int)($oldHourly['qty_ng'] ?? 0),
             ];
 
@@ -500,13 +494,13 @@ class AssyShaftDailyProductionController extends BaseController
             $ok = $db->table('machining_assy_shaft_hourly')->replace($payload);
             if ($ok === false) $this->throwDbError($db, 'Replace machining_assy_shaft_hourly gagal');
 
-            // WIP delta update (tetap)
+            // WIP delta update
             $this->applyHourlyDeltaToWip($db, $row, $date, $deltaFg);
         }
     }
 
     /* =====================================================
-     * FINISH SHIFT (punyamu, dipertahankan)
+     * FINISH SHIFT (WIP TRANSFER)
      * ===================================================== */
 
     private function finishAssyShaftTransferFromWip($db, string $date): array
@@ -647,7 +641,6 @@ class AssyShaftDailyProductionController extends BaseController
 
         $shifts = $this->getMachiningShifts($db);
 
-        // ✅ NG Categories
         $ngCategories = [];
         if ($db->tableExists('ng_categories')) {
             $ngCategories = $db->table('ng_categories')
@@ -711,7 +704,7 @@ class AssyShaftDailyProductionController extends BaseController
                 $shift['hourly_map'][(int)$h['machine_id']][(int)$h['product_id']][(int)$h['time_slot_id']] = $h;
             }
 
-            // ✅ NG detail map
+            // NG detail map
             $shift['ng_detail_map'] = [];
             if ($db->tableExists('machining_assy_shaft_hourly_ng_details')) {
                 $details = $db->table('machining_assy_shaft_hourly_ng_details')
@@ -729,14 +722,14 @@ class AssyShaftDailyProductionController extends BaseController
         [$canFinish, $shift3EndDT, $finishError] = $this->canFinishShift($db, $date);
 
         return view('machining/assy_shaft/daily_production/index', [
-            'date'          => $date,
-            'operator'      => $operator,
-            'shifts'        => $shifts,
-            'ngCategories'  => $ngCategories,
-            'canFinish'     => $canFinish,
-            'isAdmin'       => $this->isAdminSession(),
-            'shift3EndAt'   => $shift3EndDT ? $shift3EndDT->format('Y-m-d H:i:s') : null,
-            'finishError'   => $finishError,
+            'date'         => $date,
+            'operator'     => $operator,
+            'shifts'       => $shifts,
+            'ngCategories' => $ngCategories,
+            'canFinish'    => $canFinish,
+            'isAdmin'      => $this->isAdminSession(),
+            'shift3EndAt'  => $shift3EndDT ? $shift3EndDT->format('Y-m-d H:i:s') : null,
+            'finishError'  => $finishError,
         ]);
     }
 

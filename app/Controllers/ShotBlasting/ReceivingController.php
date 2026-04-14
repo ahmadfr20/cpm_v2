@@ -215,16 +215,23 @@ class ReceivingController extends BaseController
     }
 
     /* =========================
-     * INDEX (SAMA DENGAN BARITORI)
+     * INDEX (Menampilkan status proses transfer internal)
      * ========================= */
 
     public function index()
     {
         $db = db_connect();
 
-        // vendor disimpan di material_transactions.process_to
-        $hasVendors = $db->tableExists('vendors');
+        $sbId = $this->getSandBlastingProcessId($db);
+        
+        if (!$sbId) {
+            return view('shot_blasting/receiving/index', [
+                'deliveries' => [],
+                'errorMsg'   => 'Process Shot Blasting tidak ditemukan.',
+            ]);
+        }
 
+        // Tampilkan barang yang telah di-delivery (TRANSFER) tapi belum selesai di-receiving
         $builder = $db->table('material_transactions mt')
             ->select("
                 mt.shift_id,
@@ -234,22 +241,15 @@ class ReceivingController extends BaseController
                 p.part_no,
                 p.part_name,
 
-                mt.process_to AS vendor_id,
-                " . ($hasVendors ? "COALESCE(v.vendor_name,'-')" : "'-'") . " AS vendor_name,
-
-                SUM(CASE WHEN mt.transaction_type='VENDOR_OUT' THEN mt.qty ELSE 0 END) AS qty_out,
-                SUM(CASE WHEN mt.transaction_type='VENDOR_IN'  THEN mt.qty ELSE 0 END) AS qty_in
+                SUM(CASE WHEN mt.transaction_type='TRANSFER' AND mt.process_to = {$sbId} THEN mt.qty ELSE 0 END) AS qty_out,
+                SUM(CASE WHEN mt.transaction_type='FINISH_GOOD' AND mt.process_from = {$sbId} THEN mt.qty ELSE 0 END) AS qty_in
             ")
             ->join('products p', 'p.id = mt.product_id', 'left')
             ->join('shifts s', 's.id = mt.shift_id', 'left')
-            ->whereIn('mt.transaction_type', ['VENDOR_OUT', 'VENDOR_IN'])
-            ->groupBy('mt.shift_id, mt.product_id, mt.process_to')
-            ->orderBy('vendor_name', 'ASC')
+            ->where('mt.process_from', $sbId)
+            ->whereIn('mt.transaction_type', ['TRANSFER', 'FINISH_GOOD'])
+            ->groupBy('mt.shift_id, mt.product_id')
             ->orderBy('p.part_no', 'ASC');
-
-        if ($hasVendors) {
-            $builder->join('vendors v', 'v.id = mt.process_to', 'left');
-        }
 
         $rows = $builder->get()->getResultArray();
 
@@ -259,18 +259,19 @@ class ReceivingController extends BaseController
             $outstanding = max(0, $qtyOut - $qtyIn);
 
             $d['outstanding'] = $outstanding;
-            $d['status'] = ($qtyOut > 0 && $outstanding <= 0) ? 'RECEIVED' : 'OUTSTANDING';
+            $d['status'] = ($qtyOut > 0 && $outstanding <= 0) ? 'COMPLETED' : 'IN PROCESS';
         }
         unset($d);
 
         return view('shot_blasting/receiving/index', [
             'deliveries' => $rows,
+            'errorMsg'   => null,
         ]);
     }
 
     /* =========================
-     * STORE (SAMA DENGAN BARITORI)
-     * - insert VENDOR_IN
+     * STORE (Menerima Hasil Internal Shot Blasting)
+     * - insert FINISH_GOOD
      * - update WIP stock SB
      * ========================= */
 
@@ -285,7 +286,7 @@ class ReceivingController extends BaseController
 
         $sbId = $this->getSandBlastingProcessId($db);
         if (!$sbId) {
-            return redirect()->back()->with('error', 'Process Sand Blasting tidak ditemukan (process_code SB).');
+            return redirect()->back()->with('error', 'Process Shot Blasting tidak ditemukan (process_code SB).');
         }
 
         if (!$db->tableExists('production_wip')) {
@@ -299,9 +300,9 @@ class ReceivingController extends BaseController
             return redirect()->back()->with('error', 'Kolom stock tidak ditemukan di production_wip.');
         }
 
-        $date      = date('Y-m-d');
+        $date       = date('Y-m-d');
         $wipDateCol = $this->detectWipDateColumn($db);
-        $now       = date('Y-m-d H:i:s');
+        $now        = date('Y-m-d H:i:s');
 
         $db->transBegin();
 
@@ -310,20 +311,19 @@ class ReceivingController extends BaseController
                 $qty       = (int)($row['qty'] ?? 0);
                 $productId = (int)($row['product_id'] ?? 0);
                 $shiftId   = (int)($row['shift_id'] ?? 0);
-                $vendorId  = (int)($row['vendor_id'] ?? 0);
 
-                if ($qty <= 0 || $productId <= 0 || $shiftId <= 0 || $vendorId <= 0) continue;
+                if ($qty <= 0 || $productId <= 0 || $shiftId <= 0) continue;
 
-                // outstanding berdasarkan shift+product+vendor(process_to)
+                // Cek outstanding berdasarkan shift + product
                 $sumRow = $db->table('material_transactions')
                     ->select("
-                        SUM(CASE WHEN transaction_type='VENDOR_OUT' THEN qty ELSE 0 END) AS qty_out,
-                        SUM(CASE WHEN transaction_type='VENDOR_IN'  THEN qty ELSE 0 END) AS qty_in
+                        SUM(CASE WHEN transaction_type='TRANSFER' AND process_to = {$sbId} THEN qty ELSE 0 END) AS qty_out,
+                        SUM(CASE WHEN transaction_type='FINISH_GOOD' AND process_from = {$sbId} THEN qty ELSE 0 END) AS qty_in
                     ")
                     ->where('shift_id', $shiftId)
                     ->where('product_id', $productId)
-                    ->where('process_to', $vendorId)
-                    ->whereIn('transaction_type', ['VENDOR_OUT', 'VENDOR_IN'])
+                    ->where('process_from', $sbId)
+                    ->whereIn('transaction_type', ['TRANSFER', 'FINISH_GOOD'])
                     ->get()->getRowArray();
 
                 $qtyOut = (int)($sumRow['qty_out'] ?? 0);
@@ -335,31 +335,29 @@ class ReceivingController extends BaseController
                     throw new \Exception("Qty receive melebihi outstanding. Max: {$outstanding}");
                 }
 
-                // 1) insert VENDOR_IN
+                // 1) insert FINISH_GOOD (sebagai tanda selesai diproses Shot Blasting)
                 $trxPayload = [
                     'transaction_date' => $date,
                     'shift_id'         => $shiftId,
                     'product_id'       => $productId,
                     'qty'              => $qty,
-                    'transaction_type' => 'VENDOR_IN',
+                    'transaction_type' => 'FINISH_GOOD', // Penanda barang selesai diproses di internal
                     'created_at'       => $now,
-
-                    // vendor disimpan di process_to
-                    'process_to'       => $vendorId,
-
-                    // optional tracking (kalau kolom ada)
                     'process_from'     => $sbId,
+                    'process_to'       => $sbId,
                 ];
                 $trxPayload = $this->onlyExistingColumns($db, 'material_transactions', $trxPayload);
 
                 $db->table('material_transactions')->insert($trxPayload);
                 $trxId = (int)$db->insertID();
 
-                // 2) update stock WIP SB (receiving yang isi stock)
+                // 2) update stock WIP SB (receiving memindahkan nilai transfer kembali ke stock siap pakai)
                 $sbSnap       = $this->getLatestSnapshot($db, $date, $sbId, $productId);
                 $sbBefore     = (int)($sbSnap['stock'] ?? 0);
                 $sbTransfer   = (int)($sbSnap['transfer'] ?? 0);
-                $sbAfterStock = $sbBefore + $qty;
+                
+                $sbAfterStock    = $sbBefore + $qty;
+                $sbAfterTransfer = max(0, $sbTransfer - $qty);
 
                 $this->upsertWaitingSnapshot(
                     $db,
@@ -368,7 +366,7 @@ class ReceivingController extends BaseController
                     $productId,
                     $sbId,
                     $sbAfterStock,
-                    $sbTransfer,
+                    $sbAfterTransfer,
                     'material_transactions',
                     $trxId
                 );
@@ -388,7 +386,7 @@ class ReceivingController extends BaseController
                     'status'          => 'DONE',
                     'created_at'      => $now,
                 ];
-                if ($transferCol) $sbIn[$transferCol] = 0;
+                if ($transferCol) $sbIn[$transferCol] = $sbAfterTransfer;
 
                 $sbIn = $this->onlyExistingColumns($db, 'production_wip', $sbIn);
                 $db->table('production_wip')->insert($sbIn);

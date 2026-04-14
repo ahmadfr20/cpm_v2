@@ -6,6 +6,14 @@
      <i class="bi bi-tools me-2 text-warning"></i> JADWAL DANDORI – MACHINING
   </h4>
 </div>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
+</div>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success shadow-sm"><i class="bi bi-check-circle-fill me-2"></i><?= esc(session()->getFlashdata('success')) ?></div>
@@ -18,7 +26,7 @@
   <input type="date" name="date" value="<?= esc($date) ?>" class="form-control fw-bold text-primary" style="max-width:240px" onchange="this.form.submit()">
 </form>
 
-<form method="post" action="<?= site_url('/machining/dandori/store') ?>">
+<form method="post" action="<?= site_url('/machining/dandori/store') ?>" id="dandoriForm">
 <?= csrf_field() ?>
 <input type="hidden" name="date" value="<?= esc($date) ?>">
 
@@ -127,7 +135,7 @@
 
 </form>
 
-<template id="row-template">
+<script type="text/template" id="row-template">
     <tr class="dandori-row">
         <td>
           <input type="hidden" class="input-shift" name="items[{uuid}][shift_id]" value="">
@@ -158,10 +166,9 @@
           </button>
         </td>
     </tr>
-</template>
+</script>
 
 <script>
-// Peta data Time Slot (Agar template baris baru punya dropdown jam yang sesuai dengan shift)
 const shiftSlotsMap = <?= json_encode($shiftSlots) ?>;
 
 function initSelect2() {
@@ -173,12 +180,14 @@ $(document).ready(function() {
 
     // Fungsi Hapus Baris
     $(document).on('click', '.btn-remove-row', function() {
-        const tbody = $(this).closest('tbody');
-        $(this).closest('tr').remove();
-        
-        // Memunculkan text pesan kosong jika di shift tersebut tidak tersisa baris
-        if(tbody.find('tr.dandori-row').length === 0) {
-            tbody.find('.empty-row').show();
+        if(confirm('Yakin ingin menghapus jadwal dandori ini dari form?')) {
+            const tbody = $(this).closest('tbody');
+            $(this).closest('tr').remove();
+            
+            // Memunculkan text pesan kosong jika di shift tersebut tidak tersisa baris
+            if(tbody.find('tr.dandori-row').length === 0) {
+                tbody.find('.empty-row').show();
+            }
         }
     });
 
@@ -198,9 +207,9 @@ $(document).ready(function() {
 
         $newRow.find('.input-shift').val(shiftId);
 
-        // Render dropwdown Time Slot berdasarkan Shift yang diklik
+        // Render dropdown Time Slot berdasarkan Shift yang diklik
         let slots = shiftSlotsMap[shiftId] || [];
-        let selectHtml = `<select class="form-select form-select-sm bg-warning-subtle" name="items[${uuid}][time_slot_id]">
+        let selectHtml = `<select class="form-select form-select-sm bg-warning-subtle" name="items[${uuid}][time_slot_id]" required>
                             <option value="">-- Set Waktu --</option>`;
         slots.forEach(s => {
             selectHtml += `<option value="${s.time_slot_id}">${s.label}</option>`;

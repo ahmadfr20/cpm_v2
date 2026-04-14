@@ -2,6 +2,14 @@
 <?= $this->section('content') ?>
 
 <h4 class="mb-3">MACHINING – DAILY PRODUCTION PER HOUR</h4>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
+</div>
 
 <div class="d-flex flex-wrap align-items-end gap-4 mb-4">
   <div>
@@ -217,8 +225,23 @@
 
               $exist = $shift['hourly_map'][(int)$item['machine_id']][(int)$item['product_id']][(int)$slot['id']] ?? null;
               $ngDetail = $shift['ng_detail_map'][(int)$item['machine_id']][(int)$item['product_id']][(int)$slot['id']] ?? [];
-              $key = $shiftId.'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
+              $key = $date.'_'.$shift['id'].'_'.$item['machine_id'].'_'.$item['product_id'].'_'.$slot['id'];
+              $inputNamePrefix = "items[{$key}]";
+              $isProductDandori = isset($shift['dandori_map'][(int)$item['machine_id']][(int)$item['product_id']]['is_dandori']);
             ?>
+            
+            <?php if ($isProductDandori && $item['target_per_shift'] <= 0): ?>
+                <td colspan="5" class="bg-warning text-dark text-center fw-bold align-middle bg-opacity-25" style="border-right: 2px solid #e5e7eb;">
+                    <i class="bi bi-tools"></i> <span>DANDORI</span>
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[date]" value="<?= esc($date) ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[shift_id]" value="<?= $shift['id'] ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[machine_id]" value="<?= $item['machine_id'] ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[product_id]" value="<?= $item['product_id'] ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[time_slot_id]" value="<?= $slot['id'] ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[fg]" value="0">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[downtime_category_id]" value="0">
+                </td>
+            <?php else: ?>
 
               <td class="slot-target-cell fw-bold bg-light text-center" data-slot-id="<?= $slot['id'] ?>">
                  <span class="slot-target-display"><?= (int)$targetSlot ?></span>
@@ -233,7 +256,7 @@
                        data-shift-id="<?= $shift['id'] ?>"
                        data-slot-id="<?= $slot['id'] ?>"
                        value="<?= (int)($exist['qty_fg'] ?? 0) ?>"
-                       name="items[<?= esc($key) ?>][fg]">
+                       name="<?= $inputNamePrefix ?>[fg]">
               </td>
 
               <td>
@@ -242,7 +265,7 @@
                        readonly
                        id="ngTotalInput_<?= esc($key) ?>"
                        value="<?= (int)($exist['qty_ng'] ?? 0) ?>"
-                       name="items[<?= esc($key) ?>][ng]">
+                       name="<?= $inputNamePrefix ?>[ng]">
               </td>
 
               <td class="text-start outer-td">
@@ -279,21 +302,21 @@
 
                 <div class="ng-hidden d-none" id="ngHidden_<?= esc($key) ?>">
                   <?php foreach ($ngDetail as $idx => $d): ?>
-                    <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][ng_category_id]" value="<?= (int)$d['ng_category_id'] ?>">
-                    <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][qty]" value="<?= (int)$d['qty'] ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[ng_details][<?= $idx ?>][ng_category_id]" value="<?= (int)$d['ng_category_id'] ?>">
+                    <input type="hidden" name="<?= $inputNamePrefix ?>[ng_details][<?= $idx ?>][qty]" value="<?= (int)$d['qty'] ?>">
                   <?php endforeach; ?>
                 </div>
                 
-                <input type="hidden" name="items[<?= esc($key) ?>][shift_id]" value="<?= (int)$shiftId ?>">
-                <input type="hidden" name="items[<?= esc($key) ?>][machine_id]" value="<?= (int)$item['machine_id'] ?>">
-                <input type="hidden" name="items[<?= esc($key) ?>][product_id]" value="<?= (int)$item['product_id'] ?>">
-                <input type="hidden" name="items[<?= esc($key) ?>][time_slot_id]" value="<?= (int)$slot['id'] ?>">
-                <input type="hidden" name="items[<?= esc($key) ?>][date]" value="<?= esc($date) ?>">
+                <input type="hidden" name="<?= $inputNamePrefix ?>[shift_id]" value="<?= (int)$shiftId ?>">
+                <input type="hidden" name="<?= $inputNamePrefix ?>[machine_id]" value="<?= (int)$item['machine_id'] ?>">
+                <input type="hidden" name="<?= $inputNamePrefix ?>[product_id]" value="<?= (int)$item['product_id'] ?>">
+                <input type="hidden" name="<?= $inputNamePrefix ?>[time_slot_id]" value="<?= (int)$slot['id'] ?>">
+                <input type="hidden" name="<?= $inputNamePrefix ?>[date]" value="<?= esc($date) ?>">
               </td>
 
               <td>
                 <select class="form-select form-select-sm dt-sel text-danger" 
-                        name="items[<?= esc($key) ?>][downtime_category_id]" 
+                        name="<?= $inputNamePrefix ?>[downtime_category_id]" 
                         data-shift-id="<?= $shift['id'] ?>" 
                         data-slot-id="<?= $slot['id'] ?>">
                     <option value="0" data-value="0">-- Tidak Ada --</option>
@@ -305,6 +328,7 @@
                     <?php endforeach; ?>
                 </select>
               </td>
+            <?php endif; ?>
 
             <?php endforeach ?>
           </tr>
@@ -323,17 +347,7 @@
 
   <?php endforeach ?>
 
-  <div class="position-sticky bottom-0 bg-white p-3 border-top shadow-sm d-flex gap-2 justify-content-between mt-3 z-3">
-      <?php if ($canFinish): ?>
-        <button type="button" class="btn btn-danger fw-bold shadow-sm px-4" onclick="confirmFinishShift()">
-          <i class="bi bi-box-arrow-right me-1"></i> Finish Shift (Transfer)
-        </button>
-      <?php else: ?>
-        <button type="button" class="btn btn-secondary fw-bold shadow-sm px-4" disabled title="<?= esc($finishError) ?>">
-          <i class="bi bi-lock me-1"></i> Finish Shift (Locked)
-        </button>
-      <?php endif; ?>
-
+  <div class="position-sticky bottom-0 bg-white p-3 border-top shadow-sm d-flex gap-2 justify-content-end mt-3 z-3">
       <button class="btn btn-success fw-bold shadow-sm px-5" id="btnSave" type="submit">
         <i class="bi bi-save me-1"></i> Simpan Data Produksi
       </button>
@@ -761,14 +775,6 @@ document.querySelectorAll('.ng-inline[data-key]').forEach(box=>{
   const shiftId = btn ? btn.dataset.shiftId : null;
   renderNgTable(key, shiftId);
 });
-
-function confirmFinishShift() {
-  if (confirm('Yakin akan mengakhiri Shift? Transaksi akan dikirim ke WIP Proses berikutnya dan jadwal shift ini tidak dapat diubah lagi.')) {
-      const form = document.getElementById('hourlyForm');
-      form.action = '/machining/hourly/finish-shift';
-      form.submit();
-  }
-}
 </script>
 
 <?= $this->endSection() ?>

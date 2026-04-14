@@ -348,4 +348,20 @@ $routes->group('final-inspection', ['filter' => 'auth:OPERATOR,FI'], function ($
     $routes->post('daily-production/save-slot', 'FinalInspection\FinalInspectionController::saveSlot');
 });
 
+$routes->group('finished-good', ['filter' => 'auth'], function ($routes) {
+    $routes->get('delivery', 'FinishedGood\DeliveryController::index');
+    $routes->post('delivery/store', 'FinishedGood\DeliveryController::store');
+    $routes->get('delivery/get-ready-stock', 'FinishedGood\DeliveryController::getReadyStock');
+    $routes->get('delivery/invoice/(:num)', 'FinishedGood\DeliveryController::invoice/$1');
+    $routes->get('delivery/export', 'FinishedGood\DeliveryController::export');
+});
+
+/**
+ * QC (NEW)
+ */
+$routes->group('qc', ['filter' => 'auth'], function ($routes) {
+    $routes->get('/', 'QC\QCController::index');
+    $routes->post('store', 'QC\QCController::store');
+});
+
 $routes->get('/asakai', 'AsakaiController::index', ['filter' => 'auth']);

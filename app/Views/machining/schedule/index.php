@@ -44,6 +44,14 @@
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
   <div>
       <h4 class="mb-0 text-dark fw-bold">DAILY SCHEDULE – MACHINING</h4>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
+</div>
       <small class="text-muted">Mengambil data dari WIP Transfer Machining</small>
   </div>
   <div>
@@ -67,7 +75,18 @@
                 <label class="form-label fw-bold text-muted small">PILIH TANGGAL JADWAL</label>
                 <input type="date" name="date" value="<?= esc($date) ?>" class="form-control form-control-sm" onchange="this.form.submit()">
             </div>
-        </form>
+
+            <?php if (isset($isAdmin) && $isAdmin): ?>
+            <div class="col-md-4 ms-auto text-end">
+                <div class="form-check form-switch d-inline-block text-start" style="transform: scale(1.1); transform-origin: right;">
+                    <input class="form-check-input bg-danger border-danger" type="checkbox" id="bypassStockToggle" style="cursor: pointer;">
+                    <label class="form-check-label fw-bold text-danger ms-1" for="bypassStockToggle" style="cursor: pointer;">
+                        <i class="bi bi-unlock-fill"></i> Admin: Bypass Validasi Stok
+                    </label>
+                </div>
+            </div>
+            <?php endif; ?>
+            </form>
     </div>
 </div>
 
@@ -332,6 +351,13 @@ function validatePlanAgainstStock(row, showAlert = true) {
   if (!selectEl || !planEl) return true;
   if (!selectEl.value) return true;
 
+  // --- CEK TOGGLE BYPASS ADMIN ---
+  const bypassToggle = document.getElementById('bypassStockToggle');
+  if (bypassToggle && bypassToggle.checked) {
+      return true; // Langsung lolos tanpa memotong / memvalidasi stok
+  }
+  // -------------------------------
+
   const opt = selectEl.selectedOptions[0];
   const stockReady = parseInt(planEl.dataset.stockReady || opt.dataset.stockReady || '0', 10);
   let planVal = parseInt(planEl.value || '0', 10);
@@ -430,11 +456,16 @@ $(document).on('change', '.product-select', function() {
   planEl.dataset.stockReady = String(stockReady);
   updateStockDisplay(row, stockReady, ngBefore, ngList);
 
-  if (stockReady <= 0) {
+  // --- TAMBAHAN CEK BYPASS UNTUK ALERT ALERT SAAT CHANGE PRODUK ---
+  const bypassToggle = document.getElementById('bypassStockToggle');
+  const isBypass = bypassToggle && bypassToggle.checked;
+
+  if (stockReady <= 0 && !isBypass) {
     alert('Stok di Area Machining Kosong. Tidak bisa menjadwalkan part ini.');
     planEl.value = 0;
     return;
   }
+  // ---------------------------------------------------------------
 
   if (!planEl.value || planEl.value == 0) {
     planEl.dataset.manual = ""; 
@@ -447,6 +478,16 @@ $(document).on('input', '.plan-input', function() {
   this.dataset.manual = "1";
   const row = this.closest('tr');
   validatePlanAgainstStock(row, true);
+});
+
+// Aksi ketika Toggle Bypass dinyalakan/dimatikan
+$(document).on('change', '#bypassStockToggle', function() {
+    if (!this.checked) {
+        // Jika Bypass dimatikan, jalankan validasi ulang di semua baris
+        document.querySelectorAll('tr.schedule-row').forEach(row => {
+            validatePlanAgainstStock(row, false);
+        });
+    }
 });
 
 // Aksi Toggle Dandori
@@ -555,6 +596,7 @@ $(document).on('submit', '.mc-form', function(e){
   for (const row of rows) {
     const isDandoriChecked = row.querySelector('.dandori-toggle').checked;
     
+    // Saat disubmit, pastikan validasinya berjalan jika tidak bypass
     const ok = validatePlanAgainstStock(row, !isDandoriChecked); 
     
     if (!ok && !isDandoriChecked) {

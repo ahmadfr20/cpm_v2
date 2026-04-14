@@ -406,6 +406,11 @@ class AssyBushingDailyScheduleController extends BaseController
             }
         }
 
+        // --- TAMBAHAN: Cek Role Admin ---
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+        // --------------------------------
+
         return view('machining/assy_bushing_schedule/index', [
             'date'          => $date,
             'shifts'        => $shifts,
@@ -413,7 +418,8 @@ class AssyBushingDailyScheduleController extends BaseController
             'shiftEndSlots' => $shiftEndSlots,
             'machines'      => $machines,
             'planMap'       => $planMap,
-            'actualMap'     => $actualMap
+            'actualMap'     => $actualMap,
+            'isAdmin'       => $isAdmin // <- pass ke view
         ]);
     }
 
@@ -523,6 +529,9 @@ class AssyBushingDailyScheduleController extends BaseController
         $deny = $this->guardScheduleDateByRoleRedirect($date);
         if ($deny) return $deny;
 
+        $role = session()->get('role') ?? '';
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+
         $processIdAB = $this->getProcessIdAssyBushing($db);
         $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
         $hasEndSlotCol = $db->fieldExists('end_time_slot_id', 'daily_schedules');
@@ -618,8 +627,10 @@ class AssyBushingDailyScheduleController extends BaseController
                     $delta = $planInput - $oldPlan;
                     if ($delta > 0) {
                         $stockPrev = $this->getPrevProcessStock($db, $date, $productId, $prevProcessIdNew);
-                        if ($stockPrev <= 0) throw new \Exception("Stock kosong pada proses sebelumnya untuk Product ID {$productId}.");
-                        if ($delta > $stockPrev) throw new \Exception("Scheduling tambahan ({$delta}) > stock ({$stockPrev}) untuk Product ID {$productId}.");
+                        if (!$isAdmin) { // Hanya validasi error untuk selain Admin
+                            if ($stockPrev <= 0) throw new \Exception("Stock kosong pada proses sebelumnya untuk Product ID {$productId}.");
+                            if ($delta > $stockPrev) throw new \Exception("Scheduling tambahan ({$delta}) > stock ({$stockPrev}) untuk Product ID {$productId}.");
+                        }
                     }
                     if ($delta !== 0) {
                         $this->applyPrevReserveToNext($db, $date, $productId, $prevProcessIdNew, $delta);
