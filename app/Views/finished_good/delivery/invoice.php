@@ -68,7 +68,7 @@
 <body>
 
 <div class="print-actions">
-    <button class="btn-print" onclick="window.print()"><i>🖨</i> Print Invoice</button>
+    <button class="btn-print" onclick="window.print()"><i>🖨</i> Print DO</button>
     <button class="btn-back" onclick="window.close()">✕ Tutup</button>
 </div>
 
@@ -79,7 +79,7 @@
             <p>Production Management System</p>
         </div>
         <div class="invoice-label">
-            <h2>INVOICE</h2>
+            <h2>DELIVERY ORDER</h2>
             <div class="inv-no"><?= esc($delivery['invoice_no'] ?? '-') ?></div>
             <div class="inv-date"><?= date('d F Y', strtotime($delivery['delivery_date'] ?? 'now')) ?></div>
         </div>

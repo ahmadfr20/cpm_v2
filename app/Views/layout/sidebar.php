@@ -19,6 +19,13 @@ function isActive($path, $currentUrl)
     </a>
 </li>
 
+<li class="nav-item">
+    <a class="nav-link <?= isActive('inventory-fg', $currentUrl) ? 'active' : 'text-white' ?>"
+       href="/inventory-fg">
+        <i class="bi bi-box-seam me-2 text-success"></i> Inventory FG
+    </a>
+</li>
+
 <!-- <li class="nav-item mt-3">
     <a class="nav-link <?= $currentUrl === 'dashboard' ? 'active' : '' ?>"
        href="/production/daily-schedule/list">
@@ -67,6 +74,7 @@ function isActive($path, $currentUrl)
 <ul class="nav flex-column ms-3">
 
 <li><a class="nav-link" href="/ppc/good-receive">Good Receive</a></li>
+<li><a class="nav-link <?= isActive('ppc/qc-schedule',$currentUrl)?'active':'' ?>" href="/ppc/qc-schedule">QC Schedule</a></li>
 
 <li class="text-secondary small mt-2">Die Casting</li>
 <li><a class="nav-link" href="/die-casting/daily-schedule">Daily Schedule</a></li>

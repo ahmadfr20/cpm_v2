@@ -364,4 +364,19 @@ $routes->group('qc', ['filter' => 'auth'], function ($routes) {
     $routes->post('store', 'QC\QCController::store');
 });
 
+$routes->group('ppc', ['filter' => 'auth:PPIC'], function ($routes) {
+    $routes->get('qc-schedule', 'QC\QCScheduleController::index');
+    $routes->post('qc-schedule/store', 'QC\QCScheduleController::store');
+    $routes->post('qc-schedule/delete/(:num)', 'QC\QCScheduleController::delete/$1');
+    $routes->get('qc-schedule/available-stock', 'QC\QCScheduleController::getAvailableStock');
+});
+
+/**
+ * FG Inventory
+ */
+$routes->group('inventory-fg', ['filter' => 'auth'], function ($routes) {
+    $routes->get('/', 'FinishedGood\FgInventoryController::index');
+    $routes->get('export', 'FinishedGood\FgInventoryController::exportCsv');
+});
+
 $routes->get('/asakai', 'AsakaiController::index', ['filter' => 'auth']);

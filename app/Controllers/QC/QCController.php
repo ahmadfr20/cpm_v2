@@ -3,7 +3,6 @@
 namespace App\Controllers\QC;
 
 use App\Controllers\BaseController;
-use CodeIgniter\Files\File;
 
 class QCController extends BaseController
 {
@@ -41,129 +40,44 @@ class QCController extends BaseController
     }
 
     /**
-     * For a given product, find the process that comes right before the QC/FI process.
-     * This is the "last production step" before inspection.
+     * Get items that have been scheduled for QC inspection today.
      */
-    private function getProcessBeforeQc($db, int $productId, int $qcProcessId): int
+    private function getScheduledItemsForQc($db, string $date): array
     {
-        $flows = $db->table('product_process_flows')
-            ->select('process_id')
-            ->where('product_id', $productId)
-            ->where('is_active', 1)
-            ->orderBy('sequence', 'ASC')
+        if (!$db->tableExists('qc_schedules')) return [];
+
+        $schedules = $db->table('qc_schedules qs')
+            ->select('qs.id as schedule_id, qs.product_id, qs.source_process_id, qs.qty_plan, qs.qty_inspected,
+                      p.part_no, p.part_name, pp.process_name as source_process_name')
+            ->join('products p', 'p.id = qs.product_id', 'left')
+            ->join('production_processes pp', 'pp.id = qs.source_process_id', 'left')
+            ->where('qs.schedule_date', $date)
+            ->where('qs.status !=', 'COMPLETED')
+            ->orderBy('qs.created_at', 'DESC')
             ->get()->getResultArray();
 
-        $prev = 0;
-        foreach ($flows as $f) {
-            if ((int)$f['process_id'] === $qcProcessId) {
-                return $prev; // return the process right before QC
-            }
-            $prev = (int)$f['process_id'];
-        }
-        return $prev; // fallback: return last process if QC not found in flow
-    }
-
-    /**
-     * Collect all WIP items ready for QC inspection from two sources:
-     *   1) Explicitly transferred to QC: to_process_id = qcProcessId (FI)
-     *   2) Stock sitting at the last production step before FI (fallback when
-     *      "Finish Shift" transfer hasn't been done yet)
-     */
-    private function getWipItemsForQc($db, string $date, int $qcProcessId): array
-    {
-        if (!$db->tableExists('production_wip')) return [];
-
-        $wipDateCol = $db->fieldExists('wip_date', 'production_wip') ? 'wip_date' : 'production_date';
-
-        // --- Source 1: WIP explicitly destined for QC/FI ---
-        $rows = $db->table('production_wip pw')
-            ->select('pw.id AS wip_id, pw.product_id, pw.from_process_id, pw.to_process_id,
-                      pw.qty, pw.qty_in, pw.qty_out, pw.stock, pw.status,
-                      pw.' . $wipDateCol . ' AS production_date,
-                      p.part_no, p.part_name,
-                      pr_from.process_name AS from_process_name,
-                      pr_to.process_name AS to_process_name')
-            ->join('products p', 'p.id = pw.product_id')
-            ->join('production_processes pr_from', 'pr_from.id = pw.from_process_id', 'left')
-            ->join('production_processes pr_to', 'pr_to.id = pw.to_process_id', 'left')
-            ->where('pw.to_process_id', $qcProcessId)
-            ->where('pw.stock >', 0)
-            ->where("pw.status !=", 'DONE')
-            ->where("pw.$wipDateCol <=", $date)
-            ->orderBy("pw.$wipDateCol", 'DESC')
-            ->orderBy('pw.id', 'DESC')
-            ->get()->getResultArray();
-
-        // --- Source 2: Stock at the last production step before FI ---
-        // For each product, determine which process is right before FI,
-        // then fetch WIP where to_process_id = that process and stock > 0
-        $products = $db->table('products')->where('is_active', 1)->get()->getResultArray();
-        $seenProducts = [];
-
-        foreach ($products as $p) {
-            $pid = (int)$p['id'];
-            $lastProdProcessId = $this->getProcessBeforeQc($db, $pid, $qcProcessId);
-            if ($lastProdProcessId <= 0) continue;
-
-            // Find WIP records where items are AT the last production step
-            // (to_process_id = last process before FI, meaning stock arrived there)
-            $fallbackRows = $db->table('production_wip pw')
-                ->select('pw.id AS wip_id, pw.product_id, pw.from_process_id, pw.to_process_id,
-                          pw.qty, pw.qty_in, pw.qty_out, pw.stock, pw.status,
-                          pw.' . $wipDateCol . ' AS production_date,
-                          p.part_no, p.part_name,
-                          pr_from.process_name AS from_process_name,
-                          pr_to.process_name AS to_process_name')
-                ->join('products p', 'p.id = pw.product_id')
-                ->join('production_processes pr_from', 'pr_from.id = pw.from_process_id', 'left')
-                ->join('production_processes pr_to', 'pr_to.id = pw.to_process_id', 'left')
-                ->where('pw.product_id', $pid)
-                ->where('pw.to_process_id', $lastProdProcessId)
-                ->where('pw.stock >', 0)
-                ->where("pw.status !=", 'DONE')
-                ->where("pw.$wipDateCol <=", $date)
-                ->orderBy("pw.$wipDateCol", 'DESC')
-                ->orderBy('pw.id', 'DESC')
-                ->get()->getResultArray();
-
-            $rows = array_merge($rows, $fallbackRows);
-        }
-
-        // Aggregate by product (multiple WIP rows for same product)
         $items = [];
-        foreach ($rows as $r) {
-            $pid = (int)$r['product_id'];
-            if (!isset($items[$pid])) {
-                $fromName = $r['from_process_name'] ?: 'Production';
-                $toName   = $r['to_process_name'] ?: '';
-                $label    = $fromName;
-                if ($toName && (int)$r['to_process_id'] !== $qcProcessId) {
-                    $label = $toName . ' (output)';
-                }
+        foreach ($schedules as $sched) {
+            $pid = (int)$sched['product_id'];
+            $remaining = (int)$sched['qty_plan'] - (int)$sched['qty_inspected'];
+            
+            if ($remaining <= 0) continue; // Safety check
 
-                $items[$pid] = [
-                    'wip_ids'         => [],
-                    'product_id'      => $pid,
-                    'part_no'         => $r['part_no'],
-                    'part_name'       => $r['part_name'],
-                    'from_process'    => $label,
-                    'production_date' => $r['production_date'],
-                    'total_stock'     => 0,
-                    'total_qty_in'    => 0,
-                    'total_qty_out'   => 0,
-                ];
-            }
-
-            $items[$pid]['wip_ids'][] = [
-                'id'    => (int)$r['wip_id'],
-                'stock' => (int)$r['stock'],
+            $items[] = [
+                'schedule_id'       => $sched['schedule_id'],
+                'product_id'        => $pid,
+                'part_no'           => $sched['part_no'],
+                'part_name'         => $sched['part_name'],
+                'source_process_id' => $sched['source_process_id'],
+                'from_process'      => $sched['source_process_name'] ?: 'Unknown Process',
+                'production_date'   => $date,
+                'total_stock'       => $remaining, // remaining in schedule
+                'qty_plan'          => $sched['qty_plan'],
+                'qty_inspected'     => $sched['qty_inspected']
             ];
-            $items[$pid]['total_stock']   += (int)$r['stock'];
-            $items[$pid]['total_qty_in']  += (int)($r['qty_in'] ?? $r['qty'] ?? 0);
-            $items[$pid]['total_qty_out'] += (int)($r['qty_out'] ?? 0);
         }
 
-        return array_values($items);
+        return $items;
     }
 
     public function index()
@@ -175,11 +89,8 @@ class QCController extends BaseController
         $qcProcessId = $this->getQcProcessId($db);
         $fgProcessId = $this->getFgProcessId($db);
 
-        // Get WIP items destined for QC/FI with stock > 0
-        $wips = [];
-        if ($qcProcessId > 0) {
-            $wips = $this->getWipItemsForQc($db, $date, $qcProcessId);
-        }
+        // Get scheduled items for QC
+        $wips = $this->getScheduledItemsForQc($db, $date);
 
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
@@ -194,9 +105,10 @@ class QCController extends BaseController
 
         // Get today's inspections to display what has been inspected
         $inspections = $db->table('qc_inspections qc')
-            ->select('qc.*, p.part_no, p.part_name, s.shift_name')
+            ->select('qc.*, p.part_no, p.part_name, s.shift_name, pp.process_name')
             ->join('products p', 'p.id = qc.product_id')
             ->join('shifts s', 's.id = qc.shift_id', 'left')
+            ->join('production_processes pp', 'pp.id = qc.source_process_id', 'left')
             ->where('qc.production_date', $date)
             ->orderBy('qc.created_at', 'DESC')
             ->get()->getResultArray();
@@ -233,22 +145,31 @@ class QCController extends BaseController
         $db = db_connect();
 
         $date       = $this->request->getPost('production_date');
-        $shiftId    = (int)$this->request->getPost('shift_id');
         $productId  = (int)$this->request->getPost('product_id');
+        $scheduleId = (int)$this->request->getPost('schedule_id');
         $qtyOk      = (int)$this->request->getPost('qty_ok');
         $inspectedBy = session()->get('fullname') ?? 'QC Operator';
 
-        if (empty($date) || empty($shiftId) || empty($productId)) {
+        if (empty($date) || empty($productId) || empty($scheduleId)) {
             return redirect()->back()->with('error', 'Data input tidak lengkap.');
         }
 
         $qcProcessId = $this->getQcProcessId($db);
         $fgProcessId = $this->getFgProcessId($db);
 
+        $schedule = $db->table('qc_schedules')->where('id', $scheduleId)->get()->getRowArray();
+        if (!$schedule) {
+            return redirect()->back()->with('error', 'QC Schedule tidak ditemukan.');
+        }
+        $sourceProcessId = (int)$schedule['source_process_id'];
+        $shiftId = (int)$schedule['shift_id'];
+
         $db->transBegin();
         try {
             // 1. Save main inspection record
             $db->table('qc_inspections')->insert([
+                'qc_schedule_id'  => $scheduleId,
+                'source_process_id'=> $sourceProcessId,
                 'production_date' => $date,
                 'shift_id'        => $shiftId,
                 'product_id'      => $productId,
@@ -306,14 +227,12 @@ class QCController extends BaseController
             ]);
 
             // 4. Deduct stock from WIP records
-            //    First try: WIP with to_process_id = QC (explicit transfers)
-            //    Second try: WIP at the last production step before QC (fallback)
-            if ($qcProcessId > 0 && $db->tableExists('production_wip')) {
+            //    Source: WIP lying at source_process_id
+            if ($sourceProcessId > 0 && $db->tableExists('production_wip')) {
                 $wipDateCol = $db->fieldExists('wip_date', 'production_wip') ? 'wip_date' : 'production_date';
 
-                // Source 1: WIP destined for QC
                 $wipRows = $db->table('production_wip')
-                    ->where('to_process_id', $qcProcessId)
+                    ->where('to_process_id', $sourceProcessId)
                     ->where('product_id', $productId)
                     ->where('stock >', 0)
                     ->where("status !=", 'DONE')
@@ -321,21 +240,6 @@ class QCController extends BaseController
                     ->orderBy($wipDateCol, 'ASC')
                     ->orderBy('id', 'ASC')
                     ->get()->getResultArray();
-
-                // Source 2: WIP at the last production step before QC
-                $lastProdProcessId = $this->getProcessBeforeQc($db, $productId, $qcProcessId);
-                if ($lastProdProcessId > 0) {
-                    $fallbackWip = $db->table('production_wip')
-                        ->where('to_process_id', $lastProdProcessId)
-                        ->where('product_id', $productId)
-                        ->where('stock >', 0)
-                        ->where("status !=", 'DONE')
-                        ->where("$wipDateCol <=", $date)
-                        ->orderBy($wipDateCol, 'ASC')
-                        ->orderBy('id', 'ASC')
-                        ->get()->getResultArray();
-                    $wipRows = array_merge($wipRows, $fallbackWip);
-                }
 
                 $remaining = $totalInspected;
 
@@ -357,6 +261,15 @@ class QCController extends BaseController
                     $remaining -= $deduct;
                 }
             }
+
+            // Update qc_schedules qty_inspected
+            $newInspected = (int)$schedule['qty_inspected'] + $totalInspected;
+            $status = ($newInspected >= (int)$schedule['qty_plan']) ? 'COMPLETED' : 'IN_PROGRESS';
+            $db->table('qc_schedules')->where('id', $scheduleId)->update([
+                'qty_inspected' => $newInspected,
+                'status'        => $status,
+                'updated_at'    => date('Y-m-d H:i:s')
+            ]);
 
             // 5. Forward PASS (OK) qty to Finished Good stock
             if ($qtyOk > 0 && $fgProcessId > 0 && $qcProcessId > 0 && $db->tableExists('production_wip')) {

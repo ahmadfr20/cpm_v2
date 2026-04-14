@@ -103,7 +103,7 @@
                         <th style="width:40px">No</th>
                         <th style="width:220px">Customer</th>
                         <th>Part No & Name</th>
-                        <th style="width:160px">DO Number</th>
+                        <th style="width:140px" class="text-center">DO Number</th>
                         <th style="width:110px" class="text-center">Ready FG</th>
                         <th style="width:130px" class="text-center">Qty Kirim</th>
                         <th style="width:50px"></th>
@@ -179,7 +179,7 @@
                             </td>
                             <td class="text-center">
                                 <a href="<?= site_url('/finished-good/delivery/invoice/' . $h['id']) ?>" target="_blank" class="btn btn-sm btn-outline-primary fw-bold">
-                                    <i class="bi bi-printer me-1"></i> Invoice
+                                    <i class="bi bi-printer me-1"></i> Cetak Hasil
                                 </a>
                             </td>
                         </tr>
@@ -248,7 +248,7 @@ function addRow() {
         <td class="row-no fw-bold">${rowCount}</td>
         <td><select name="items[${rowCount}][customer_id]" class="form-select form-select-sm fw-bold" required>${custOpts}</select></td>
         <td><select name="items[${rowCount}][product_id]" class="form-select form-select-sm product-select fw-bold" required>${prodOpts}</select></td>
-        <td><input type="text" name="items[${rowCount}][do_number]" class="form-control form-control-sm text-center fw-bold" placeholder="DO-XXX"></td>
+        <td class="text-center"><span class="badge bg-light text-secondary border px-2 py-1 w-100 fs-7">Auto Generate</span></td>
         <td class="ready-fg text-center fw-bold">-</td>
         <td><input type="number" name="items[${rowCount}][qty]" class="form-control form-control-sm text-center qty-input fw-bold" min="1" placeholder="0" required readonly></td>
         <td><button type="button" class="btn btn-sm btn-outline-danger btn-remove-row"><i class="bi bi-x-lg"></i></button></td>

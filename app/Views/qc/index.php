@@ -52,18 +52,18 @@
     <div class="col-xl-12 mb-4">
         <div class="qc-card bg-white">
             <div class="qc-card-header bg-gradient-qc">
-                <h4 class="qc-card-title text-white"><i class="bi bi-hourglass-split me-2"></i> Menunggu Inspeksi (WIP)</h4>
+                <h4 class="qc-card-title text-white"><i class="bi bi-hourglass-split me-2"></i> Schedule Inspeksi Hari Ini</h4>
             </div>
             <div class="table-responsive">
                 <table class="qc-table table-hover">
                     <thead>
                         <tr>
-                            <th>Tanggal WIP</th>
+                            <th>Tgl Schedule</th>
                             <th>Part No</th>
                             <th>Part Name</th>
                             <th>Dari Proses</th>
-                            <th class="text-center">Stock Tersedia</th>
-                            <th>Status</th>
+                            <th class="text-center">Maksimal Inspeksi</th>
+                            <th>Progress</th>
                             <th class="text-center">Aksi</th>
                         </tr>
                     </thead>
@@ -72,7 +72,7 @@
                             <tr>
                                 <td colspan="7" class="text-center py-5 text-muted fw-bold">
                                     <i class="bi bi-inbox fs-2 d-block mb-3"></i>
-                                    Tidak ada produk yang menunggu Quality Control.
+                                    Tidak ada QC schedule tersisa untuk hari ini.
                                 </td>
                             </tr>
                         <?php else: ?>
@@ -80,9 +80,6 @@
                                 <?php 
                                     $stock = (int)$wip['total_stock'];
                                     if ($stock <= 0) continue;
-                                    
-                                    // Encode wip_ids for deduction
-                                    $wipIdsJson = htmlspecialchars(json_encode($wip['wip_ids']), ENT_QUOTES, 'UTF-8');
                                 ?>
                                 <tr>
                                     <td><?= date('d/m/Y', strtotime($wip['production_date'])) ?></td>
@@ -95,14 +92,14 @@
                                     </td>
                                     <td class="text-center"><span class="badge-soft-warning fs-6"><?= number_format($stock) ?> Pcs</span></td>
                                     <td>
-                                        <div class="small">
-                                            Masuk: <?= number_format((int)$wip['total_qty_in']) ?><br>
-                                            Diperiksa: <?= number_format((int)$wip['total_qty_out']) ?>
+                                        <div class="small fw-bold">
+                                            Plan: <?= number_format((int)$wip['qty_plan']) ?><br>
+                                            <span class="text-success">Done: <?= number_format((int)$wip['qty_inspected']) ?></span>
                                         </div>
                                     </td>
                                     <td class="text-center">
                                         <button type="button" class="btn-inspect shadow-sm" 
-                                                onclick="openInspectionModal(<?= $wip['product_id'] ?>, '<?= esc($wip['part_no']) ?>', '<?= esc($wip['part_name']) ?>', <?= $stock ?>)">
+                                                onclick="openInspectionModal(<?= $wip['product_id'] ?>, <?= $wip['schedule_id'] ?>, '<?= esc($wip['part_no']) ?>', '<?= esc($wip['part_name']) ?>', <?= $stock ?>)">
                                             <i class="bi bi-search me-1"></i> Inspeksi
                                         </button>
                                     </td>
@@ -146,7 +143,7 @@
                                     <td><?= date('H:i', strtotime($ins['created_at'])) ?></td>
                                     <td>
                                         <span class="fw-bold d-block text-dark"><?= esc($ins['shift_name'] ?? '-') ?></span>
-                                        <span class="small text-muted"><i class="bi bi-person-badge"></i> <?= esc($ins['inspected_by'] ?? '-') ?></span>
+                                        <span class="small text-muted"><i class="bi bi-diagram-3-fill"></i> <?= esc($ins['process_name'] ?? 'WIP Lama') ?></span>
                                     </td>
                                     <td>
                                         <span class="fw-bold d-block text-dark"><?= esc($ins['part_no']) ?></span>
@@ -194,6 +191,7 @@
       <form action="<?= base_url('qc/store') ?>" method="post" enctype="multipart/form-data" id="qcForm">
           <?= csrf_field() ?>
           <input type="hidden" name="product_id" id="modalProductId">
+          <input type="hidden" name="schedule_id" id="modalScheduleId">
           <input type="hidden" name="production_date" value="<?= esc($date) ?>">
           
           <div class="modal-body p-4 bg-light">
@@ -214,22 +212,13 @@
               </div>
 
               <div class="row g-3 mb-4">
-                  <div class="col-md-6">
-                      <label class="form-label fw-bold text-dark">Shift Pengerjaan <span class="text-danger">*</span></label>
-                      <select name="shift_id" class="form-select fw-bold shadow-sm" required>
-                          <option value="">-- Pilih Shift --</option>
-                          <?php foreach($shifts as $s): ?>
-                              <option value="<?= $s['id'] ?>"><?= esc($s['shift_name']) ?></option>
-                          <?php endforeach; ?>
-                      </select>
-                  </div>
-                  <div class="col-md-6">
+                  <div class="col-md-12">
                       <label class="form-label fw-bold text-success">Barang OK PASS (Qty) <span class="text-danger">*</span></label>
                       <div class="input-group shadow-sm">
                           <span class="input-group-text bg-success text-white border-0"><i class="bi bi-check-circle-fill"></i></span>
                           <input type="number" name="qty_ok" id="inputQtyOk" class="form-control fw-bold form-control-lg text-success" min="0" value="0" required>
                       </div>
-                      <small class="text-muted mt-1 d-block"><i class="bi bi-info-circle me-1"></i>Barang PASS akan otomatis masuk ke stock Finished Good</small>
+                      <small class="text-muted mt-1 d-block"><i class="bi bi-info-circle me-1"></i>Barang PASS otomatis masuk ke stock FG. <span class="fw-bold">Shift Inspeksi otomatis mengikuti Schedule.</span></small>
                   </div>
               </div>
 
@@ -291,8 +280,9 @@
 <script>
     let currentMaxRemain = 0;
 
-    function openInspectionModal(prodId, partNo, partName, remainQ) {
+    function openInspectionModal(prodId, schedId, partNo, partName, remainQ) {
         document.getElementById('modalProductId').value = prodId;
+        document.getElementById('modalScheduleId').value = schedId;
         
         document.getElementById('modalPartNo').innerText = partNo;
         document.getElementById('modalPartName').innerText = partName;

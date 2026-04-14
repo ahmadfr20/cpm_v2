@@ -130,14 +130,19 @@ class DeliveryController extends BaseController
         $db->transBegin();
         try {
             $deliveredItems = [];
+            $generatedDos = [];
 
             foreach ($items as $row) {
                 $productId  = (int)($row['product_id'] ?? 0);
                 $customerId = (int)($row['customer_id'] ?? 0);
                 $qty        = (int)($row['qty'] ?? 0);
-                $doNumber   = trim((string)($row['do_number'] ?? ''));
 
                 if ($productId <= 0 || $qty <= 0) continue;
+
+                if (!isset($generatedDos[$customerId])) {
+                    $generatedDos[$customerId] = $this->generateDoNumber($db, $customerId);
+                }
+                $doNumber = $generatedDos[$customerId];
 
                 // Get total FG stock for this product
                 $fgStock = $this->getFgStockMap($db, $date, $fgProcessId);
@@ -396,6 +401,35 @@ class DeliveryController extends BaseController
             $seq = (int)end($parts) + 1;
         }
         return $prefix . str_pad($seq, 3, '0', STR_PAD_LEFT);
+    }
+
+    private function generateDoNumber($db, int $customerId): string
+    {
+        $this->ensureFgDeliveryItemsTable($db);
+        $customer = $db->table('customers')->where('id', $customerId)->get()->getRowArray();
+        
+        $custCode = 'NOCUST';
+        if ($customer) {
+            $custCode = !empty($customer['customer_code_app']) ? $customer['customer_code_app'] : (!empty($customer['customer_code']) ? $customer['customer_code'] : 'UNK');
+        }
+
+        $prefix = "DO-{$custCode}-";
+
+        $last = $db->table('fg_delivery_items')
+            ->select('do_number')
+            ->where('customer_id', $customerId)
+            ->like('do_number', $prefix, 'after')
+            ->orderBy('id', 'DESC')
+            ->limit(1)
+            ->get()->getRowArray();
+
+        $seq = 1;
+        if ($last && !empty($last['do_number'])) {
+            $parts = explode('-', $last['do_number']);
+            $seq = (int)end($parts) + 1;
+        }
+
+        return $prefix . str_pad($seq, 5, '0', STR_PAD_LEFT);
     }
 
     private function ensureFgDeliveriesTable($db): void
