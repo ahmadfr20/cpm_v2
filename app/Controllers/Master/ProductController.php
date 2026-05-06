@@ -94,6 +94,7 @@ class ProductController extends BaseController
             'cycle_time'          => $this->request->getPost('cycle_time'),
             'cycle_time_machining'=> $ctMachining, // ✅ baru
             'cavity'              => $this->request->getPost('cavity'),
+            'shot_weight'         => $this->request->getPost('shot_weight') ?? 0,
             'efficiency_rate'     => $this->request->getPost('efficiency_rate'),
             'notes'               => $this->request->getPost('notes'),
             'is_active'           => 1
@@ -157,6 +158,7 @@ class ProductController extends BaseController
             'cycle_time'          => $this->request->getPost('cycle_time'),
             'cycle_time_machining'=> $ctMachining, // ✅ baru
             'cavity'              => $this->request->getPost('cavity'),
+            'shot_weight'         => $this->request->getPost('shot_weight') ?? 0,
             'efficiency_rate'     => $this->request->getPost('efficiency_rate'),
             'notes'               => $this->request->getPost('notes'),
         ]);

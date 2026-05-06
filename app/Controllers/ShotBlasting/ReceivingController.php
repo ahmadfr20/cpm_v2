@@ -221,11 +221,13 @@ class ReceivingController extends BaseController
     public function index()
     {
         $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
 
         $sbId = $this->getSandBlastingProcessId($db);
         
         if (!$sbId) {
             return view('shot_blasting/receiving/index', [
+                'date'       => $date,
                 'deliveries' => [],
                 'errorMsg'   => 'Process Shot Blasting tidak ditemukan.',
             ]);
@@ -246,7 +248,8 @@ class ReceivingController extends BaseController
             ")
             ->join('products p', 'p.id = mt.product_id', 'left')
             ->join('shifts s', 's.id = mt.shift_id', 'left')
-            ->where('mt.process_from', $sbId)
+            ->where('mt.transaction_date', $date)
+            ->where("(mt.process_to = {$sbId} OR mt.process_from = {$sbId})", null, false)
             ->whereIn('mt.transaction_type', ['TRANSFER', 'FINISH_GOOD'])
             ->groupBy('mt.shift_id, mt.product_id')
             ->orderBy('p.part_no', 'ASC');
@@ -264,6 +267,7 @@ class ReceivingController extends BaseController
         unset($d);
 
         return view('shot_blasting/receiving/index', [
+            'date'       => $date,
             'deliveries' => $rows,
             'errorMsg'   => null,
         ]);
@@ -322,7 +326,7 @@ class ReceivingController extends BaseController
                     ")
                     ->where('shift_id', $shiftId)
                     ->where('product_id', $productId)
-                    ->where('process_from', $sbId)
+                    ->where("(process_to = {$sbId} OR process_from = {$sbId})", null, false)
                     ->whereIn('transaction_type', ['TRANSFER', 'FINISH_GOOD'])
                     ->get()->getRowArray();
 

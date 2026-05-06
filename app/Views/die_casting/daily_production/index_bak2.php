@@ -1,0 +1,832 @@
+<?= $this->extend('layout/layout') ?>
+<?= $this->section('content') ?>
+
+<h4 class="mb-3">DIE CASTING – DAILY PRODUCTION PER HOUR</h4>
+<div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
+    <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
+        <i class="bi bi-file-earmark-excel"></i> Export Excel
+    </button>
+    <button type="button" class="btn btn-outline-danger btn-sm fw-bold" onclick="window.print()">
+        <i class="bi bi-printer"></i> Print / PDF
+    </button>
+</div>
+
+<div class="d-flex flex-wrap align-items-end gap-4 mb-4">
+  <div>
+    <form method="get" class="mb-0">
+      <label class="fw-bold me-2">Tanggal Produksi:</label>
+      <input type="date"
+             name="date"
+             value="<?= esc($date) ?>"
+             class="form-control d-inline-block"
+             style="width:180px"
+             onchange="this.form.submit()">
+    </form>
+  </div>
+  
+  <div>
+    <strong>Operator:</strong> <span class="text-primary"><?= esc($operator) ?></span>
+  </div>
+
+  <?php if ($isAdmin): ?>
+  <div class="form-check form-switch mb-1">
+    <input class="form-check-input border-danger" type="checkbox" id="adminOverrideToggle" role="switch" style="cursor: pointer; transform: scale(1.2);">
+    <label class="form-check-label fw-bold text-danger ms-2" for="adminOverrideToggle" style="cursor: pointer;">
+      <i class="bi bi-unlock-fill"></i> Unlock Semua Slot Waktu (Admin)
+    </label>
+  </div>
+  <?php endif; ?>
+</div>
+
+<?php if (session()->getFlashdata('success')): ?>
+  <div class="alert alert-success alert-dismissible fade show" role="alert">
+    <strong><i class="bi bi-check-circle"></i> Berhasil!</strong> <?= esc(session()->getFlashdata('success')) ?>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+<?php endif ?>
+<?php if (session()->getFlashdata('error')): ?>
+  <div class="alert alert-danger alert-dismissible fade show" role="alert">
+    <strong><i class="bi bi-exclamation-triangle"></i> Gagal!</strong> <?= esc(session()->getFlashdata('error')) ?>
+    <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+  </div>
+<?php endif ?>
+
+<style>
+.table-scroll{ overflow:auto; position:relative; max-width:100%; border:1px solid #e5e7eb; border-radius:12px; background:#fff; padding:10px; }
+.production-table{ width:max-content; border-collapse:separate !important; border-spacing:0 !important; table-layout:fixed; }
+.production-table th, .production-table td{ font-size:13px; padding:10px 10px; white-space:nowrap; text-align:center; vertical-align:middle; box-sizing:border-box; line-height:1.2; background:#fff; border-right:1px solid #e5e7eb; border-bottom:1px solid #e5e7eb; transition: background 0.3s; }
+.production-table tr > *:first-child{ border-left:1px solid #e5e7eb; }
+.production-table thead tr:first-child > *{ border-top:1px solid #e5e7eb; }
+
+.production-table thead tr.thead-row-1 th{ position:sticky; top:0; z-index:30; background:#f8fafc; font-weight:900; height:44px; }
+.production-table thead tr.thead-row-2 th{ position:sticky; top:44px; z-index:29; background:#f1f5f9; font-weight:900; height:44px; font-size:12px; }
+
+.col-machine{ width:120px; min-width:120px; max-width:120px; }
+.col-part{ width:320px; min-width:320px; max-width:320px; }
+.col-target-shift{ width:140px; min-width:140px; max-width:140px; }
+.col-slot-target{ width:90px; min-width:90px; }
+.col-slot-fg{ width:90px; min-width:90px; }
+.col-slot-ng{ width:90px; min-width:90px; }
+.col-slot-remark{ width:320px; min-width:320px; } 
+.col-slot-downtime{ width:170px; min-width:170px; } /* Lebar untuk select downtime */
+
+.sticky-left{ position:sticky; left:0; z-index:40; background:#fff; }
+.sticky-left-2{ position:sticky; left:120px; z-index:40; background:#fff; }
+.sticky-left-3{ position:sticky; left:440px; z-index:40; background:#fff; }
+.th-sticky-left{ z-index:60 !important; background:#f8fafc !important; }
+
+.slot-active{ background:#dcfce7 !important; }
+.slot-header-active{ background:#fde68a !important; }
+
+.slot-rest { background-color: #cbd5e1 !important; opacity: 0.7; }
+.slot-locked input, .slot-locked select { background-color: #f1f5f9; }
+.slot-dandori-running { background-color: #fff3cd !important; opacity: 0.85; cursor: not-allowed; }
+.slot-dandori-running input, .slot-dandori-running select { pointer-events: none; opacity: 0.6; }
+
+.production-table input.form-control, .production-table select.form-select{ min-width:80px; padding:6px 8px; }
+
+.ng-inline{ display:flex; flex-direction:column; gap:8px; }
+.ng-inline-head{ display:flex; justify-content:space-between; align-items:center; gap:8px; }
+.ng-inline-head .meta{ font-size:12px; color:#64748b; font-weight:700; }
+.ng-mini-table{ width:100%; border-collapse:separate; border-spacing:0; }
+.ng-mini-table th, .ng-mini-table td{ border:1px solid #e5e7eb; padding:6px 6px; font-size:12px; text-align:left; background:#fff; }
+.ng-mini-table th{ background:#f8fafc; font-weight:900; text-align:center; }
+.ng-mini-table td.ng-no{ width:60px; text-align:center; font-weight:900; }
+.ng-mini-table td.ng-qty{ width:110px; }
+.ng-mini-table td.ng-act{ width:70px; text-align:center; }
+.ng-empty{ font-size:12px; color:#64748b; font-weight:700; text-align:center; padding:8px 0; border:1px dashed #cbd5e1; border-radius:8px; }
+
+.rest-toggle { transform: scale(0.9); margin-top: 0.25rem !important; }
+</style>
+
+<form method="post" action="/die-casting/daily-production/store" id="mainForm">
+  <?= csrf_field() ?>
+  <input type="hidden" name="global_date" value="<?= esc($date) ?>">
+
+  <?php foreach ($shifts as $shift): ?>
+    <?php
+      if (empty($shift['slots'])) continue; 
+
+      $shiftId = (int)$shift['id'];
+      $shiftCode = (int)($shift['shift_code'] ?? 0);
+    ?>
+
+    <div class="d-flex flex-column gap-1 mt-4 mb-2">
+      <div class="d-flex align-items-center justify-content-between">
+        <h5 class="m-0 text-primary border-start border-4 border-primary ps-2"><?= esc($shift['shift_name']) ?></h5>
+      </div>
+      <small class="text-muted ms-3">
+        <i class="bi bi-clock-history"></i> Total Waktu Produksi (Slot Aktif): 
+        <strong class="shift-active-minutes-display" data-shift-id="<?= $shift['id'] ?>" data-original-minutes="<?= $shift['total_minute'] ?>">
+          <?= $shift['total_minute'] ?> Menit
+        </strong>
+      </small>
+    </div>
+
+    <div class="table-scroll">
+      <table class="production-table table table-sm align-middle">
+        <thead>
+          <tr class="thead-row-1">
+            <th rowspan="2" class="sticky-left col-machine th-sticky-left">Mesin</th>
+            <th rowspan="2" class="sticky-left-2 col-part th-sticky-left">Part</th>
+            <th rowspan="2" class="sticky-left-3 col-target-shift th-sticky-left">Target<br>Shift</th>
+
+            <?php foreach ($shift['slots'] as $slot):
+              // Cek apakah ada dandori di slot ini untuk mesin manapun dalam shift ini
+              $slotHasDandori = false;
+              foreach ($shift['dandori_map'] as $mId => $slotArr) {
+                  if (isset($slotArr[(int)$slot['id']])) { $slotHasDandori = true; break; }
+              }
+              $headerClass = $slotHasDandori ? 'bg-warning text-dark' : '';
+            ?>
+              <th colspan="5"
+                  class="slot-header <?= $headerClass ?>"
+                  data-start="<?= esc($slot['time_start']) ?>"
+                  data-end="<?= esc($slot['time_end']) ?>"
+                  data-shift-id="<?= $shift['id'] ?>"
+                  data-slot-id="<?= $slot['id'] ?>">
+                <div class="mb-1"><?= esc(substr((string)$slot['time_start'],0,5)) ?> - <?= esc(substr((string)$slot['time_end'],0,5)) ?></div>
+                <?php if ($slotHasDandori): ?>
+                  <div class="mb-1"><span class="badge bg-warning text-dark border border-dark" style="font-size:0.6rem"><i class="bi bi-tools"></i> DANDORI</span></div>
+                <?php else: ?>
+                <div class="form-check form-switch d-flex justify-content-center m-0 pb-1">
+                  <input class="form-check-input rest-toggle border-secondary" type="checkbox" 
+                         id="rest_<?= $shift['id'] ?>_<?= $slot['id'] ?>" 
+                         data-shift-id="<?= $shift['id'] ?>" 
+                         data-slot-id="<?= $slot['id'] ?>" 
+                         data-slot-minutes="<?= $slot['minute'] ?>"
+                         title="Tandai sebagai Jam Istirahat">
+                  <label class="form-check-label ms-1 text-muted fw-normal" style="font-size: 11px; cursor:pointer;" for="rest_<?= $shift['id'] ?>_<?= $slot['id'] ?>">Rest</label>
+                </div>
+                <?php endif; ?>
+              </th>
+            <?php endforeach ?>
+
+          </tr>
+
+          <tr class="thead-row-2">
+            <?php foreach ($shift['slots'] as $slot): ?>
+              <th class="col-slot-target">Target</th>
+              <th class="col-slot-fg">FG</th>
+              <th class="col-slot-ng">NG</th>
+              <th class="col-slot-remark">NG Category</th>
+              <th class="col-slot-downtime">Downtime</th> <?php endforeach ?>
+          </tr>
+        </thead>
+
+        <tbody class="shift-body" data-shift-id="<?= $shift['id'] ?>">
+          <?php foreach ($shift['items'] as $item): ?>
+            <tr class="item-row" data-original-target="<?= (int)$item['qty_p'] ?>">
+              <td class="sticky-left fw-bold text-center">
+                <?= esc($item['machine_code']) ?>
+              </td>
+
+              <td class="sticky-left-2 text-start fw-bold">
+                <?= esc(($item['part_prod'] ?? '')) ?>
+                <?php if (!empty($item['part_prod']) && !empty($item['part_name'])): ?>&nbsp;-&nbsp;<?php endif; ?>
+                <?= esc(($item['part_name'] ?? '')) ?>
+              </td>
+
+              <td class="sticky-left-3 fw-bold text-center text-primary fs-6">
+                <span class="target-shift-display"><?= (int)$item['qty_p'] ?></span>
+              </td>
+
+              <?php foreach ($shift['slots'] as $slot):
+                $slotId    = (int)$slot['id'];
+                $machineId = (int)$item['machine_id'];
+                $productId = (int)$item['product_id'];
+
+                $exist    = $shift['hourly_map'][$machineId][$productId][$slotId] ?? null;
+                $ngDetail = $shift['ng_detail_map'][$machineId][$productId][$slotId] ?? [];
+                $key      = $date.'_'.$shift['id'].'_'.$machineId.'_'.$productId.'_'.$slotId;
+
+                // Cek apakah slot ini adalah slot DANDORI untuk mesin ini
+                $dandoriOnThisSlot = $shift['dandori_map'][$machineId][$slotId] ?? null;
+                // Cek apakah slot ini berada SETELAH slot dandori untuk produk ini
+                $isAfterDandoriSlot = false;
+                foreach (($shift['dandori_map'][$machineId] ?? []) as $dSlotId => $dInfo) {
+                    if ($slotId > $dSlotId && ($dInfo['product_id'] ?? 0) === $productId) {
+                        $isAfterDandoriSlot = true;
+                    }
+                }
+
+                $slotDandoriMinute = $dandoriOnThisSlot['dandori_minute'] ?? 0;
+                $activeSlotMinute = max(0, $slot['minute'] - $slotDandoriMinute);
+                $targetSlot = $shift['total_minute'] > 0
+                  ? (int) round(((int)$item['qty_p'] / (float)$shift['total_minute']) * (float)$activeSlotMinute)
+                  : 0;
+
+                $slotClass = $isAfterDandoriSlot ? 'bg-success bg-opacity-10' : ''; 
+              ?>
+
+              <?php if ($dandoriOnThisSlot !== null): ?>
+                 <td class="slot-target-cell fw-bold bg-warning bg-opacity-25 text-center <?= $slotClass ?>" 
+                     data-slot-id="<?= $slot['id'] ?>" 
+                     data-dandori-minutes="<?= $slotDandoriMinute ?>"
+                     data-slot-minutes="<?= (int)$slot['minute'] ?>"
+                     style="border-left: 2px solid #ffc107;">
+                    <div class="badge bg-warning text-dark mb-1 d-block w-100" style="font-size:0.65rem;">
+                        Dandori <?= $slotDandoriMinute ?>m
+                    </div>
+                    <span class="slot-target-display"><?= (int)$targetSlot ?></span>
+                 </td>
+              <?php else: ?>
+                 <td class="slot-target-cell fw-bold bg-light text-center <?= $slotClass ?>" 
+                     data-slot-id="<?= $slot['id'] ?>"
+                     data-dandori-minutes="0"
+                     data-slot-minutes="<?= (int)$slot['minute'] ?>">
+                   <span class="slot-target-display"><?= (int)$targetSlot ?></span>
+                 </td>
+              <?php endif; ?>
+
+                <td class="<?= $slotClass ?>">
+                  <input type="number"
+                         class="form-control form-control-sm slot-input fg val-fg"
+                         data-date="<?= esc($date) ?>"
+                         data-start="<?= esc($slot['time_start']) ?>"
+                         data-end="<?= esc($slot['time_end']) ?>"
+                         data-shift-id="<?= $shift['id'] ?>"
+                         data-slot-id="<?= $slot['id'] ?>"
+                         data-dandori-minutes="<?= $dandoriOnThisSlot !== null ? $slotDandoriMinute : 0 ?>"
+                         value="<?= (int)($exist['qty_fg'] ?? 0) ?>"
+                         name="items[<?= esc($key) ?>][fg]">
+                </td>
+
+                <td class="<?= $slotClass ?>">
+                  <input type="number"
+                         class="form-control form-control-sm slot-input ng val-ng"
+                         readonly
+                         id="ngTotalInput_<?= esc($key) ?>"
+                         value="<?= (int)($exist['qty_ng'] ?? 0) ?>"
+                         name="items[<?= esc($key) ?>][ng]">
+                </td>
+
+                <td class="text-start <?= $slotClass ?>">
+                  <div class="ng-inline" data-key="<?= esc($key) ?>">
+                    <div class="ng-inline-head">
+                      <div class="meta">
+                        Total NG: <span class="fw-bold text-danger" id="ngTotalBadge_<?= esc($key) ?>">0</span>
+                      </div>
+                      <button type="button"
+                              class="btn btn-sm btn-outline-danger fw-bold ng-add-btn"
+                              onclick="addNgRowInline('<?= esc($key) ?>', <?= $shift['id'] ?>)"
+                              data-start="<?= esc($slot['time_start']) ?>"
+                              data-end="<?= esc($slot['time_end']) ?>"
+                              data-shift-id="<?= $shift['id'] ?>"
+                              data-slot-id="<?= $slot['id'] ?>">
+                        + NG
+                      </button>
+                    </div>
+                    <div class="table-responsive">
+                      <table class="ng-mini-table">
+                        <thead>
+                          <tr>
+                            <th style="width:60px">NG</th>
+                            <th>Category</th>
+                            <th style="width:110px">Qty</th>
+                            <th style="width:70px"></th>
+                          </tr>
+                        </thead>
+                        <tbody id="ngBody_<?= esc($key) ?>">
+                          </tbody>
+                      </table>
+                    </div>
+                  </div>
+                  <div class="ng-hidden d-none" id="ngHidden_<?= esc($key) ?>">
+                    <?php foreach ($ngDetail as $idx => $d): ?>
+                      <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][ng_category_id]" value="<?= (int)$d['ng_category_id'] ?>">
+                      <input type="hidden" name="items[<?= esc($key) ?>][ng_details][<?= $idx ?>][qty]" value="<?= (int)$d['qty'] ?>">
+                    <?php endforeach; ?>
+                  </div>
+                </td>
+
+                <td class="<?= $slotClass ?>">
+                  <select class="form-select form-select-sm dt-sel text-danger" 
+                          name="items[<?= esc($key) ?>][downtime_category_id]" 
+                          data-shift-id="<?= $shift['id'] ?>" 
+                          data-slot-id="<?= $slot['id'] ?>">
+                      <option value="0" data-value="0">-- Tidak Ada --</option>
+                      <?php foreach ($downtimes as $dt): ?>
+                          <option value="<?= $dt['id'] ?>" data-value="<?= $dt['value'] ?>" 
+                                  <?= (($exist['downtime_category_id'] ?? 0) == $dt['id']) ? 'selected' : '' ?>>
+                              <?= esc($dt['downtime_name']) ?> (-<?= $dt['value'] ?>%)
+                          </option>
+                      <?php endforeach; ?>
+                  </select>
+                </td>
+              <!-- END slot columns -->
+
+              <?php endforeach ?>
+            </tr>
+          <?php endforeach ?>
+        </tbody>
+
+      </table>
+    </div>
+
+    <div class="mt-2 mb-5 p-3 border rounded bg-light summary-box" data-shift-id="<?= $shift['id'] ?>">
+      <strong>SUMMARY <?= esc($shift['shift_name']) ?> :</strong>
+      <span class="ms-4">TOTAL TARGET: <span class="total-target fw-bold text-dark fs-5">0</span></span>
+      <span class="ms-4">TOTAL FG: <span class="total-fg fw-bold text-success fs-5">0</span></span>
+      <span class="ms-4">TOTAL NG: <span class="total-ng fw-bold text-danger fs-5">0</span></span>
+      <span class="ms-4 border-start ps-4">EFISIENSI (Ach): <span class="efficiency-rate fw-bold text-primary fs-5">0%</span></span>
+    </div>
+
+  <?php endforeach ?>
+
+  <div class="position-sticky bottom-0 bg-white p-3 border-top shadow-sm d-flex gap-2 align-items-center mt-3 z-3">
+    <button class="btn btn-success fw-bold px-4" id="btnSave" type="submit">
+      <i class="bi bi-save"></i> Simpan Data Produksi
+    </button>
+  </div>
+</form>
+
+<script>
+const NG_CATEGORIES = <?= json_encode(array_map(fn($x)=>[
+  'id'=>(int)$x['id'],
+  'ng_code'=>(int)$x['ng_code'],
+  'ng_name'=>(string)$x['ng_name']
+], $ngCategories)) ?>;
+
+function escapeHtml(str) {
+  return String(str ?? '')
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;')
+    .replaceAll("'", '&#039;');
+}
+
+function buildNgSelectOptions(selectedId){
+  let html = `<option value="0">-- pilih --</option>`;
+  NG_CATEGORIES.forEach(c=>{
+    const sel = (parseInt(selectedId||0,10) === c.id) ? 'selected' : '';
+    html += `<option value="${c.id}" ${sel}>${c.ng_code} - ${escapeHtml(c.ng_name)}</option>`;
+  });
+  return html;
+}
+
+function readNgHidden(key){
+  const hidden = document.getElementById('ngHidden_'+key);
+  const rows = [];
+  if(!hidden) return rows;
+
+  const inputs = hidden.querySelectorAll('input');
+  const map = {};
+  inputs.forEach(inp=>{
+    const m = inp.name.match(/\[ng_details\]\[(\d+)\]\[(ng_category_id|qty)\]/);
+    if(!m) return;
+    const idx = m[1];
+    const field = m[2];
+    map[idx] = map[idx] || {};
+    map[idx][field] = inp.value;
+  });
+
+  Object.keys(map)
+    .sort((a,b)=>parseInt(a,10)-parseInt(b,10))
+    .forEach(k=>{
+      rows.push({
+        ng_category_id: parseInt(map[k].ng_category_id || '0',10),
+        qty: parseInt(map[k].qty || '0',10),
+      });
+    });
+
+  return rows;
+}
+
+function writeNgHiddenFromRows(key, rows){
+  const hidden = document.getElementById('ngHidden_'+key);
+  if(!hidden) return;
+  hidden.innerHTML = '';
+
+  rows.forEach((r,i)=>{
+    const ngId = parseInt(r.ng_category_id || 0, 10);
+    const qty  = parseInt(r.qty || 0, 10);
+
+    const a = document.createElement('input');
+    a.type='hidden';
+    a.name=`items[${key}][ng_details][${i}][ng_category_id]`;
+    a.value=String(isNaN(ngId)?0:ngId);
+    hidden.appendChild(a);
+
+    const b = document.createElement('input');
+    b.type='hidden';
+    b.name=`items[${key}][ng_details][${i}][qty]`;
+    b.value=String(isNaN(qty)?0:qty);
+    hidden.appendChild(b);
+  });
+}
+
+function calcTotalNg(rows){
+  return rows.reduce((s,r)=>{
+    const ngId = parseInt(r.ng_category_id||0,10);
+    const qty  = parseInt(r.qty||0,10);
+    if(ngId>0 && qty>0) return s + qty;
+    return s;
+  },0);
+}
+
+function updateNgTotalUI(key, total, shiftId){
+  const badge = document.getElementById('ngTotalBadge_'+key);
+  if(badge) badge.textContent = String(total);
+
+  const ngInp = document.getElementById('ngTotalInput_'+key);
+  if(ngInp) {
+      ngInp.value = String(total);
+      recalcShiftSummary(shiftId);
+  }
+}
+
+function renderNgTable(key, shiftId){
+  const tbody = document.getElementById('ngBody_'+key);
+  if(!tbody) return;
+
+  const rows = readNgHidden(key);
+  tbody.innerHTML = '';
+
+  if(rows.length === 0){
+    tbody.innerHTML = `<tr><td colspan="4"><div class="ng-empty">Belum ada NG</div></td></tr>`;
+    updateNgTotalUI(key, 0, shiftId);
+  } else {
+    rows.forEach((r, idx)=>{
+      const cat = NG_CATEGORIES.find(x=>x.id === (parseInt(r.ng_category_id||0,10))) || null;
+      const code = cat ? cat.ng_code : '-';
+
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="ng-no">${escapeHtml(code)}</td>
+        <td>
+          <select class="form-select form-select-sm ngSel" data-key="${escapeHtml(key)}" data-shift-id="${shiftId}" data-idx="${idx}">
+            ${buildNgSelectOptions(r.ng_category_id)}
+          </select>
+        </td>
+        <td class="ng-qty">
+          <input type="number" class="form-control form-control-sm ngQty" min="0" data-key="${escapeHtml(key)}" data-shift-id="${shiftId}" data-idx="${idx}" value="${parseInt(r.qty||0,10)}">
+        </td>
+        <td class="ng-act">
+          <button type="button" class="btn btn-sm btn-danger py-0 px-2 ng-del-btn" onclick="deleteNgRowInline('${escapeHtml(key)}', ${idx}, ${shiftId})">
+            <i class="bi bi-x"></i>
+          </button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+    updateNgTotalUI(key, calcTotalNg(rows), shiftId);
+  }
+  
+  const inlineDiv = document.querySelector(`.ng-inline[data-key="${key}"]`);
+  if (inlineDiv) {
+     const td = inlineDiv.closest('td');
+     if (td && td.classList.contains('slot-locked')) {
+         inlineDiv.querySelectorAll('input.ngQty').forEach(el => el.readOnly = true);
+         inlineDiv.querySelectorAll('select.ngSel, button.ng-del-btn').forEach(el => el.disabled = true);
+     }
+  }
+}
+
+function addNgRowInline(key, shiftId){
+  const rows = readNgHidden(key);
+  rows.push({ ng_category_id: 0, qty: 0 }); 
+  writeNgHiddenFromRows(key, rows);
+  renderNgTable(key, shiftId);
+}
+
+function deleteNgRowInline(key, idx, shiftId){
+  const rows = readNgHidden(key);
+  rows.splice(idx, 1);
+  writeNgHiddenFromRows(key, rows);
+  renderNgTable(key, shiftId);
+}
+
+document.addEventListener('change', function(e){
+  const sel = e.target.closest('.ngSel');
+  if(!sel) return;
+
+  const key = sel.dataset.key;
+  const shiftId = sel.dataset.shiftId;
+  const idx = parseInt(sel.dataset.idx||'0',10);
+  const rows = readNgHidden(key);
+  if(!rows[idx]) return;
+
+  rows[idx].ng_category_id = parseInt(sel.value||'0',10);
+  writeNgHiddenFromRows(key, rows);
+
+  const cat = NG_CATEGORIES.find(x=>x.id === rows[idx].ng_category_id) || null;
+  const tr = sel.closest('tr');
+  const codeTd = tr ? tr.querySelector('.ng-no') : null;
+  if(codeTd) codeTd.textContent = cat ? cat.ng_code : '-';
+
+  updateNgTotalUI(key, calcTotalNg(rows), shiftId);
+});
+
+document.addEventListener('input', function(e){
+  const inp = e.target.closest('.ngQty');
+  if(!inp) return;
+
+  const key = inp.dataset.key;
+  const shiftId = inp.dataset.shiftId;
+  const idx = parseInt(inp.dataset.idx||'0',10);
+  let v = parseInt(inp.value||'0',10);
+  if(isNaN(v) || v < 0) v = 0;
+  inp.value = String(v);
+
+  const rows = readNgHidden(key);
+  if(!rows[idx]) return;
+
+  rows[idx].qty = v;
+  writeNgHiddenFromRows(key, rows);
+
+  updateNgTotalUI(key, calcTotalNg(rows), shiftId);
+});
+
+
+/* ========= TIME SLOT LOCK, REST TIME & DYNAMIC TARGET RECALCULATION ========= */
+function recalculateTargets(shiftId) {
+    const shiftMinutesEl = document.querySelector(`.shift-active-minutes-display[data-shift-id="${shiftId}"]`);
+    if (!shiftMinutesEl) return;
+
+    // Total menit penuh shift (dari schedule, tidak berubah)
+    const totalShiftMinutes = parseInt(shiftMinutesEl.dataset.originalMinutes || 0, 10);
+    if (totalShiftMinutes <= 0) return;
+
+    // Kumpulkan slot yang ditandai istirahat (rest)
+    let restMinutes = 0;
+    const restSlotIds = new Set();
+    document.querySelectorAll(`.rest-toggle[data-shift-id="${shiftId}"]`).forEach(t => {
+        if (t.checked) {
+            restMinutes += parseInt(t.dataset.slotMinutes || 0, 10);
+            restSlotIds.add(t.dataset.slotId);
+        }
+    });
+
+    // Update tampilan total menit aktif (hanya kurangi rest, bukan dandori)
+    shiftMinutesEl.innerText = `${totalShiftMinutes - restMinutes} Menit`;
+
+    const rows = document.querySelectorAll(`tbody[data-shift-id="${shiftId}"] .item-row`);
+    rows.forEach(row => {
+        // Target shift SELALU sama dengan qty_p dari schedule (tidak dikurangi dandori)
+        const originalTarget = parseInt(row.dataset.originalTarget || 0, 10);
+        const shiftTargetDisplay = row.querySelector('.target-shift-display');
+        if (shiftTargetDisplay) shiftTargetDisplay.innerText = originalTarget;
+
+        // Update target per slot: qty_p / totalShiftMinutes * activeSlotMinutes
+        row.querySelectorAll('.slot-target-cell').forEach(cell => {
+            const slotId = cell.dataset.slotId;
+            const slotMinutes = parseInt(cell.dataset.slotMinutes || 0, 10);
+            const slotDandoriMin = parseInt(cell.dataset.dandoriMinutes || 0, 10);
+            const isRest = restSlotIds.has(slotId);
+
+            // Menit aktif slot = menit slot - menit dandori, atau 0 jika rest
+            const activeSlotMin = isRest ? 0 : Math.max(0, slotMinutes - slotDandoriMin);
+
+            const targetDisplay = cell.querySelector('.slot-target-display');
+            const fgInput = row.querySelector(`.val-fg[data-slot-id="${slotId}"]`);
+
+            if (activeSlotMin <= 0 || totalShiftMinutes <= 0) {
+                if (targetDisplay) targetDisplay.innerText = '0';
+                if (fgInput) fgInput.readOnly = true;
+            } else {
+                // Target slot = qty_p / total_menit_shift * menit_aktif_slot
+                const newSlotTarget = Math.round(originalTarget * activeSlotMin / totalShiftMinutes);
+                if (targetDisplay) targetDisplay.innerText = newSlotTarget;
+                if (fgInput) fgInput.readOnly = false;
+            }
+        });
+    });
+
+    recalcShiftSummary(shiftId);
+}
+
+/* ========= AUTO CALCULATE SHIFT SUMMARY & EFFICIENCY ========= */
+function recalcShiftSummary(shiftId) {
+    const tbody = document.querySelector(`tbody[data-shift-id="${shiftId}"]`);
+    if(!tbody) return;
+
+    let totalTarget = 0;
+    let totalFg = 0;
+    let totalNg = 0;
+    let totalDowntimeVal = 0;
+
+    tbody.querySelectorAll('.target-shift-display').forEach(span => {
+        totalTarget += parseInt(span.innerText.trim() || 0, 10);
+    });
+
+    tbody.querySelectorAll('.val-fg').forEach(inp => {
+        totalFg += parseInt(inp.value || 0, 10);
+    });
+
+    tbody.querySelectorAll('.val-ng').forEach(inp => {
+        totalNg += parseInt(inp.value || 0, 10);
+    });
+
+    // Menghitung Penalti Downtime
+    tbody.querySelectorAll('.dt-sel').forEach(sel => {
+        if(sel.value !== "0" && sel.options[sel.selectedIndex]) {
+            totalDowntimeVal += parseInt(sel.options[sel.selectedIndex].dataset.value || 0, 10);
+        }
+    });
+
+    const box = document.querySelector(`.summary-box[data-shift-id="${shiftId}"]`);
+    if(box) {
+        box.querySelector('.total-target').innerText = totalTarget.toLocaleString('id-ID');
+        box.querySelector('.total-fg').innerText = totalFg.toLocaleString('id-ID');
+        box.querySelector('.total-ng').innerText = totalNg.toLocaleString('id-ID');
+
+        // Kalkulasi Efisiensi Pencapaian: (Total FG / Total Target Shift) * 100 - Downtime
+        let efficiency = 0;
+        if(totalTarget > 0) {
+            efficiency = (totalFg / totalTarget) * 100;
+        }
+        
+        // Kurangi efisiensi dengan value downtime (Pastikan tidak jadi negatif)
+        efficiency = efficiency - totalDowntimeVal;
+        if (efficiency < 0) efficiency = 0;
+
+        const effSpan = box.querySelector('.efficiency-rate');
+        if(effSpan) {
+            effSpan.innerText = efficiency.toFixed(2) + '%';
+            effSpan.className = 'efficiency-rate fw-bold fs-5 ' + (efficiency >= 90 ? 'text-success' : (efficiency >= 75 ? 'text-warning' : 'text-danger'));
+        }
+    }
+}
+
+document.addEventListener('input', function(e) {
+    if (e.target.classList.contains('val-fg')) {
+        const shiftId = e.target.dataset.shiftId;
+        recalcShiftSummary(shiftId);
+    }
+});
+
+// Listener untuk kalkulasi ulang saat dropdown Downtime dipilih
+document.addEventListener('change', function(e) {
+    if (e.target.classList.contains('dt-sel')) {
+        const shiftId = e.target.dataset.shiftId;
+        recalcShiftSummary(shiftId);
+    }
+});
+
+function parseTimeOnDate(dateISO, hhmmss){
+  const t = String(hhmmss || '').slice(0,5);
+  return new Date(`${dateISO}T${t}:00`);
+}
+
+function isSlotActive(prodDateISO, start, end){
+  const now = new Date();
+  let s = parseTimeOnDate(prodDateISO, start);
+  let e = parseTimeOnDate(prodDateISO, end);
+
+  const startHour = parseInt(String(start).split(':')[0], 10);
+  const endHour = parseInt(String(end).split(':')[0], 10);
+
+  if (startHour >= 0 && startHour < 7) s.setDate(s.getDate() + 1);
+  if (endHour >= 0 && endHour < 7) e.setDate(e.getDate() + 1);
+  if (e <= s) e.setDate(e.getDate() + 1);
+
+  return now >= s && now <= e;
+}
+
+/* ========= CHECK IF DANDORI STILL RUNNING ========= */
+function isDandoriStillRunning(prodDateISO, slotStart, dandoriMinutes) {
+    if (!dandoriMinutes || dandoriMinutes <= 0) return false;
+    
+    const now = new Date();
+    let slotStartDt = parseTimeOnDate(prodDateISO, slotStart);
+    
+    // Handle slots that cross midnight
+    const startHour = parseInt(String(slotStart).split(':')[0], 10);
+    if (startHour >= 0 && startHour < 7) slotStartDt.setDate(slotStartDt.getDate() + 1);
+    
+    const dandoriEndDt = new Date(slotStartDt.getTime() + dandoriMinutes * 60 * 1000);
+    
+    return now >= slotStartDt && now < dandoriEndDt;
+}
+
+function applySlotLock(){
+  const prodDateISO = "<?= esc($date) ?>";
+  const overrideToggle = document.getElementById('adminOverrideToggle');
+  const isAdminOverride = overrideToggle ? overrideToggle.checked : false;
+
+  document.querySelectorAll('th.slot-header').forEach(th => {
+     const shiftId = th.dataset.shiftId;
+     const slotId = th.dataset.slotId;
+     const slotStart = th.dataset.start;
+     const isCurrentTime = isSlotActive(prodDateISO, th.dataset.start, th.dataset.end);
+     
+     const restToggle = document.getElementById(`rest_${shiftId}_${slotId}`);
+     const isRest = restToggle ? restToggle.checked : false;
+     
+     // Check dandori status for this slot (each machine row may have different dandori)
+     // We'll handle per-input below
+     const canEditSlot = !isRest && (isAdminOverride || isCurrentTime);
+
+     th.classList.toggle('slot-header-active', isCurrentTime && !isRest);
+     th.classList.toggle('bg-secondary', isRest);
+     th.classList.toggle('bg-opacity-25', isRest);
+
+     document.querySelectorAll(`.fg[data-shift-id="${shiftId}"][data-slot-id="${slotId}"]`).forEach(inp => {
+         const dandoriMinutes = parseInt(inp.dataset.dandoriMinutes || 0, 10);
+         const dandoriRunning = !isAdminOverride && isDandoriStillRunning(prodDateISO, slotStart, dandoriMinutes);
+         const canEdit = canEditSlot && !dandoriRunning;
+         
+         inp.readOnly = !canEdit;
+         
+         const tdFg = inp.closest('td');
+         if(tdFg) {
+             const tdTarget = tdFg.previousElementSibling;
+             const tdNg = tdFg.nextElementSibling;
+             const tdNgInline = tdNg.nextElementSibling;
+             const tdDowntime = tdNgInline.nextElementSibling;
+             
+             [tdTarget, tdFg, tdNg, tdNgInline, tdDowntime].forEach(td => {
+                 if(td) {
+                     td.classList.toggle('slot-active', isCurrentTime && !isRest && !dandoriRunning);
+                     td.classList.toggle('slot-locked', !canEdit);
+                     td.classList.toggle('slot-rest', isRest);
+                     td.classList.toggle('slot-dandori-running', dandoriRunning && !isAdminOverride);
+                 }
+             });
+             
+             // Show/update dandori countdown in target cell
+             const targetCell = tdTarget;
+             if (targetCell && dandoriRunning && !isAdminOverride) {
+                 let countdownEl = targetCell.querySelector('.dandori-countdown');
+                 if (!countdownEl) {
+                     countdownEl = document.createElement('div');
+                     countdownEl.className = 'dandori-countdown text-danger fw-bold';
+                     countdownEl.style.fontSize = '0.6rem';
+                     targetCell.appendChild(countdownEl);
+                 }
+                 const slotStartDt = parseTimeOnDate(prodDateISO, slotStart);
+                 const startHour = parseInt(String(slotStart).split(':')[0], 10);
+                 if (startHour >= 0 && startHour < 7) slotStartDt.setDate(slotStartDt.getDate() + 1);
+                 const dandoriEndDt = new Date(slotStartDt.getTime() + dandoriMinutes * 60 * 1000);
+                 const remainSec = Math.max(0, Math.floor((dandoriEndDt - new Date()) / 1000));
+                 const mm = Math.floor(remainSec / 60).toString().padStart(2,'0');
+                 const ss = (remainSec % 60).toString().padStart(2,'0');
+                 countdownEl.textContent = `⏱ ${mm}:${ss}`;
+             } else if (targetCell) {
+                 const countdownEl = targetCell.querySelector('.dandori-countdown');
+                 if (countdownEl) countdownEl.remove();
+             }
+         }
+     });
+
+     // Lock / Unlock button dan select didalam row slot
+     document.querySelectorAll(`.ng-add-btn[data-shift-id="${shiftId}"][data-slot-id="${slotId}"]`).forEach(btn => {
+         const dandoriMinutes = parseInt(btn.dataset.dandoriMinutes || 0, 10);
+         const dandoriRunning = !isAdminOverride && isDandoriStillRunning(prodDateISO, slotStart, dandoriMinutes);
+         const canEdit = canEditSlot && !dandoriRunning;
+         
+         btn.disabled = !canEdit;
+         
+         const key = btn.closest('.ng-inline').dataset.key;
+         const ngBody = document.getElementById(`ngBody_${key}`);
+         if(ngBody) {
+             ngBody.querySelectorAll('input.ngQty').forEach(el => el.readOnly = !canEdit);
+             ngBody.querySelectorAll('select.ngSel, button.ng-del-btn').forEach(el => el.disabled = !canEdit);
+         }
+     });
+     
+     // Lock / Unlock Dropdown Downtime
+     document.querySelectorAll(`.dt-sel[data-shift-id="${shiftId}"][data-slot-id="${slotId}"]`).forEach(sel => {
+         sel.disabled = !canEditSlot;
+     });
+  });
+}
+
+document.querySelectorAll('.rest-toggle').forEach(t => {
+   const storageKey = `rest_<?= esc($date) ?>_${t.dataset.shiftId}_${t.dataset.slotId}`;
+   
+   if(localStorage.getItem(storageKey) === '1') {
+       t.checked = true;
+   }
+   
+   t.addEventListener('change', function() {
+       localStorage.setItem(storageKey, this.checked ? '1' : '0');
+       applySlotLock();
+       recalculateTargets(this.dataset.shiftId);
+   });
+});
+
+const adminOverrideEl = document.getElementById('adminOverrideToggle');
+if (adminOverrideEl) {
+  adminOverrideEl.addEventListener('change', applySlotLock);
+}
+
+applySlotLock();
+document.querySelectorAll('.shift-body').forEach(tbody => {
+    recalculateTargets(tbody.dataset.shiftId);
+});
+// Refresh setiap 60 detik untuk mendeteksi expired dandori otomatis
+setInterval(applySlotLock, 60000);
+
+document.querySelectorAll('.ng-inline[data-key]').forEach(box=>{
+  const key = box.getAttribute('data-key');
+  const btn = box.querySelector('.ng-add-btn');
+  const shiftId = btn ? btn.dataset.shiftId : null;
+  renderNgTable(key, shiftId);
+});
+
+</script>
+
+<?= $this->endSection() ?>

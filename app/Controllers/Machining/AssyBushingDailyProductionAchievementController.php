@@ -11,26 +11,28 @@ class AssyBushingDailyProductionAchievementController extends BaseController
         $db   = db_connect();
         $date = $this->request->getGet('date') ?? date('Y-m-d');
 
-        // process Assy Bushing
-        $assyProcess = $this->getProcessAssyBushing($db);
-        $assyProcessId = $assyProcess['id'] ?? null;
+        // process machining
+        $machiningProcess = $db->table('production_processes')
+            ->select('id, process_code, process_name')
+            ->where('process_code', 'AB')
+            ->get()->getRowArray();
+
+        $machiningProcessId = $machiningProcess['id'] ?? null;
 
         // shifts MC
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
             ->where('is_active', 1)
+            ->where('day_group', $this->getDayGroup($date))
             ->like('shift_name', 'MC')
             ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
             ->get()->getResultArray();
 
-        // ng categories (master) - kalau table ada
-        $ngCategories = [];
-        if ($db->tableExists('ng_categories')) {
-            $ngCategories = $db->table('ng_categories')
-                ->select('id, ng_code, ng_name')
-                ->orderBy('ng_code', 'ASC')
-                ->get()->getResultArray();
-        }
+        // ng categories (master)
+        $ngCategories = $db->table('ng_categories')
+            ->select('id, ng_code, ng_name')
+            ->orderBy('ng_code', 'ASC')
+            ->get()->getResultArray();
 
         // Map time slots per shift (untuk edit window)
         $shiftSlots = [];
@@ -45,11 +47,10 @@ class AssyBushingDailyProductionAchievementController extends BaseController
             $shiftSlots[$s['id']] = $slots;
         }
 
-        // Schedule Assy Bushing (target per shift)
+        // Schedule Machining (target per shift)
         $scheduleRows = $db->table('daily_schedule_items dsi')
             ->select('
                 ds.shift_id,
-                dsi.id as dsi_id,
                 dsi.machine_id,
                 dsi.product_id,
                 dsi.target_per_shift,
@@ -68,12 +69,15 @@ class AssyBushingDailyProductionAchievementController extends BaseController
             ->orderBy('m.line_position', 'ASC')
             ->get()->getResultArray();
 
-        // Hourly totals (fg/ng) per shift+machine+product
+        // Hourly totals (fg/ng/dt) per shift+machine+product
         $hourlyTotals = $db->table('machining_assy_bushing_hourly')
             ->select('
-                shift_id, machine_id, product_id,
-                SUM(qty_fg) fg,
-                SUM(qty_ng) ng
+                shift_id, machine_id, product_id, SUM(qty_fg) fg,
+                SUM(qty_ng) ng,
+                SUM(qty_ng_blank) ng_blank,
+                SUM(downtime) downtime,
+                MAX(downtime_category_id) downtime_category_id,
+                MAX(ng_category_id) ng_category
             ')
             ->where('production_date', $date)
             ->groupBy('shift_id, machine_id, product_id')
@@ -85,25 +89,19 @@ class AssyBushingDailyProductionAchievementController extends BaseController
             $hourlyMap[$key] = $h;
         }
 
-        // WIP inbound untuk Assy Bushing: (prev -> AB)
+        // WIP for Machining inbound: (prev -> MC)
+        // NOTE: kalau kamu ingin tampil wip outbound (MC -> next), tinggal ganti to_process_id.
         $wipMap = [];
-        if ($assyProcessId && $db->tableExists('production_wip')) {
-            $selectCols = ['pw.product_id','pw.from_process_id','pw.to_process_id','pw.status','pw.qty'];
-            if ($db->fieldExists('qty_in', 'production_wip'))  $selectCols[] = 'pw.qty_in';
-            if ($db->fieldExists('qty_out', 'production_wip')) $selectCols[] = 'pw.qty_out';
-            if ($db->fieldExists('stock', 'production_wip'))   $selectCols[] = 'pw.stock';
-
-            // pakai detect date col biar aman
-            $wipDateCol = $this->detectWipDateColumn($db);
-
+        if ($machiningProcessId) {
             $wips = $db->table('production_wip pw')
-                ->select(implode(',', $selectCols))
-                ->where("pw.$wipDateCol", $date)
-                ->where('pw.to_process_id', $assyProcessId)
+                ->select('pw.product_id, pw.from_process_id, pw.to_process_id, pw.status, pw.qty_in, pw.qty_out, pw.stock')
+                ->where('pw.production_date', $date)
+                ->where('pw.to_process_id', $machiningProcessId)
                 ->get()->getResultArray();
 
             foreach ($wips as $w) {
-                $wipMap[(int)$w['product_id']] = $w;
+                // key by product only (umumnya inbound per product)
+                $wipMap[$w['product_id']] = $w;
             }
         }
 
@@ -112,7 +110,7 @@ class AssyBushingDailyProductionAchievementController extends BaseController
         $processes = $db->table('production_processes')->select('id, process_name')->get()->getResultArray();
         foreach ($processes as $pp) $processNameMap[$pp['id']] = $pp['process_name'];
 
-        // Build shifts output
+        // Build shifts output like Die Casting view structure
         $viewShifts = [];
         $dailyTarget = 0; $dailyFG = 0; $dailyNG = 0; $dailyDT = 0;
 
@@ -123,9 +121,11 @@ class AssyBushingDailyProductionAchievementController extends BaseController
             $startTime = $slots[0]['time_start'] ?? null;
             $endTime   = $slots ? end($slots)['time_end'] : null;
 
+            // deadline = 1 jam setelah shift end (handle cross midnight)
             $editDeadline = $this->calcEditDeadline($date, $startTime, $endTime, 60);
             $canEdit = $editDeadline ? (time() <= strtotime($editDeadline)) : false;
 
+            // items by shift
             $items = array_values(array_filter($scheduleRows, fn($r) => (int)$r['shift_id'] === $shiftId));
 
             $mappedItems = [];
@@ -135,29 +135,26 @@ class AssyBushingDailyProductionAchievementController extends BaseController
 
             foreach ($items as $r) {
                 $k = $shiftId.'_'.$r['machine_id'].'_'.$r['product_id'];
-                $h = $hourlyMap[$k] ?? ['fg'=>0,'ng'=>0];
+                $h = $hourlyMap[$k] ?? ['fg'=>0,'ng'=>0,'ng_blank'=>0,'downtime'=>0,'downtime_category_id'=>0,'ng_category'=>null];
 
                 $totalTarget += (int)$r['target_per_shift'];
                 $totalFG     += (int)$h['fg'];
                 $totalNG     += (int)$h['ng'];
-                $totalDT     += 0;
+                $totalDT     += (int)$h['downtime'];
 
                 $dailyTarget += (int)$r['target_per_shift'];
                 $dailyFG     += (int)$h['fg'];
                 $dailyNG     += (int)$h['ng'];
-                $dailyDT     += 0;
+                $dailyDT     += (int)$h['downtime'];
 
-                $nextProcessId = $this->getNextProcessId($db, (int)$r['product_id'], $assyProcessId);
+                // next process from flow (sequence + 1)
+                $nextProcessId = $this->getNextProcessId($db, (int)$r['product_id'], $machiningProcessId);
                 $nextProcessName = $nextProcessId ? ($processNameMap[$nextProcessId] ?? '-') : '-';
 
+                // WIP inbound display
                 $wip = $wipMap[(int)$r['product_id']] ?? null;
                 $wipStatus = $wip['status'] ?? 'WAITING';
-
-                $wipQty = 0;
-                if ($wip) {
-                    if (array_key_exists('qty_in', $wip)) $wipQty = (int)($wip['qty_in'] ?? 0);
-                    else $wipQty = (int)($wip['qty'] ?? 0);
-                }
+                $wipQty = (int)($wip['qty_in'] ?? 0);
 
                 $mappedItems[] = [
                     'no' => $no++,
@@ -172,8 +169,10 @@ class AssyBushingDailyProductionAchievementController extends BaseController
 
                     'fg_display' => (int)$h['fg'],
                     'ng_display' => (int)$h['ng'],
-                    'downtime' => 0,
-                    'ng_category' => '',
+                    'ng_blank_display' => (int)$h['ng_blank'],
+                    'downtime' => (int)$h['downtime'],
+                    'downtime_category_id' => (int)($h['downtime_category_id'] ?? 0),
+                    'ng_category' => (string)($h['ng_category'] ?? ''),
 
                     'next_process_name' => $nextProcessName,
                     'wip_qty' => $wipQty,
@@ -181,39 +180,164 @@ class AssyBushingDailyProductionAchievementController extends BaseController
                 ];
             }
 
+            // Get ng_detail_map for this shift
+            $ngDetailMap = [];
+            if ($db->tableExists('machining_assy_bushing_hourly_ng_details') && !empty($mappedItems)) {
+                $hourlyRows = $db->table('machining_assy_bushing_hourly')
+                                 ->select('id, machine_id, product_id, time_slot_id, remark')
+                                 ->where('production_date', $date)
+                                 ->where('shift_id', $shiftId)
+                                 ->get()->getResultArray();
+                
+                $hourlyIds = array_column($hourlyRows, 'id');
+                
+                // Remarks Map
+                $ngDetailMap['remark_map'] = [];
+                foreach ($hourlyRows as $h) {
+                    $m = (int)$h['machine_id'];
+                    $p = (int)$h['product_id'];
+                    $t = (int)$h['time_slot_id'];
+                    $ngDetailMap['remark_map'][$m][$p][$t] = $h['remark'] ?? '';
+                }
+                
+                if (!empty($hourlyIds)) {
+                    $details = $db->table('machining_assy_bushing_hourly_ng_details d')
+                        ->select('d.machining_assy_bushing_hourly_id, d.ng_category_id, d.qty')
+                        ->whereIn('d.machining_assy_bushing_hourly_id', $hourlyIds)
+                        ->get()->getResultArray();
+
+                    $hourlyIndex = [];
+                    foreach ($hourlyRows as $h) {
+                        $hourlyIndex[(int)$h['id']] = [
+                            'm' => (int)$h['machine_id'],
+                            'p' => (int)$h['product_id']
+                        ];
+                    }
+
+                    $shiftNgSums = [];
+                    foreach ($details as $d) {
+                        $hid = (int)$d['machining_assy_bushing_hourly_id'];
+                        $idx = $hourlyIndex[$hid] ?? null;
+                        if (!$idx) continue;
+                        $m = $idx['m'];
+                        $p = $idx['p'];
+                        $c = (int)$d['ng_category_id'];
+                        
+                        if (!isset($shiftNgSums[$m][$p][$c])) {
+                            $shiftNgSums[$m][$p][$c] = 0;
+                        }
+                        $shiftNgSums[$m][$p][$c] += (int)$d['qty'];
+                    }
+
+                    foreach ($shiftNgSums as $m => $prodArr) {
+                        foreach ($prodArr as $p => $catArr) {
+                            foreach ($catArr as $c => $qty) {
+                                $ngDetailMap[$m][$p][] = [
+                                    'ng_category_id' => $c,
+                                    'qty' => $qty
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Build dt_detail_map: machine_id => product_id => [ {downtime_category_id, downtime_minute} ]
+            $dtDetailMap = [];
+            if ($db->tableExists('machining_assy_bushing_hourly_downtime_details') && !empty($mappedItems)) {
+                $allHourlyRows = $db->table('machining_assy_bushing_hourly')
+                    ->select('id, machine_id, product_id')
+                    ->where('production_date', $date)
+                    ->where('shift_id', $shiftId)
+                    ->get()->getResultArray();
+                $allHourlyIds = array_column($allHourlyRows, 'id');
+                if (!empty($allHourlyIds)) {
+                    $dtRows = $db->table('machining_assy_bushing_hourly_downtime_details')
+                        ->whereIn('machining_assy_bushing_hourly_id', $allHourlyIds)
+                        ->get()->getResultArray();
+
+                    $hIdx = [];
+                    foreach ($allHourlyRows as $h) { $hIdx[(int)$h['id']] = ['m' => (int)$h['machine_id'], 'p' => (int)$h['product_id']]; }
+
+                    $dtSums = [];
+                    foreach ($dtRows as $d) {
+                        $hid = (int)$d['machining_assy_bushing_hourly_id'];
+                        if (!isset($hIdx[$hid])) continue;
+                        $m = $hIdx[$hid]['m']; $p = $hIdx[$hid]['p'];
+                        $catId = (int)$d['downtime_category_id'];
+                        $mins  = (int)$d['downtime_minute'];
+                        if (!isset($dtSums[$m][$p][$catId])) $dtSums[$m][$p][$catId] = 0;
+                        $dtSums[$m][$p][$catId] += $mins;
+                    }
+                    foreach ($dtSums as $m => $prodArr) {
+                        foreach ($prodArr as $p => $catArr) {
+                            foreach ($catArr as $catId => $mins) {
+                                $dtDetailMap[$m][$p][] = ['downtime_category_id' => $catId, 'downtime_minute' => $mins];
+                            }
+                        }
+                    }
+                }
+            }
+
             $viewShifts[] = [
                 'id' => $shiftId,
                 'shift_name' => $s['shift_name'],
                 'isEditable' => $canEdit,
                 'editDeadline' => $editDeadline,
-
                 'items' => $mappedItems,
+                'ng_detail_map' => $ngDetailMap,
+                'dt_detail_map' => $dtDetailMap,
+                'slots' => $slots,
+
                 'totalTarget' => $totalTarget,
                 'totalFG' => $totalFG,
                 'totalNG' => $totalNG,
                 'totalDT' => $totalDT,
             ];
+
         }
 
         $dailyEfficiency = $dailyTarget > 0 ? round(($dailyFG / $dailyTarget) * 100, 1) : 0;
 
+        $ngCategories = [];
+        if ($db->tableExists('ng_categories')) {
+            $ngCategories = $db->table('ng_categories')
+                ->where('process_name', 'Assy Bushing')
+                ->where('is_active', 1)
+                ->get()->getResultArray();
+        }
+
+        $downtimes = [];
+        if ($db->tableExists('downtime_categories')) {
+            $downtimes = $db->table('downtime_categories')
+                ->where('process_id', $machiningProcessId)
+                ->where('is_active', 1)
+                ->orderBy('downtime_name', 'ASC')
+                ->get()->getResultArray();
+        }
+
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+
         return view('machining/assy_bushing/daily_production_achievement/index', [
             'date' => $date,
             'shifts' => $viewShifts,
+            'shiftSlots' => $shiftSlots,
             'ngCategories' => $ngCategories,
-
+            'downtimes' => $downtimes,
             'dailyTarget' => $dailyTarget,
             'dailyFG' => $dailyFG,
             'dailyNG' => $dailyNG,
             'dailyDT' => $dailyDT,
             'dailyEfficiency' => $dailyEfficiency,
+            'isAdmin' => $isAdmin,
         ]);
     }
 
     /**
      * Simpan Koreksi:
+     * - Tidak overwrite semua hourly
      * - Adjust delta ke slot terakhir shift supaya SUM sesuai input
-     * - ✅ Setelah koreksi, update stock WIP inbound (prev -> AB) = SUM(qty_fg) harian (qty OK)
      */
     public function store()
     {
@@ -224,10 +348,17 @@ class AssyBushingDailyProductionAchievementController extends BaseController
             return redirect()->back()->with('error', 'Data tidak valid');
         }
 
-        $db->transBegin();
-        try {
-            $affectedDates = [];
+        $downtimeValues = [];
+        if ($db->tableExists('downtime_categories')) {
+            $dtRows = $db->table('downtime_categories')->get()->getResultArray();
+            foreach ($dtRows as $dt) {
+                $downtimeValues[(int)$dt['id']] = (int)$dt['value'];
+            }
+        }
 
+        $db->transBegin();
+
+        try {
             foreach ($items as $row) {
                 $date = $row['date'] ?? null;
                 $shiftId = (int)($row['shift_id'] ?? 0);
@@ -235,8 +366,6 @@ class AssyBushingDailyProductionAchievementController extends BaseController
                 $productId = (int)($row['product_id'] ?? 0);
 
                 if (!$date || !$shiftId || !$machineId || !$productId) continue;
-
-                $affectedDates[$date] = true;
 
                 // cek edit window (max 1 jam setelah shift end)
                 $slots = $db->table('shift_time_slots sts')
@@ -249,9 +378,12 @@ class AssyBushingDailyProductionAchievementController extends BaseController
                 $startTime = $slots[0]['time_start'] ?? null;
                 $endTime   = $slots ? end($slots)['time_end'] : null;
 
+                $role = (string)(session()->get('role') ?? '');
+                $isAdmin = (strtoupper($role) === 'ADMIN');
+
                 $deadline = $this->calcEditDeadline($date, $startTime, $endTime, 60);
-                if (!$deadline || time() > strtotime($deadline)) {
-                    continue;
+                if (!$isAdmin && (!$deadline || time() > strtotime($deadline))) {
+                    continue; // terkunci
                 }
 
                 $lastSlotId = $slots ? (int)end($slots)['id'] : 0;
@@ -259,10 +391,30 @@ class AssyBushingDailyProductionAchievementController extends BaseController
 
                 $newFG = (int)($row['fg'] ?? 0);
                 $newNG = (int)($row['ng'] ?? 0);
+                $newNGBlank = (int)($row['ng_blank'] ?? 0);
+                
+                // Support dt_details array (new inline DT table) or legacy downtime_category_id
+                $dtDetails = $row['dt_details'] ?? [];
+                $dtId = 0;
+                $newDT = 0;
+                if (!empty($dtDetails) && is_array($dtDetails)) {
+                    foreach ($dtDetails as $dtEntry) {
+                        $newDT += (int)($dtEntry['downtime_minute'] ?? 0);
+                        // Use first category for legacy downtime_category_id column
+                        if (!$dtId && !empty($dtEntry['downtime_category_id'])) {
+                            $dtId = (int)$dtEntry['downtime_category_id'];
+                        }
+                    }
+                } else {
+                    $dtId = (int)($row['downtime_category_id'] ?? 0);
+                    $newDT = $dtId > 0 ? ($downtimeValues[$dtId] ?? 0) : 0;
+                }
+                
+                $newNGCat = (string)($row['ng_category'] ?? '');
 
                 // current totals
                 $cur = $db->table('machining_assy_bushing_hourly')
-                    ->select('SUM(qty_fg) fg, SUM(qty_ng) ng')
+                    ->select('shift_id, machine_id, product_id, SUM(qty_fg) fg, SUM(qty_ng) ng, SUM(qty_ng_blank) ng_blank, SUM(downtime) downtime')
                     ->where('production_date', $date)
                     ->where('shift_id', $shiftId)
                     ->where('machine_id', $machineId)
@@ -271,59 +423,127 @@ class AssyBushingDailyProductionAchievementController extends BaseController
 
                 $curFG = (int)($cur['fg'] ?? 0);
                 $curNG = (int)($cur['ng'] ?? 0);
+                $curNGBlank = (int)($cur['ng_blank'] ?? 0);
 
                 $deltaFG = $newFG - $curFG;
                 $deltaNG = $newNG - $curNG;
+                $deltaNGBlank = $newNGBlank - $curNGBlank;
 
-                // row slot terakhir
+                // ambil row slot terakhir
                 $lastRow = $db->table('machining_assy_bushing_hourly')
                     ->where([
                         'production_date' => $date,
-                        'shift_id'        => $shiftId,
-                        'time_slot_id'    => $lastSlotId,
-                        'machine_id'      => $machineId,
-                        'product_id'      => $productId
+                        'shift_id' => $shiftId,
+                        'time_slot_id' => $lastSlotId,
+                        'machine_id' => $machineId,
+                        'product_id' => $productId
                     ])->get()->getRowArray();
 
                 if ($lastRow) {
                     $updatedFG = max(0, (int)$lastRow['qty_fg'] + $deltaFG);
                     $updatedNG = max(0, (int)$lastRow['qty_ng'] + $deltaNG);
+                    $updatedNGBlank = max(0, (int)$lastRow['qty_ng_blank'] + $deltaNGBlank);
 
-                    $payload = [
+                    $db->table('machining_assy_bushing_hourly')->where('id', $lastRow['id'])->update([
                         'qty_fg' => $updatedFG,
                         'qty_ng' => $updatedNG,
-                    ];
-                    if ($db->fieldExists('updated_at', 'machining_assy_bushing_hourly')) {
-                        $payload['updated_at'] = date('Y-m-d H:i:s');
-                    }
-                    $db->table('machining_assy_bushing_hourly')->where('id', $lastRow['id'])->update($payload);
+                        'qty_ng_blank' => $updatedNGBlank,
+                        'downtime_category_id' => $dtId > 0 ? $dtId : null,
+                        'downtime' => $newDT,
+                        
+                        'remark' => 'CORRECTION',
+                    ]);
                 } else {
-                    $payload = [
+                    // kalau slot terakhir belum ada, buat row baru sebagai "closing correction"
+                    $db->table('machining_assy_bushing_hourly')->insert([
+                        'production_date' => $date,
+                        'shift_id' => $shiftId,
+                        'time_slot_id' => $lastSlotId,
+                        'machine_id' => $machineId,
+                        'product_id' => $productId,
+                        'qty_fg' => max(0, $deltaFG), 
+                        'qty_ng' => max(0, $deltaNG),
+
+                        'qty_ng_blank' => max(0, $deltaNGBlank),
+                        'downtime_category_id' => $dtId > 0 ? $dtId : null,
+                        'downtime' => $newDT,
+                        
+                        'remark' => 'CORRECTION',
+                    ]);
+                }
+
+                // Delete all NG details for this shift/machine/product
+                $allHourlyIds = $db->table('machining_assy_bushing_hourly')
+                    ->select('id')
+                    ->where([
                         'production_date' => $date,
                         'shift_id'        => $shiftId,
-                        'time_slot_id'    => $lastSlotId,
                         'machine_id'      => $machineId,
                         'product_id'      => $productId,
-                        'qty_fg'          => max(0, $deltaFG),
-                        'qty_ng'          => max(0, $deltaNG),
-                    ];
-                    if ($db->fieldExists('created_at', 'machining_assy_bushing_hourly')) {
-                        $payload['created_at'] = date('Y-m-d H:i:s');
+                    ])->get()->getResultArray();
+                
+                if (!empty($allHourlyIds) && $db->tableExists('machining_assy_bushing_hourly_ng_details')) {
+                    $ids = array_column($allHourlyIds, 'id');
+                    $db->table('machining_assy_bushing_hourly_ng_details')
+                       ->whereIn('machining_assy_bushing_hourly_id', $ids)
+                       ->delete();
+                }
+
+                // get last row id again if it was inserted
+                $lastRowId = $lastRow ? (int)$lastRow['id'] : $db->insertID();
+
+                $ngDetails = $row['ng_details'] ?? [];
+                if ($lastRowId > 0 && is_array($ngDetails) && !empty($ngDetails)) {
+                    $this->saveNgDetails($db, $lastRowId, $ngDetails);
+                    $sumNg = $this->sumNgDetail($db, $lastRowId);
+                    $db->table('machining_assy_bushing_hourly')
+                       ->where('id', $lastRowId)
+                       ->update(['qty_ng' => $sumNg]);
+                }
+
+                // 5) simpan remarks per slot
+                $remarks = $row['remarks'] ?? [];
+                if (is_array($remarks)) {
+                    foreach ($remarks as $slotId => $rmk) {
+                        $sId = (int)$slotId;
+                        if ($sId <= 0) continue;
+                        
+                        // Cek apakah data hourly untuk slot ini sudah ada
+                        $hourlyRow = $db->table('machining_assy_bushing_hourly')
+                            ->select('id')
+                            ->where([
+                                'production_date' => $date,
+                                'shift_id'        => $shiftId,
+                                'machine_id'      => $machineId,
+                                'product_id'      => $productId,
+                                'time_slot_id'    => $sId,
+                            ])->get()->getRowArray();
+
+                        if ($hourlyRow) {
+                            $db->table('machining_assy_bushing_hourly')
+                               ->where('id', (int)$hourlyRow['id'])
+                               ->update(['remark' => $rmk ?: null]);
+                        } else if ($rmk) {
+                            // Jika belum ada tapi ada remark, buat row baru dengan 0 qty
+                            $db->table('machining_assy_bushing_hourly')->insert([
+                                'production_date' => $date,
+                                'shift_id'        => $shiftId,
+                                'machine_id'      => $machineId,
+                                'product_id'      => $productId,
+                                'time_slot_id'    => $sId,
+                                'qty_fg'          => 0,
+                                'qty_ng'          => 0,
+                                'qty_ng_blank'    => 0,
+                                'remark'          => $rmk,
+                                'created_at'      => date('Y-m-d H:i:s'),
+                            ]);
+                        }
                     }
-                    if ($db->fieldExists('updated_at', 'machining_assy_bushing_hourly')) {
-                        $payload['updated_at'] = date('Y-m-d H:i:s');
-                    }
-                    $db->table('machining_assy_bushing_hourly')->insert($payload);
                 }
             }
 
-            // ✅ setelah koreksi, sync stock WIP inbound (prev -> AB) berdasarkan SUM OK harian
-            foreach (array_keys($affectedDates) as $d) {
-                $this->syncAssyBushingWipStockFromHourly($db, (string)$d);
-            }
-
             $db->transCommit();
-            return redirect()->back()->with('success', 'Koreksi Assy Bushing berhasil disimpan + Stock WIP ter-update');
+            return redirect()->back()->with('success', 'Koreksi machining berhasil disimpan');
 
         } catch (\Throwable $e) {
             $db->transRollback();
@@ -333,40 +553,13 @@ class AssyBushingDailyProductionAchievementController extends BaseController
 
     // ================== HELPERS ==================
 
-    private function getProcessAssyBushing($db): ?array
-    {
-        // by code AB if exists
-        if ($db->fieldExists('process_code', 'production_processes')) {
-            $row = $db->table('production_processes')
-                ->select('id, process_code, process_name')
-                ->where('process_code', 'AB')
-                ->get()->getRowArray();
-            if ($row) return $row;
-        }
-
-        $row = $db->table('production_processes')
-            ->select('id, process_code, process_name')
-            ->where('process_name', 'Assy Bushing')
-            ->get()->getRowArray();
-
-        if ($row) return $row;
-
-        // LIKE fallback
-        $row = $db->table('production_processes')
-            ->select('id, process_code, process_name')
-            ->like('process_name', 'Assy Bushing')
-            ->get()->getRowArray();
-
-        return $row ?: null;
-    }
-
     private function calcEditDeadline(?string $date, ?string $start, ?string $end, int $minutesAfterEnd): ?string
     {
         if (!$date || !$start || !$end) return null;
 
         $startTs = strtotime($date.' '.$start);
         $endTs   = strtotime($date.' '.$end);
-        if ($endTs <= $startTs) $endTs += 86400;
+        if ($endTs <= $startTs) $endTs += 86400; // cross midnight
 
         $deadlineTs = $endTs + ($minutesAfterEnd * 60);
         return date('Y-m-d H:i:s', $deadlineTs);
@@ -399,132 +592,47 @@ class AssyBushingDailyProductionAchievementController extends BaseController
         return $next ? (int)$next['process_id'] : null;
     }
 
-    /* =========================
-     * ✅ Tambahan: detect date col production_wip
-     * ========================= */
-    private function detectWipDateColumn($db): string
+    private function saveNgDetails($db, int $hourlyId, $ngDetails): void
     {
-        if ($db->fieldExists('production_date', 'production_wip')) return 'production_date';
-        if ($db->fieldExists('schedule_date', 'production_wip'))   return 'schedule_date';
-        if ($db->fieldExists('wip_date', 'production_wip'))        return 'wip_date';
-        return 'production_date';
-    }
+        if (!$db->tableExists('machining_assy_bushing_hourly_ng_details')) return;
+        if (!is_array($ngDetails)) $ngDetails = [];
 
-    /* =========================
-     * ✅ Tambahan: prev process dari flow list
-     * ========================= */
-    private function resolvePrevProcessId($db, int $productId, int $toProcessId): ?int
-    {
-        $flows = $db->table('product_process_flows')
-            ->select('process_id, sequence')
-            ->where('product_id', $productId)
-            ->where('is_active', 1)
-            ->orderBy('sequence', 'ASC')
-            ->get()
-            ->getResultArray();
+        $db->table('machining_assy_bushing_hourly_ng_details')
+           ->where('machining_assy_bushing_hourly_id', $hourlyId)
+           ->delete();
 
-        if (!$flows) return null;
-
-        $idx = null;
-        foreach ($flows as $i => $f) {
-            if ((int)$f['process_id'] === (int)$toProcessId) { $idx = $i; break; }
-        }
-        if ($idx === null) return null;
-
-        return isset($flows[$idx - 1]) ? (int)$flows[$idx - 1]['process_id'] : null;
-    }
-
-    /* =========================================================
-     * ✅ Tambahan: SYNC STOCK WIP inbound (prev -> AB) dari hourly OK (SUM qty_fg)
-     * - SAMA POLA dengan Machining Hourly
-     * ========================================================= */
-    private function syncAssyBushingWipStockFromHourly($db, string $date): void
-    {
-        if (!$db->tableExists('production_wip')) return;
-        if (!$db->tableExists('machining_assy_bushing_hourly')) return;
-        if (!$db->tableExists('daily_schedule_items') || !$db->tableExists('daily_schedules')) return;
-
-        $assyProcess = $this->getProcessAssyBushing($db);
-        $assyProcessId = (int)($assyProcess['id'] ?? 0);
-        if ($assyProcessId <= 0) return;
-
-        $wipDateCol = $this->detectWipDateColumn($db);
-
-        $hasQtyIn  = $db->fieldExists('qty_in', 'production_wip');
-        $hasQtyOut = $db->fieldExists('qty_out', 'production_wip');
-        $hasStock  = $db->fieldExists('stock', 'production_wip');
-        if (!$hasStock) return;
-
-        // semua schedule item AB pada tanggal tsb (SEMUA SHIFT)
-        $items = $db->table('daily_schedule_items dsi')
-            ->select('dsi.id AS dsi_id, dsi.machine_id, dsi.product_id')
-            ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
-            ->where('ds.schedule_date', $date)
-            ->where('ds.section', 'Assy Bushing')
-            ->where('dsi.target_per_shift >', 0)
-            ->get()
-            ->getResultArray();
-
-        if (!$items) return;
-
-        // total OK harian per machine+product
-        $actualRows = $db->table('machining_assy_bushing_hourly')
-            ->select('machine_id, product_id, SUM(qty_fg) AS fg_total')
-            ->where('production_date', $date)
-            ->groupBy('machine_id, product_id')
-            ->get()
-            ->getResultArray();
-
-        $actualMap = [];
-        foreach ($actualRows as $a) {
-            $actualMap[(int)$a['machine_id'].'_'.(int)$a['product_id']] = (int)($a['fg_total'] ?? 0);
+        $grouped = [];
+        foreach ($ngDetails as $d) {
+            $ngId = (int)($d['ng_category_id'] ?? 0);
+            $qty  = (int)($d['qty'] ?? 0);
+            if ($ngId <= 0 || $qty <= 0) continue;
+            
+            if (!isset($grouped[$ngId])) $grouped[$ngId] = 0;
+            $grouped[$ngId] += $qty;
         }
 
-        $now = date('Y-m-d H:i:s');
-
-        foreach ($items as $si) {
-            $dsiId     = (int)$si['dsi_id'];
-            $machineId = (int)$si['machine_id'];
-            $productId = (int)$si['product_id'];
-            if ($dsiId <= 0 || $machineId <= 0 || $productId <= 0) continue;
-
-            $qtyA = (int)($actualMap[$machineId.'_'.$productId] ?? 0);
-
-            $prevProcessId = $this->resolvePrevProcessId($db, $productId, $assyProcessId);
-            if (!$prevProcessId) continue;
-
-            // key inbound: prev -> AB (source daily_schedule_items)
-            $key = [
-                $wipDateCol       => $date,
-                'product_id'      => $productId,
-                'from_process_id' => $prevProcessId,
-                'to_process_id'   => $assyProcessId,
+        $batch = [];
+        foreach ($grouped as $ngId => $qty) {
+            $batch[] = [
+                'machining_assy_bushing_hourly_id' => $hourlyId,
+                'ng_category_id'      => $ngId,
+                'qty'                 => $qty,
+                'created_at'          => date('Y-m-d H:i:s'),
             ];
-
-            // gunakan source_table/source_id kalau kolomnya ada (lebih presisi)
-            if ($db->fieldExists('source_table', 'production_wip')) $key['source_table'] = 'daily_schedule_items';
-            if ($db->fieldExists('source_id', 'production_wip'))    $key['source_id']    = $dsiId;
-
-            $exist = $db->table('production_wip')->where($key)->get()->getRowArray();
-
-            if (!$exist) {
-                $payload = $key + [
-                    'qty'    => 0,
-                    'status' => 'SCHEDULED',
-                    'stock'  => $qtyA,
-                ];
-                if ($hasQtyIn)  $payload['qty_in']  = 0;
-                if ($hasQtyOut) $payload['qty_out'] = 0;
-
-                if ($db->fieldExists('created_at', 'production_wip')) $payload['created_at'] = $now;
-                if ($db->fieldExists('updated_at', 'production_wip')) $payload['updated_at'] = $now;
-
-                $db->table('production_wip')->insert($payload);
-            } else {
-                $upd = ['stock' => $qtyA];
-                if ($db->fieldExists('updated_at', 'production_wip')) $upd['updated_at'] = $now;
-                $db->table('production_wip')->where('id', (int)$exist['id'])->update($upd);
-            }
         }
+
+        if (!empty($batch)) {
+            $db->table('machining_assy_bushing_hourly_ng_details')->insertBatch($batch);
+        }
+    }
+
+    private function sumNgDetail($db, int $hourlyId): int
+    {
+        if (!$db->tableExists('machining_assy_bushing_hourly_ng_details')) return 0;
+        $row = $db->table('machining_assy_bushing_hourly_ng_details')
+                  ->select('SUM(qty) AS s')
+                  ->where('machining_assy_bushing_hourly_id', $hourlyId)
+                  ->get()->getRowArray();
+        return (int)($row['s'] ?? 0);
     }
 }

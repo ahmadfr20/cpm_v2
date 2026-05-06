@@ -104,7 +104,24 @@ class QCController extends BaseController
             ->get()->getResultArray();
 
         // Get today's inspections to display what has been inspected
-        $inspections = $db->table('qc_inspections qc')
+        $inspections = $this->getInspections($db, $date);
+        $inspectionNgs = $this->getInspectionNgs($db, $inspections);
+
+        return view('qc/index', [
+            'date'          => $date,
+            'wips'          => $wips,
+            'shifts'        => $shifts,
+            'ngCategories'  => $ngCategories,
+            'qcProcessId'   => $qcProcessId,
+            'fgProcessId'   => $fgProcessId,
+            'inspections'   => $inspections,
+            'inspectionNgs' => $inspectionNgs
+        ]);
+    }
+
+    private function getInspections($db, $date)
+    {
+        return $db->table('qc_inspections qc')
             ->select('qc.*, p.part_no, p.part_name, s.shift_name, pp.process_name')
             ->join('products p', 'p.id = qc.product_id')
             ->join('shifts s', 's.id = qc.shift_id', 'left')
@@ -112,8 +129,10 @@ class QCController extends BaseController
             ->where('qc.production_date', $date)
             ->orderBy('qc.created_at', 'DESC')
             ->get()->getResultArray();
+    }
 
-        // Map NG details to inspections
+    private function getInspectionNgs($db, $inspections)
+    {
         $inspectionNgs = [];
         if (!empty($inspections)) {
             $ids = array_column($inspections, 'id');
@@ -127,17 +146,52 @@ class QCController extends BaseController
                 $inspectionNgs[$ng['qc_inspection_id']][] = $ng;
             }
         }
+        return $inspectionNgs;
+    }
 
-        return view('qc/index', [
-            'date'          => $date,
-            'wips'          => $wips,
-            'shifts'        => $shifts,
-            'ngCategories'  => $ngCategories,
-            'qcProcessId'   => $qcProcessId,
-            'fgProcessId'   => $fgProcessId,
-            'inspections'   => $inspections,
-            'inspectionNgs' => $inspectionNgs
-        ]);
+    public function exportCsv()
+    {
+        $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
+
+        $inspections = $this->getInspections($db, $date);
+        $inspectionNgs = $this->getInspectionNgs($db, $inspections);
+
+        $filename = 'QC_Inspection_Hasil_' . $date . '_' . date('Ymd_His') . '.csv';
+
+        header('Content-Type: text/csv');
+        header('Content-Disposition: attachment; filename="' . $filename . '";');
+
+        $f = fopen('php://output', 'w');
+        fputcsv($f, ['No', 'Waktu Inspeksi', 'Shift', 'Dari Proses', 'Part No', 'Part Name', 'Qty In', 'Qty OK', 'Qty NG', 'Detail NG', 'Inspektor']);
+
+        $no = 1;
+        foreach ($inspections as $ins) {
+            $ngDetails = [];
+            if (isset($inspectionNgs[$ins['id']])) {
+                foreach ($inspectionNgs[$ins['id']] as $ng) {
+                    $ngDetails[] = ($ng['ng_name'] ?: $ng['ng_code']) . ' (' . $ng['qty'] . ' pcs)';
+                }
+            }
+            $ngStr = implode(', ', $ngDetails);
+
+            fputcsv($f, [
+                $no++,
+                $ins['created_at'],
+                $ins['shift_name'],
+                $ins['process_name'],
+                "'" . $ins['part_no'],
+                $ins['part_name'],
+                $ins['qty_in'],
+                $ins['qty_ok'],
+                $ins['qty_ng'],
+                $ngStr,
+                $ins['inspected_by']
+            ]);
+        }
+
+        fclose($f);
+        exit;
     }
 
     public function store()

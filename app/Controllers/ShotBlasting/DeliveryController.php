@@ -62,6 +62,25 @@ class DeliveryController extends BaseController
         return ['id' => 0, 'stock' => 0, 'transfer' => 0];
     }
 
+    private function getPrevNextProcessByFlow($db, int $productId, int $currentProcessId): array
+    {
+        if (!$db->tableExists('product_process_flows')) return ['prev' => null, 'next' => null];
+
+        $rows = $db->table('product_process_flows')->select('process_id, sequence')
+            ->where('product_id', $productId)->where('is_active', 1)->orderBy('sequence', 'ASC')->get()->getResultArray();
+
+        if (!$rows) return ['prev' => null, 'next' => null];
+
+        $seq = array_map(fn($r) => (int)$r['process_id'], $rows);
+        $idx = array_search($currentProcessId, $seq, true);
+        if ($idx === false) return ['prev' => null, 'next' => null];
+
+        return [
+            'prev' => $seq[$idx - 1] ?? null,
+            'next' => $seq[$idx + 1] ?? null,
+        ];
+    }
+
     private function upsertCurrentSnapshot($db, string $date, int $processId, int $productId, int $fromProcessId, int $newStock, int $newTransfer, string $sourceTable, int $sourceId): void
     {
         if (!$db->tableExists('production_wip')) return;
@@ -105,6 +124,8 @@ class DeliveryController extends BaseController
     {
         $db   = db_connect();
         $date = $this->request->getGet('date') ?? date('Y-m-d');
+        $role = strtoupper((string)(session()->get('role') ?? ''));
+        $isAdmin = ($role === 'ADMIN');
 
         $sbId = $this->getSandBlastingProcessId($db);
         if (!$sbId) {
@@ -128,9 +149,14 @@ class DeliveryController extends BaseController
             foreach ($schedules as $sch) {
                 $pid = (int)$sch['product_id'];
                 if (!isset($availableMap[$pid])) {
-                    // AMBIL STOCK LANGSUNG DARI SHOT BLASTING
-                    $snap = $this->getLatestSnapshot($db, $date, $sbId, $pid);
-                    $availableMap[$pid] = (int)($snap['stock'] ?? 0);
+                    $flow = $this->getPrevNextProcessByFlow($db, $pid, $sbId);
+                    $prevId = (int)($flow['prev'] ?? 0);
+                    $available = 0;
+                    if ($prevId > 0) {
+                        $snap = $this->getLatestSnapshot($db, $date, $prevId, $pid);
+                        $available = (int)($snap['stock'] ?? 0);
+                    }
+                    $availableMap[$pid] = $available;
                 }
             }
         }
@@ -140,6 +166,7 @@ class DeliveryController extends BaseController
             'schedules'    => $schedules,
             'availableMap' => $availableMap,
             'errorMsg'     => null,
+            'isAdmin'      => $isAdmin,
         ]);
     }
 
@@ -153,6 +180,10 @@ class DeliveryController extends BaseController
         $date  = date('Y-m-d');
         $items = $this->request->getPost('items');
 
+        // Server-side: hanya ADMIN yang boleh bypass stock
+        $role = strtoupper((string)(session()->get('role') ?? ''));
+        $bypassStock = ($role === 'ADMIN') ? (int)($this->request->getPost('bypass_stock') ?? 0) : 0;
+
         if (!is_array($items) || empty($items)) return redirect()->back()->with('error', 'Tidak ada data item untuk diproses.');
 
         $sbId = $this->getSandBlastingProcessId($db);
@@ -161,9 +192,10 @@ class DeliveryController extends BaseController
         $stockCol    = $this->detectWipStockColumn($db);
         $transferCol = $this->detectWipTransferColumn($db);
         $wipDateCol  = $this->detectWipDateColumn($db);
+        $procCol     = $this->detectWipProcessColumn($db);
         $now         = date('Y-m-d H:i:s');
 
-        $db->transBegin();
+        $db->transStart();
         try {
             foreach ($items as $row) {
                 $scheduleItemId = (int)($row['schedule_item_id'] ?? 0);
@@ -181,13 +213,17 @@ class DeliveryController extends BaseController
                 $productId = (int)$dsi['product_id'];
                 $shiftId   = (int)$dsi['shift_id'];
 
-                // 1. Cek Stock Langsung di Shot Blasting
-                $sbSnap      = $this->getLatestSnapshot($db, $date, $sbId, $productId);
-                $availableSb = (int)($sbSnap['stock'] ?? 0);
-                $sbTransfer  = (int)($sbSnap['transfer'] ?? 0);
+                $flow = $this->getPrevNextProcessByFlow($db, $productId, $sbId);
+                $prevId = (int)($flow['prev'] ?? 0);
+                if ($prevId <= 0 && !$bypassStock) throw new \Exception("Flow sebelumnya tidak ditemukan untuk produk ID {$productId}.");
 
-                if ($qty > $availableSb) {
-                    throw new \Exception("Gagal: Qty proses ($qty) melebihi Ready Stock di Shot Blasting ($availableSb) untuk produk ID {$productId}.");
+                // 1. Cek Stock di Proses Sebelumnya (misal Die Casting)
+                $prevSnap      = $prevId > 0 ? $this->getLatestSnapshot($db, $date, $prevId, $productId) : ['stock' => 0, 'transfer' => 0, 'id' => 0];
+                $availablePrev = (int)($prevSnap['stock'] ?? 0);
+                $prevTransfer  = (int)($prevSnap['transfer'] ?? 0);
+
+                if (!$bypassStock && $qty > $availablePrev) {
+                    throw new \Exception("Gagal: Qty proses ($qty) melebihi Ready Stock di proses sebelumnya ($availablePrev) untuk produk ID {$productId}.");
                 }
 
                 // 2. Transaksi: TRANSFER (Proses Internal Shot Blasting)
@@ -197,47 +233,78 @@ class DeliveryController extends BaseController
                     'product_id'       => $productId, 
                     'qty'              => $qty,
                     'transaction_type' => 'TRANSFER', 
-                    'process_from'     => $sbId, 
-                    'process_to'       => $sbId, // Proses di tempat
+                    'process_from'     => $prevId > 0 ? $prevId : $sbId,
+                    'process_to'       => $sbId,
                     'created_at'       => $now,
-                    'source_table'     => 'daily_schedule_items',
-                    'source_id'        => $scheduleItemId
                 ];
 
                 $db->table('material_transactions')->insert($this->onlyExistingColumns($db, 'material_transactions', $trxPayload));
                 $trxId = (int)$db->insertID();
 
-                // 3. Update Stock Shot Blasting (WIP: SB -> Out)
-                // Stock antrean di SB BERKURANG dan dipindahkan ke Transfer SB (sebagai penanda sedang dikerjakan/sudah diproses)
-                $sbAfterStock    = max(0, $availableSb - $qty);
+                // 3. Update Stock PrevId (WIP: Prev -> Out)
+                $prevAfterStock = max(0, $availablePrev - $qty);
+
+                if ($prevId > 0) {
+                    $wipExist = $db->table('production_wip')->select('id')
+                                   ->where($wipDateCol, $date)
+                                   ->where($procCol, $prevId)
+                                   ->where('product_id', $productId)
+                                   ->where('status !=', 'DONE')
+                                   ->orderBy('id', 'DESC')->limit(1)->get()->getRowArray();
+
+                    if ($wipExist) {
+                        $upd = [$stockCol => $prevAfterStock];
+                        $db->table('production_wip')->where('id', $wipExist['id'])->update($this->onlyExistingColumns($db, 'production_wip', $upd));
+                    }
+
+                    $prevWipOut = [
+                        $wipDateCol       => $date, 
+                        'product_id'      => $productId, 
+                        'from_process_id' => $prevId, 
+                        'to_process_id'   => $prevId,
+                        'qty'             => $qty, 
+                        'qty_in'          => 0, 
+                        'qty_out'         => $qty,
+                        $stockCol         => $prevAfterStock,
+                        'source_table'    => 'material_transactions', 
+                        'source_id'       => $trxId, 
+                        'status'          => 'DONE', 
+                        'created_at'      => $now,
+                    ];
+                    if ($transferCol) $prevWipOut[$transferCol] = $prevTransfer; 
+                    $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $prevWipOut));
+                }
+
+                // 4. Update Transfer Shot Blasting (Barang sudah diproses, masuk buffer)
+                $sbSnap = $this->getLatestSnapshot($db, $date, $sbId, $productId);
+                $sbStock = (int)($sbSnap['stock'] ?? 0);
+                $sbTransfer = (int)($sbSnap['transfer'] ?? 0);
                 $sbAfterTransfer = $sbTransfer + $qty;
 
-                // Update Snapshot Tabel WIP untuk SB
-                $this->upsertCurrentSnapshot($db, $date, $sbId, $productId, $sbId, $sbAfterStock, $sbAfterTransfer, 'material_transactions', $trxId);
-
-                // Insert Log WIP untuk SB
-                $sbWip = [
-                    $wipDateCol       => $date, 
-                    'product_id'      => $productId, 
-                    'from_process_id' => $sbId, 
-                    'to_process_id'   => $sbId, 
-                    'qty'             => $qty, 
-                    'qty_in'          => 0, 
-                    'qty_out'         => $qty, 
-                    $stockCol         => $sbAfterStock, 
-                    'source_table'    => 'material_transactions', 
-                    'source_id'       => $trxId, 
-                    'status'          => 'DONE', 
+                $sbWipTransfer = [
+                    $wipDateCol       => $date,
+                    'product_id'      => $productId,
+                    'from_process_id' => $prevId > 0 ? $prevId : $sbId,
+                    'to_process_id'   => $sbId,
+                    'qty'             => $qty,
+                    'qty_in'          => 0,
+                    'qty_out'         => 0,
+                    $stockCol         => $sbStock,       // stock tetap
+                    'source_table'    => 'material_transactions',
+                    'source_id'       => $trxId,
+                    'status'          => 'DONE',
                     'created_at'      => $now,
                 ];
-                if ($transferCol) $sbWip[$transferCol] = $sbAfterTransfer;
-                
-                $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $sbWip));
+                if ($transferCol) $sbWipTransfer[$transferCol] = $sbAfterTransfer;
+                $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $sbWipTransfer));
             }
 
-            if ($db->transStatus() === false) throw new \Exception('DB error saat proses eksekusi.');
+            $db->transComplete();
 
-            $db->transCommit();
+            if ($db->transStatus() === false) {
+                return redirect()->back()->with('error', 'DB error: transaksi gagal, silakan coba lagi.');
+            }
+
             return redirect()->back()->with('success', 'Eksekusi Shot Blasting tersimpan. Stock telah diproses (Transfer).');
         } catch (\Throwable $e) {
             $db->transRollback();

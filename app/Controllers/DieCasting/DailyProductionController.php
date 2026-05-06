@@ -10,13 +10,16 @@ class DailyProductionController extends BaseController
     {
         $db       = db_connect();
         $date     = $this->request->getGet('date') ?? date('Y-m-d');
-        $operator = session()->get('fullname') ?? '-';
         $isAdmin  = $this->isAdminSession();
+
+        $operatorModel = new \App\Models\MasterOperatorModel();
+        $operators = $operatorModel->where('section', 'Die Casting')->orderBy('operator_name', 'ASC')->findAll();
 
         // SHIFT DC
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
             ->where('is_active', 1)
+            ->where('day_group', $this->getDayGroup($date))
             ->like('shift_name', 'DC')
             ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
             ->get()->getResultArray();
@@ -45,48 +48,34 @@ class DailyProductionController extends BaseController
 
         foreach ($shifts as &$shift) {
             
-            // 1. Dapatkan Jam Berakhir (End Slot ID) dari Schedule hari ini
-            $scheduleRow = $db->table('daily_schedules')
-                ->select('end_time_slot_id')
-                ->where('schedule_date', $date)
-                ->where('shift_id', $shift['id'])
-                ->where('section', 'Die Casting')
-                ->get()->getRowArray();
-                
-            $endSlotId = $scheduleRow ? (int)$scheduleRow['end_time_slot_id'] : null;
+            // Dapatkan semua slot (Tanpa memotong limit berdasarkan daily_schedules global)
+            $allSlots = $db->query(
+                "SELECT ts.id, ts.time_start, ts.time_end, sts.is_break
+                 FROM shift_time_slots sts
+                 JOIN time_slots ts ON ts.id = sts.time_slot_id
+                 WHERE sts.shift_id = ?
+                 ORDER BY sts.id ASC",
+                [(int)$shift['id']]
+            )->getResultArray();
 
-            // 2. Tarik Slots & Potong (Limit) jika ada batas akhirnya
-            $allSlots = $db->table('shift_time_slots sts')
-                ->select('ts.id, ts.time_start, ts.time_end')
-                ->join('time_slots ts', 'ts.id = sts.time_slot_id')
-                ->where('sts.shift_id', $shift['id'])
-                ->orderBy('sts.id', 'ASC')
-                ->get()->getResultArray();
-
-            $filteredSlots = [];
-            foreach($allSlots as $slot) {
-                $filteredSlots[] = $slot;
-                if($endSlotId > 0 && (int)$slot['id'] === $endSlotId) {
-                    break;
-                }
-            }
-            
-            $shift['slots'] = $filteredSlots;
-            $shift['shift_start'] = $shift['slots'][0]['time_start'] ?? null;
-            $lastSlot = !empty($shift['slots']) ? $shift['slots'][count($shift['slots']) - 1] : null;
+            $shift['slots']     = $allSlots;
+            $shift['shift_start'] = $allSlots[0]['time_start'] ?? null;
+            $lastSlot = !empty($allSlots) ? $allSlots[count($allSlots)-1] : null;
             $shift['shift_end']   = $lastSlot['time_end'] ?? null;
 
-            // 3. Hitung total menit
+            // Hitung total menit aktif (exclude slot istirahat)
             $totalMinute = 0;
-            foreach ($shift['slots'] as $k => $slot) {
+            foreach ($allSlots as $k => $slot) {
                 $start = strtotime($slot['time_start']);
                 $end   = strtotime($slot['time_end']);
-                if ($end <= $start) $end += 86400; 
-                
-                $mins = (int)(($end - $start) / 60); 
-                $shift['slots'][$k]['minute'] = $mins; 
-                $totalMinute += $mins;
+                if ($end <= $start) $end += 86400;
+                $mins = (int)(($end - $start) / 60);
+                $isBreak = (int)($slot['is_break'] ?? 0);
+                $allSlots[$k]['minute']   = $isBreak ? 0 : max(0, $mins);
+                $allSlots[$k]['is_break'] = $isBreak;
+                if (!$isBreak) $totalMinute += max(0, $mins);
             }
+            $shift['slots'] = $allSlots;
             $shift['total_minute'] = $totalMinute;
 
             // dandori map: machine_id => time_slot_id => { activity, product_id }
@@ -101,8 +90,9 @@ class DailyProductionController extends BaseController
                 $tId = !empty($d['time_slot_id']) ? (int)$d['time_slot_id'] : 0;
                 if ($tId > 0) {
                     $shift['dandori_map'][$mId][$tId] = [
-                        'activity'   => $d['activity'] ?? 'Dandori',
-                        'product_id' => (int)$d['product_id'],
+                        'activity'       => $d['activity'] ?? 'Dandori',
+                        'product_id'     => (int)$d['product_id'],
+                        'dandori_minute' => (int)($d['dandori_minute'] ?? 0),
                     ];
                 }
             }
@@ -117,7 +107,13 @@ class DailyProductionController extends BaseController
                     p.part_no,
                     p.part_prod,
                     p.part_name,
-                    dcp.qty_p
+                    IFNULL(p.weight_die_casting, 0) AS weight_dc,
+                    IFNULL(p.weight_runner, 0) AS weight_runner,
+                    IFNULL(p.cavity, 1) AS cavity,
+                    dcp.qty_p,
+                    dcp.end_time_slot_id,
+                    dcp.active_slot_ids,
+                    dcp.slot_custom_times
                 ')
                 ->join('machines m', 'm.id = dcp.machine_id')
                 ->join('products p', 'p.id = dcp.product_id')
@@ -138,6 +134,18 @@ class DailyProductionController extends BaseController
                 if ($ritem['qty_p'] > 0 || $hasDandoriForProduct) {
                     $shift['items'][] = $ritem;
                 }
+            }
+
+            // weight_dc_map: product_id => weight_die_casting (gram)
+            $shift['weight_dc_map'] = [];
+            $shift['weight_run_map'] = [];
+            $shift['cavity_map'] = [];
+            foreach ($shift['items'] as $it) {
+                $pid = (int)$it['product_id'];
+                $shift['weight_dc_map'][$pid] = (float)($it['weight_dc'] ?? 0);
+                $shift['weight_run_map'][$pid] = (float)($it['weight_runner'] ?? 0);
+                $shift['cavity_map'][$pid] = (int)($it['cavity'] ?? 1);
+                if ($shift['cavity_map'][$pid] <= 0) $shift['cavity_map'][$pid] = 1; // prevent division by zero
             }
 
             // hourly map
@@ -192,6 +200,34 @@ class DailyProductionController extends BaseController
                 }
             }
 
+            // Downtime detail map
+            $shift['dt_detail_map'] = [];
+            if ($db->tableExists('die_casting_hourly_downtime_details') && !empty($hourlyIds)) {
+                $dtDetails = $db->table('die_casting_hourly_downtime_details d')
+                    ->select('d.hourly_id, d.downtime_category_id, d.downtime_minute, dc.downtime_name')
+                    ->join('downtime_categories dc', 'dc.id = d.downtime_category_id', 'left')
+                    ->whereIn('d.hourly_id', $hourlyIds)
+                    ->get()->getResultArray();
+
+                foreach ($dtDetails as $d) {
+                    $hid = (int)$d['hourly_id'];
+                    if (!isset($hourlyIndex[$hid])) continue;
+
+                    $mid = $hourlyIndex[$hid]['machine_id'];
+                    $pid = $hourlyIndex[$hid]['product_id'];
+                    $ts  = $hourlyIndex[$hid]['time_slot_id'];
+
+                    $catId = (int)$d['downtime_category_id'];
+                    if ($catId === 0) $catId = -1; // -1 represents Dandori in the UI
+
+                    $shift['dt_detail_map'][$mid][$pid][$ts][] = [
+                        'downtime_category_id' => $catId,
+                        'downtime_minute'      => (int)$d['downtime_minute'],
+                        'downtime_name'        => $catId === -1 ? 'Dandori' : (string)$d['downtime_name'],
+                    ];
+                }
+            }
+
             // WIP MAP (0->DC)
             $shift['wip_map'] = [];
             if ($dcProcessId > 0 && $db->tableExists('production_wip')) {
@@ -231,7 +267,7 @@ class DailyProductionController extends BaseController
 
         return view('die_casting/daily_production/index', [
             'date'         => $date,
-            'operator'     => $operator,
+            'operators'    => $operators,
             'shifts'       => $shifts,
             'ngCategories' => $ngCategories,
             'downtimes'    => $downtimes,
@@ -242,8 +278,12 @@ class DailyProductionController extends BaseController
     public function store()
     {
         $db    = db_connect();
-        $items = $this->request->getPost('items');
+        // Support JSON-consolidated items to bypass max_input_vars limit
+        $itemsJson = $this->request->getPost('items_json');
+        $items = $itemsJson ? json_decode($itemsJson, true) : $this->request->getPost('items');
         $date  = $this->request->getPost('global_date'); 
+        $shiftOperators = $this->request->getPost('operators') ?? [];
+        $shiftLeaders   = $this->request->getPost('leaders') ?? [];
 
         if (!$items || !is_array($items) || empty($date)) {
             return redirect()->back()->with('error', 'Data gagal disimpan karena kosong atau terpotong oleh server (max_input_vars).');
@@ -265,12 +305,15 @@ class DailyProductionController extends BaseController
 
             foreach ($items as $key => $row) {
                 $parts = explode('_', $key);
-                if (count($parts) !== 4) continue;
+                // Key format: date_shiftId_machineId_productId_slotId (5 parts)
+                // date itself may contain dashes e.g. 2026-04-16, so we take from the end
+                if (count($parts) < 5) continue;
 
-                $shiftId    = (int)$parts[0];
-                $machineId  = (int)$parts[1];
-                $productId  = (int)$parts[2];
-                $timeSlotId = (int)$parts[3];
+                $timeSlotId = (int)array_pop($parts);
+                $productId  = (int)array_pop($parts);
+                $machineId  = (int)array_pop($parts);
+                $shiftId    = (int)array_pop($parts);
+                // remaining is the date
 
                 if ($shiftId <= 0 || $machineId <= 0 || $productId <= 0 || $timeSlotId <= 0) continue;
 
@@ -278,10 +321,10 @@ class DailyProductionController extends BaseController
 
                 $fg = (int)($row['fg'] ?? 0);
                 $ng = (int)($row['ng'] ?? 0);
+                $target = isset($row['qty_target']) ? (int)$row['qty_target'] : null;
                 
-                // Mengambil nilai referensi downtime
-                $dtId  = (int)($row['downtime_category_id'] ?? 0);
-                $dtVal = $dtId > 0 ? ($downtimeValues[$dtId] ?? 0) : 0;
+                $dtVal = (int)($row['downtime_penalty'] ?? 0);
+                $dtId  = null;
 
                 $exist = $db->table('die_casting_hourly')
                     ->where('production_date', $date)
@@ -291,18 +334,27 @@ class DailyProductionController extends BaseController
                     ->where('time_slot_id', $timeSlotId)
                     ->get()->getRowArray();
 
+                $opName = $shiftOperators[$shiftId][$machineId][$timeSlotId]
+                          ?? $shiftOperators[$shiftId][$machineId]['all']
+                          ?? (is_string($shiftOperators[$shiftId][$machineId] ?? null) ? $shiftOperators[$shiftId][$machineId] : null);
+                
+                $ldName = $shiftLeaders[$shiftId] ?? null;
+
                 if ($exist) {
                     $hourlyId = (int)$exist['id'];
                     $db->table('die_casting_hourly')->where('id', $hourlyId)->update([
                         'qty_fg'               => $fg,
                         'qty_ng'               => $ng,
+                        'qty_target'           => $target,
                         'ng_category_id'       => null,
                         'downtime_category_id' => $dtId > 0 ? $dtId : null,
                         'downtime_minute'      => $dtVal,
+                        'operator_name'        => $opName,
+                        'leader_name'          => $ldName,
                         'updated_at'           => date('Y-m-d H:i:s'),
                     ]);
                 } else {
-                    if ($fg == 0 && $ng == 0 && $dtId == 0) continue; 
+                    if ($fg == 0 && $ng == 0 && $dtId == 0 && $dtVal == 0 && empty($opName) && empty($ldName) && $target === null) continue; 
 
                     $db->table('die_casting_hourly')->insert([
                         'production_date'      => $date,
@@ -312,9 +364,12 @@ class DailyProductionController extends BaseController
                         'time_slot_id'         => $timeSlotId,
                         'qty_fg'               => $fg,
                         'qty_ng'               => $ng,
+                        'qty_target'           => $target,
                         'ng_category_id'       => null,
                         'downtime_category_id' => $dtId > 0 ? $dtId : null,
                         'downtime_minute'      => $dtVal,
+                        'operator_name'        => $opName,
+                        'leader_name'          => $ldName,
                         'created_at'           => date('Y-m-d H:i:s'),
                     ]);
                     $hourlyId = (int)$db->insertID();
@@ -323,7 +378,31 @@ class DailyProductionController extends BaseController
                 $this->saveNgDetails($db, $hourlyId, $row['ng_details'] ?? []);
                 $sumNg = $this->sumNgDetail($db, $hourlyId);
                 $db->table('die_casting_hourly')->where('id', $hourlyId)->update(['qty_ng' => $sumNg]);
+
+                $this->saveDowntimeDetails($db, $hourlyId, $row['dt_details'] ?? []);
             }
+
+            // Sync updated total targets per shift to schedule
+            // PERMINTAAN USER: "seharusnya target per shift tidak berubah apabila target per hournya diganti"
+            // Jadi bagian ini di-comment agar qty_p (target per shift) tidak ikut berubah
+            /*
+            $rowTargets = $this->request->getPost('row_targets') ?? [];
+            foreach ($rowTargets as $key => $sumTarget) {
+                // key is ShiftId_MachineId_ProductId
+                $parts = explode('_', $key);
+                if (count($parts) === 3) {
+                    $sId = (int)$parts[0];
+                    $mId = (int)$parts[1];
+                    $pId = (int)$parts[2];
+                    $db->table('die_casting_production')
+                        ->where('production_date', $date)
+                        ->where('shift_id', $sId)
+                        ->where('machine_id', $mId)
+                        ->where('product_id', $pId)
+                        ->update(['qty_p' => (int)$sumTarget]);
+                }
+            }
+            */
 
             $isAdmin = $this->isAdminSession();
 
@@ -377,6 +456,33 @@ class DailyProductionController extends BaseController
         }
     }
 
+    private function saveDowntimeDetails($db, int $hourlyId, $dtDetails): void
+    {
+        if (!$db->tableExists('die_casting_hourly_downtime_details')) return;
+        if (!is_array($dtDetails)) $dtDetails = [];
+
+        $db->table('die_casting_hourly_downtime_details')->where('hourly_id', $hourlyId)->delete();
+
+        $batch = [];
+        foreach ($dtDetails as $d) {
+            $dtId = (int)($d['downtime_category_id'] ?? 0);
+            $mins = (int)($d['downtime_minute'] ?? 0);
+            if ($dtId <= 0 && $dtId !== -1) continue; // -1 for Dandori (special UI handling)
+            
+            $batch[] = [
+                'hourly_id'            => $hourlyId,
+                'downtime_category_id' => $dtId === -1 ? 0 : $dtId, // Store 0 for Dandori internally or keep it flexible
+                'downtime_minute'      => $mins,
+                'created_at'           => date('Y-m-d H:i:s'),
+                'updated_at'           => date('Y-m-d H:i:s'),
+            ];
+        }
+
+        if (!empty($batch)) {
+            $db->table('die_casting_hourly_downtime_details')->insertBatch($batch);
+        }
+    }
+
     private function sumNgDetail($db, int $hourlyId): int
     {
         if (!$db->tableExists('die_casting_hourly_ng_details')) return 0;
@@ -414,13 +520,14 @@ class DailyProductionController extends BaseController
 
             $this->syncDailyScheduleActual($db, $date, $shiftId, $isAdmin);
             $shiftCode = (int)$db->table('shifts')->select('shift_code')->where('id', $shiftId)->get()->getRow('shift_code');
-            $dcShiftIds = $this->getDcShiftIds($db);
+            $dcShiftIds = $this->getDcShiftIds($db, $date);
             $idx = array_search($shiftId, $dcShiftIds, true);
             if ($idx === false) throw new \Exception('Shift DC tidak valid');
 
-            if ($shiftCode === 1 || $shiftCode === 2) {
-                $nextShiftId = (int)($dcShiftIds[$idx + 1] ?? 0);
-                if (!$nextShiftId) throw new \Exception('Tidak ada shift berikutnya');
+            $nextShiftId = (int)($dcShiftIds[$idx + 1] ?? 0);
+
+            if ($nextShiftId > 0) {
+                // Not the last shift of the day
                 $moved = $this->transferDcStockToNextDcShift($db, $date, $shiftId, $nextShiftId, $dcProcessId, $isAdmin);
                 $this->zeroOutDcShift($db, $date, $shiftId, $dcProcessId);
                 $this->syncDailyScheduleActual($db, $date, $nextShiftId, $isAdmin);
@@ -429,12 +536,11 @@ class DailyProductionController extends BaseController
                 $db->transCommit();
                 return $this->response->setJSON([
                     'status' => true,
-                    'message' => "Finish Shift {$shiftCode} OK. Stock moved: {$moved} & shift cleared",
+                    'message' => "Finish Shift OK. Stock moved: {$moved} & shift cleared",
                     'count' => $moved
                 ]);
-            }
-
-            if ($shiftCode === 3) {
+            } else {
+                // The last shift of the day -> close completely
                 foreach ($dcShiftIds as $sid) {
                     $this->syncDailyScheduleActual($db, $date, (int)$sid, $isAdmin);
                 }
@@ -445,12 +551,10 @@ class DailyProductionController extends BaseController
                 $db->transCommit();
                 return $this->response->setJSON([
                     'status' => true,
-                    'message' => "Finish Shift 3 OK. Transferred: {$count} & shift cleared",
+                    'message' => "Finish Shift Akhir Hari OK. Transferred: {$count} & shift cleared",
                     'count' => $count
                 ]);
             }
-
-            throw new \Exception('Shift DC tidak dikenali');
 
         } catch (\Throwable $e) {
             $db->transRollback();
@@ -699,9 +803,14 @@ class DailyProductionController extends BaseController
         return $now >= $windowStart && $now <= $endDT;
     }
 
-    private function getDcShiftIds($db): array
+    private function getDcShiftIds($db, string $date): array
     {
-        $rows = $db->table('shifts')->select('id')->where('is_active', 1)->like('shift_name', 'DC')->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')->get()->getResultArray();
+        $rows = $db->table('shifts')->select('id')
+               ->where('is_active', 1)
+               ->where('day_group', $this->getDayGroup($date))
+               ->like('shift_name', 'DC')
+               ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
+               ->get()->getResultArray();
         return array_values(array_map(fn($r) => (int)$r['id'], $rows));
     }
 
@@ -737,5 +846,62 @@ class DailyProductionController extends BaseController
     {
         $row = $db->table('production_processes')->select('id')->where('process_name', $processName)->get()->getRowArray();
         return (int)($row['id'] ?? 0);
+    }
+
+    public function endDandori()
+    {
+        $db = db_connect();
+        $date       = $this->request->getPost('date');
+        $shiftId    = (int)$this->request->getPost('shift_id');
+        $machineId  = (int)$this->request->getPost('machine_id');
+        $timeSlotId = (int)$this->request->getPost('time_slot_id');
+
+        if (!$date || !$shiftId || !$machineId || !$timeSlotId) {
+            return $this->response->setJSON(['ok' => false, 'msg' => 'Invalid parameters']);
+        }
+
+        $now = time();
+
+        $dandoriRecord = $db->table('die_casting_dandori')
+            ->where('dandori_date', $date)
+            ->where('shift_id', $shiftId)
+            ->where('machine_id', $machineId)
+            ->where('time_slot_id', $timeSlotId)
+            ->get()->getRowArray();
+
+        if (!$dandoriRecord) {
+            return $this->response->setJSON(['ok' => false, 'msg' => 'Dandori record not found']);
+        }
+
+        $slot = $db->table('time_slots')->where('id', $timeSlotId)->get()->getRowArray();
+        if (!$slot) {
+            return $this->response->setJSON(['ok' => false, 'msg' => 'Time slot not found']);
+        }
+
+        $prodDateISO = $date;
+        $startStr = substr((string)($slot['time_start'] ?? ''), 0, 5);
+        $startDate = date('Y-m-d H:i:s', strtotime("{$prodDateISO} {$startStr}:00"));
+        
+        $startHour = (int)date('H', strtotime($startDate));
+        if ($startHour >= 0 && $startHour < 7) {
+            $startDate = date('Y-m-d H:i:s', strtotime($startDate . ' +1 day'));
+        }
+
+        $startTs = strtotime($startDate);
+        if ($now <= $startTs) {
+            $diffMins = 0;
+        } else {
+            $diffMins = (int)floor(($now - $startTs) / 60);
+        }
+
+        // Limit the actual dandori minutes to the original scheduled minutes
+        $originalMins = (int)($dandoriRecord['dandori_minute'] ?? 0);
+        if ($diffMins > $originalMins) $diffMins = $originalMins;
+
+        $db->table('die_casting_dandori')
+            ->where('id', $dandoriRecord['id'])
+            ->update(['dandori_minute' => $diffMins]);
+
+        return $this->response->setJSON(['ok' => true, 'dandori_minute' => $diffMins, 'msg' => 'Dandori ended']);
     }
 }

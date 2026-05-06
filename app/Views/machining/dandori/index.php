@@ -52,9 +52,9 @@
       <table class="table table-bordered table-sm text-center align-middle mb-0" id="table-shift-<?= $shift['id'] ?>">
         <thead class="table-light">
           <tr>
-            <th style="width:180px;">Mesin</th>
-            <th style="min-width:300px;">Part Produk</th>
-            <th style="width:180px;">Waktu Dandori</th>
+            <th style="width:160px;">Mesin</th>
+            <th style="min-width:250px;">Part Produk</th>
+            <th style="min-width:320px;">Slot Dandori &amp; Menit per Slot</th>
             <th>Detail Aktivitas</th>
             <th style="width:60px;">Hapus</th>
           </tr>
@@ -92,15 +92,28 @@
               </select>
             </td>
 
-            <td>
-              <select class="form-select form-select-sm bg-warning-subtle" name="items[<?= $uuid ?>][time_slot_id]">
-                  <option value="">-- Set Waktu --</option>
-                  <?php foreach ($shiftSlots[$shift['id']] as $slot): ?>
-                      <option value="<?= $slot['time_slot_id'] ?>" <?= ($d['time_slot_id'] == $slot['time_slot_id']) ? 'selected' : '' ?>>
-                          <?= $slot['label'] ?>
-                      </option>
+            <td class="text-start">
+              <table class="table table-sm table-bordered mb-0" style="font-size:12px; min-width:280px;">
+                <thead class="table-light text-center"><tr><th style="width:30px;">✓</th><th>Waktu</th><th style="width:90px;">Menit</th></tr></thead>
+                <tbody>
+                  <?php foreach ($shiftSlots[$shift['id']] as $slot):
+                    $slotId = $slot['time_slot_id'];
+                    $isChecked = in_array($slotId, $d['time_slot_ids'] ?? []);
+                    $savedMinute = 0;
+                    foreach (($d['slot_minutes'] ?? []) as $sm) {
+                        if ((int)$sm['slot_id'] === (int)$slotId) { $savedMinute = (int)$sm['minute']; break; }
+                    }
+                  ?>
+                  <tr>
+                    <td class="text-center">
+                      <input type="checkbox" class="form-check-input slot-check" name="items[<?= $uuid ?>][slot_data][<?= $slotId ?>][selected]" value="1" <?= $isChecked ? 'checked' : '' ?> style="width:16px;height:16px;">
+                    </td>
+                    <td><?= esc($slot['label']) ?></td>
+                    <td><input type="number" class="form-control form-control-sm text-center" name="items[<?= $uuid ?>][slot_data][<?= $slotId ?>][minute]" value="<?= $isChecked ? $savedMinute : 0 ?>" min="0" placeholder="mnt"></td>
+                  </tr>
                   <?php endforeach; ?>
-              </select>
+                </tbody>
+              </table>
             </td>
 
             <td>
@@ -154,8 +167,9 @@
             <?php endforeach; ?>
           </select>
         </td>
-        <td class="time-slot-container">
-           </td>
+        <td class="text-start slot-table-container">
+          <!-- Diisi oleh JS berdasarkan shift -->
+        </td>
         <td>
           <input type="text" class="form-control form-control-sm" name="items[{uuid}][activity]" 
                  value="Setup/Dandori Preparation" required>
@@ -175,28 +189,40 @@ function initSelect2() {
     $('.product-select').select2({ width: '100%', placeholder: '- Cari Part -', allowClear: true });
 }
 
+function buildSlotTable(uuid, shiftId) {
+    const slots = shiftSlotsMap[shiftId] || [];
+    if (!slots.length) return '<p class="text-muted small">Tidak ada slot untuk shift ini.</p>';
+
+    let html = '<table class="table table-sm table-bordered mb-0" style="font-size:12px;min-width:280px;">';
+    html += '<thead class="table-light text-center"><tr><th style="width:30px;">✓</th><th>Waktu</th><th style="width:90px;">Menit</th></tr></thead><tbody>';
+    slots.forEach(s => {
+        const slotId = s.time_slot_id;
+        html += `<tr>
+          <td class="text-center"><input type="checkbox" class="form-check-input" name="items[${uuid}][slot_data][${slotId}][selected]" value="1" style="width:16px;height:16px;"></td>
+          <td>${s.label}</td>
+          <td><input type="number" class="form-control form-control-sm text-center" name="items[${uuid}][slot_data][${slotId}][minute]" value="0" min="0" placeholder="mnt"></td>
+        </tr>`;
+    });
+    html += '</tbody></table>';
+    return html;
+}
+
 $(document).ready(function() {
     initSelect2();
 
-    // Fungsi Hapus Baris
     $(document).on('click', '.btn-remove-row', function() {
         if(confirm('Yakin ingin menghapus jadwal dandori ini dari form?')) {
             const tbody = $(this).closest('tbody');
             $(this).closest('tr').remove();
-            
-            // Memunculkan text pesan kosong jika di shift tersebut tidak tersisa baris
             if(tbody.find('tr.dandori-row').length === 0) {
                 tbody.find('.empty-row').show();
             }
         }
     });
 
-    // Fungsi Tambah Baris Manual
     $('.btn-add-dandori').on('click', function() {
         const shiftId = $(this).data('shift');
         const tbody = $(`#tbody-shift-${shiftId}`);
-        
-        // Sembunyikan pesan kosong
         tbody.find('.empty-row').hide();
 
         const template = document.getElementById('row-template').innerHTML;
@@ -206,21 +232,10 @@ $(document).ready(function() {
         let $newRow = $(newRowHtml);
 
         $newRow.find('.input-shift').val(shiftId);
-
-        // Render dropdown Time Slot berdasarkan Shift yang diklik
-        let slots = shiftSlotsMap[shiftId] || [];
-        let selectHtml = `<select class="form-select form-select-sm bg-warning-subtle" name="items[${uuid}][time_slot_id]" required>
-                            <option value="">-- Set Waktu --</option>`;
-        slots.forEach(s => {
-            selectHtml += `<option value="${s.time_slot_id}">${s.label}</option>`;
-        });
-        selectHtml += `</select>`;
-        
-        $newRow.find('.time-slot-container').html(selectHtml);
+        $newRow.find('.slot-table-container').html(buildSlotTable(uuid, shiftId));
 
         tbody.append($newRow);
         
-        // Aktifkan select2 pencarian produk di baris baru
         $newRow.find('.product-select-new').removeClass('product-select-new').addClass('product-select').select2({
             width: '100%',
             placeholder: '- Cari Part -',

@@ -17,33 +17,28 @@ class DailyScheduleController extends BaseController
             $date = date('Y-m-d', strtotime('+1 day'));
         }
 
+        // Auto-add kolom active_slot_ids ke die_casting_production jika belum ada
+        if (!$db->fieldExists('active_slot_ids', 'die_casting_production')) {
+            try { $db->query("ALTER TABLE die_casting_production ADD COLUMN active_slot_ids TEXT NULL AFTER end_time_slot_id"); } catch (\Throwable $e) {}
+        }
+
         $processIdDC = $this->getProcessIdDieCasting($db);
 
         // SHIFT Die Casting (DC)
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
             ->where('is_active', 1)
+            ->where('day_group', $this->getDayGroup($date))
             ->like('shift_name', 'DC')
             ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
             ->get()
             ->getResultArray();
 
-        // Ambil Data Header Schedule untuk mengetahui Waktu Berakhir (End Slot) yang tersimpan
-        $dailySchedules = $db->table('daily_schedules')
-            ->where('schedule_date', $date)
-            ->where('process_id', $processIdDC)
-            ->get()->getResultArray();
-            
-        $shiftEndSlots = [];
-        foreach ($dailySchedules as $ds) {
-            $shiftEndSlots[$ds['shift_id']] = $ds['end_time_slot_id'];
-        }
-
         $shiftSlots = [];
         foreach ($shifts as &$shift) {
             // Menggunakan sts.id ASC agar urutan slot shift malam tidak berantakan
             $slots = $db->table('shift_time_slots sts')
-                ->select('ts.id as time_slot_id, ts.time_start, ts.time_end')
+                ->select('ts.id as time_slot_id, ts.time_start, ts.time_end, sts.is_break')
                 ->join('time_slots ts', 'ts.id = sts.time_slot_id')
                 ->where('sts.shift_id', (int)$shift['id'])
                 ->orderBy('sts.id', 'ASC') 
@@ -56,9 +51,14 @@ class DailyScheduleController extends BaseController
                 if ($end <= $start) $end += 86400; // Lewat tengah malam
                 $mins = (int)(($end - $start) / 60);
                 
-                $s['minutes'] = $mins;
+                if (!empty($s['is_break'])) {
+                    $s['minutes'] = 0;
+                } else {
+                    $s['minutes'] = $mins;
+                    $totalMinute += $mins;
+                }
+                
                 $s['label']   = substr($s['time_start'], 0, 5) . ' - ' . substr($s['time_end'], 0, 5);
-                $totalMinute += $mins;
             }
             $shift['total_minute'] = $totalMinute;
             $shiftSlots[$shift['id']] = $slots;
@@ -83,6 +83,29 @@ class DailyScheduleController extends BaseController
             $map[(int)$e['shift_id']][(int)$e['machine_id']][] = $e;
         }
 
+        // Active Slot IDs per machine per shift: dari die_casting_production
+        // Format: $activeSlotMap[shift_id][machine_id][index] = [slot_id, ...] or null (semua aktif)
+        $activeSlotMap = [];
+        $slotCustomTimesMap = [];
+        $mapCount = [];
+        $hasSlotCustomCol = $db->fieldExists('slot_custom_times', 'die_casting_production');
+        foreach ($existing as $e) {
+            $sId = (int)$e['shift_id'];
+            $mId = (int)$e['machine_id'];
+            if (!isset($mapCount[$sId][$mId])) {
+                $mapCount[$sId][$mId] = 0;
+            }
+            $idx = $mapCount[$sId][$mId];
+
+            $raw = $e['active_slot_ids'] ?? null;
+            $activeSlotMap[$sId][$mId][$idx] = $raw ? array_map('intval', explode(',', $raw)) : null;
+            if ($hasSlotCustomCol) {
+                $slotCustomTimesMap[$sId][$mId][$idx] = $e['slot_custom_times'] ?? null;
+            }
+            
+            $mapCount[$sId][$mId]++;
+        }
+
         // Ambil data Dandori yang sudah dicentang
         $dandoriRecords = [];
         if ($db->tableExists('die_casting_dandori')) {
@@ -93,18 +116,35 @@ class DailyScheduleController extends BaseController
         
         $dandoriMap = [];
         foreach ($dandoriRecords as $d) {
-            // Kita simpan time_slot_id dari tabel dandori (bisa bernilai null atau integer)
-            $dandoriMap[$d['shift_id']][$d['machine_id']][$d['product_id']] = $d['time_slot_id'];
+            $sId = (int)$d['shift_id'];
+            $mId = (int)$d['machine_id'];
+            $pId = (int)$d['product_id'];
+            
+            if (!isset($dandoriMap[$sId][$mId][$pId])) {
+                $dandoriMap[$sId][$mId][$pId] = [
+                    'time_slot_ids' => [],
+                    'slot_minutes'  => [], // [ ['slot_id'=>X, 'minute'=>Y] ]
+                ];
+            }
+            if (!empty($d['time_slot_id'])) {
+                $slotId = (int)$d['time_slot_id'];
+                $dandoriMap[$sId][$mId][$pId]['time_slot_ids'][] = $slotId;
+                $dandoriMap[$sId][$mId][$pId]['slot_minutes'][] = [
+                    'slot_id' => $slotId,
+                    'minute'  => (int)($d['dandori_minute'] ?? 0),
+                ];
+            }
         }
 
         return view('die_casting/daily_schedule/index', [
-            'date'          => $date,
-            'shifts'        => $shifts,
-            'shiftSlots'    => $shiftSlots,
-            'shiftEndSlots' => $shiftEndSlots,
-            'machines'      => $machines,
-            'map'           => $map,
-            'dandoriMap'    => $dandoriMap
+            'date'               => $date,
+            'shifts'             => $shifts,
+            'shiftSlots'         => $shiftSlots,
+            'machines'           => $machines,
+            'map'                => $map,
+            'dandoriMap'         => $dandoriMap,
+            'activeSlotMap'      => $activeSlotMap,
+            'slotCustomTimesMap' => $slotCustomTimesMap,
         ]);
     }
 
@@ -159,6 +199,48 @@ class DailyScheduleController extends BaseController
             ->where('process_id', $processIdDC)
             ->where('is_active', 1)
             ->countAllResults() > 0;
+    }
+
+    /**
+     * Calculate total active minutes from slot selections and custom times.
+     * @param string|null $activeSlotIds  Comma-separated slot IDs (e.g. "5,6,7")
+     * @param string|null $slotCustomTimes Comma-separated slot_id:minutes (e.g. "5:45,6:60")
+     */
+    private function calcActiveMinutes($db, int $shiftId, ?string $activeSlotIds, ?string $slotCustomTimes): int
+    {
+        if (!$activeSlotIds) {
+            return $this->getTotalMinuteShift($db, $shiftId);
+        }
+
+        $slotIds = array_map('intval', explode(',', $activeSlotIds));
+        $customMap = [];
+        if ($slotCustomTimes) {
+            foreach (explode(',', $slotCustomTimes) as $entry) {
+                $parts = explode(':', $entry, 2);
+                if (count($parts) === 2) $customMap[(int)$parts[0]] = (int)$parts[1];
+            }
+        }
+
+        $slots = $db->table('shift_time_slots sts')
+            ->select('ts.id, ts.time_start, ts.time_end, sts.is_break')
+            ->join('time_slots ts', 'ts.id = sts.time_slot_id')
+            ->where('sts.shift_id', $shiftId)
+            ->orderBy('sts.id', 'ASC')
+            ->get()->getResultArray();
+
+        $totalMinute = 0;
+        foreach ($slots as $sl) {
+            if (!in_array((int)$sl['id'], $slotIds)) continue;
+            if (!empty($sl['is_break'])) continue;
+            if (isset($customMap[(int)$sl['id']])) {
+                $totalMinute += $customMap[(int)$sl['id']];
+            } else {
+                $s = strtotime($sl['time_start']); $e = strtotime($sl['time_end']);
+                if ($e <= $s) $e += 86400;
+                $totalMinute += (int)(($e - $s) / 60);
+            }
+        }
+        return $totalMinute;
     }
 
     public function getProductAndTarget()
@@ -220,7 +302,7 @@ class DailyScheduleController extends BaseController
             ->where('is_active', 1)
             ->orderBy('sequence', 'ASC')
             ->get()->getResultArray();
-        return array_map(fn($r) => (int)$r['process_id'], $rows);
+        return array_column($rows, 'process_id');
     }
 
     private function getNextProcessIdByFlow($db, int $productId, int $currentProcessId): ?int
@@ -280,7 +362,6 @@ class DailyScheduleController extends BaseController
         }
 
         $payload = $where + ['is_completed' => 0];
-        if ($hasEndSlotCol) $payload['end_time_slot_id'] = $endSlotId;
         if ($db->fieldExists('created_at', 'daily_schedules')) $payload['created_at'] = $now;
         if ($db->fieldExists('updated_at', 'daily_schedules')) $payload['updated_at'] = $now;
         
@@ -303,10 +384,13 @@ class DailyScheduleController extends BaseController
     public function store()
     {
         $db    = db_connect();
-        $items = $this->request->getPost('items');
-        
-        // Ambil Data Waktu Berakhir Shift yang dipilih user
-        $shiftEndSlots = $this->request->getPost('shift_end_slots') ?? [];
+        // Support JSON-consolidated items to bypass max_input_vars limit
+        $itemsJson = $this->request->getPost('items_json');
+        if ($itemsJson) {
+            $items = json_decode($itemsJson, true);
+        } else {
+            $items = $this->request->getPost('items');
+        }
 
         if (!$items || !is_array($items)) {
             return redirect()->back()->with('error', 'Tidak ada data');
@@ -327,6 +411,11 @@ class DailyScheduleController extends BaseController
         }
 
         $now = date('Y-m-d H:i:s');
+
+        // Auto-add slot_custom_times column
+        if (!$db->fieldExists('slot_custom_times', 'die_casting_production')) {
+            try { $db->query("ALTER TABLE die_casting_production ADD COLUMN slot_custom_times TEXT NULL AFTER active_slot_ids"); } catch (\Throwable $e) {}
+        }
 
         $db->transBegin();
         try {
@@ -350,17 +439,9 @@ class DailyScheduleController extends BaseController
                 $qtyP      = (int)($row['qty_p'] ?? 0);
                 $statusRow = (string)($row['status'] ?? 'Normal');
                 
-                // Ambil data toggle dan dropdown slot waktu dandori
                 $isDandori = isset($row['is_dandori']) && $row['is_dandori'] == 1;
-                $dandoriTimeSlotId = (!empty($row['dandori_time_slot_id'])) ? (int)$row['dandori_time_slot_id'] : null;
 
-                if ($productId <= 0 || $qtyP <= 0) {
-                    $db->table('die_casting_production')->where([
-                        'production_date' => $date, 'shift_id' => $shiftId,
-                        'machine_id' => $machineId, 'product_id' => $productId
-                    ])->delete();
-                    continue;
-                }
+                if ($productId <= 0 || $qtyP <= 0) continue;
 
                 if (!$this->validateProductHasFlowDC($db, $productId, $processIdDC)) continue;
 
@@ -371,88 +452,103 @@ class DailyScheduleController extends BaseController
                 $cavity = (int)($product['cavity'] ?? 0);
                 $partLabel = (($product['part_name'] ?? '') ?: '-') . ' #1';
 
-                $exist = $db->table('die_casting_production')
-                    ->where([
-                        'production_date' => $date, 'shift_id' => $shiftId,
-                        'machine_id' => $machineId, 'product_id' => $productId 
-                    ])
-                    ->get()->getRowArray();
-
-                if ($exist) {
-                    $db->table('die_casting_production')->where('id', (int)$exist['id'])->update([
-                        'qty_p'        => $qtyP,
-                        'status'       => $statusRow,
-                        'part_label'   => $partLabel,
-                        'process_id'   => $processIdDC,
-                        'is_completed' => 0,
-                    ]);
-                    $sourceId = (int)$exist['id'];
-                } else {
-                    $db->table('die_casting_production')->insert([
-                        'production_date' => $date, 'shift_id' => $shiftId, 'machine_id' => $machineId,
-                        'product_id' => $productId, 'part_label' => $partLabel, 'qty_p' => $qtyP,
-                        'qty_a' => 0, 'qty_ng' => 0, 'status' => $statusRow,
-                        'process_id' => $processIdDC, 'is_completed' => 0, 'created_at' => $now,
-                    ]);
-                    $sourceId = (int)$db->insertID();
-                }
-
-                // Handle Checkbox Dandori dengan menyertakan time_slot_id
+                // Handle Dandori
                 if ($isDandori && $db->tableExists('die_casting_dandori')) {
-                    $db->table('die_casting_dandori')->insert([
-                        'dandori_date' => $date, 
-                        'shift_id'     => $shiftId, 
-                        'machine_id'   => $machineId,
-                        'product_id'   => $productId, 
-                        'time_slot_id' => $dandoriTimeSlotId,
-                        'activity'     => 'Setup/Dandori Preparation', 
-                        'created_at'   => $now
-                    ]);
+                    $slotData = $row['slot_data'] ?? [];
+                    $hasAnySlot = false;
+                    foreach ($slotData as $tsId => $slotInfo) {
+                        if (empty($slotInfo['selected'])) continue;
+                        $db->table('die_casting_dandori')->insert([
+                            'dandori_date' => $date, 'shift_id' => $shiftId, 'machine_id' => $machineId,
+                            'product_id' => $productId, 'time_slot_id' => (int)$tsId,
+                            'dandori_minute' => (int)($slotInfo['minute'] ?? 0),
+                            'activity' => 'Dandori', 'created_at' => $now
+                        ]);
+                        $hasAnySlot = true;
+                    }
+                    if (!$hasAnySlot) {
+                        $db->table('die_casting_dandori')->insert([
+                            'dandori_date' => $date, 'shift_id' => $shiftId, 'machine_id' => $machineId,
+                            'product_id' => $productId, 'time_slot_id' => null, 'dandori_minute' => 0,
+                            'activity' => 'Dandori', 'created_at' => $now
+                        ]);
+                    }
                 }
 
-                $wipStatus = ($date === $today) ? 'SCHEDULED' : 'WAITING';
+                $activeSlotIds = isset($row['active_slot_ids']) && !empty($row['active_slot_ids'])
+                    ? (string)$row['active_slot_ids'] : null;
+                $slotCustomTimes = isset($row['slot_custom_times']) && !empty($row['slot_custom_times'])
+                    ? (string)$row['slot_custom_times'] : null;
 
-                $this->upsertProductionWip(
-                    $db, $date, $productId, $processIdDC, $processIdDC, $qtyP,                 
-                    $wipStatus, 'die_casting_production', $sourceId, $qtyP, 0, 0                      
-                );
-
+                // Collect per shift for delete-reinsert
                 $gKey = $date . '_' . $shiftId;
                 if (!isset($dailyGroup[$gKey])) {
-                    $dailyGroup[$gKey] = ['date' => $date, 'shift_id' => $shiftId, 'items' => []];
+                    $dailyGroup[$gKey] = ['date' => $date, 'shift_id' => $shiftId, 'rows' => []];
                 }
 
-                $endSlotId = !empty($shiftEndSlots[$shiftId]) ? (int)$shiftEndSlots[$shiftId] : null;
-                $totalMinute = $this->getTotalMinuteShift($db, $shiftId, $endSlotId);
-
+                // Calculate total active minutes
+                $totalMinute = $this->calcActiveMinutes($db, $shiftId, $activeSlotIds, $slotCustomTimes);
                 $hours = ($totalMinute > 0) ? ($totalMinute / 60) : 0;
                 $targetPerHour = ($hours > 0) ? (int)ceil($qtyP / $hours) : 0;
 
-                $dailyGroup[$gKey]['items'][] = [
-                    'daily_schedule_id' => 0,
-                    'shift_id'          => $shiftId,
-                    'machine_id'        => $machineId,
-                    'product_id'        => $productId,
-                    'cycle_time'        => $cycle > 0 ? $cycle : 0,
-                    'cavity'            => $cavity > 0 ? $cavity : 0,
-                    'target_per_hour'   => $targetPerHour,
-                    'target_per_shift'  => $qtyP,
-                    'is_selected'       => 1,
+                $dailyGroup[$gKey]['rows'][] = [
+                    'production_date' => $date, 'shift_id' => $shiftId, 'machine_id' => $machineId,
+                    'product_id' => $productId, 'part_label' => $partLabel, 'qty_p' => $qtyP,
+                    'qty_a' => 0, 'qty_ng' => 0, 'status' => $statusRow, 'process_id' => $processIdDC,
+                    'is_completed' => 0, 'active_slot_ids' => $activeSlotIds,
+                    'slot_custom_times' => $slotCustomTimes, 'created_at' => $now,
+                    '_cycle' => $cycle, '_cavity' => $cavity, '_tph' => $targetPerHour,
                 ];
             }
 
-            // Upsert Header & Items
-            foreach ($dailyGroup as $g) {
-                $endSlotId = !empty($shiftEndSlots[$g['shift_id']]) ? (int)$shiftEndSlots[$g['shift_id']] : null;
-                $headerId = $this->upsertDailyScheduleHeader($db, $g['date'], $processIdDC, $g['shift_id'], 'Die Casting', $endSlotId);
-                if ($headerId <= 0) continue;
+            // Delete-and-Reinsert per shift (preserves duplicate machines)
+            $hasSlotCustomCol = $db->fieldExists('slot_custom_times', 'die_casting_production');
+            $hasActiveSlotCol = $db->fieldExists('active_slot_ids', 'die_casting_production');
 
-                $itemsToInsert = [];
-                foreach ($g['items'] as $it) {
-                    $it['daily_schedule_id'] = $headerId;
-                    $itemsToInsert[] = $it;
+            foreach ($dailyGroup as $g) {
+                // Delete all existing rows for this shift
+                $db->table('die_casting_production')->where([
+                    'production_date' => $g['date'], 'shift_id' => $g['shift_id'],
+                ])->delete();
+
+                // Insert all rows
+                foreach ($g['rows'] as $r) {
+                    $payload = [
+                        'production_date' => $r['production_date'], 'shift_id' => $r['shift_id'],
+                        'machine_id' => $r['machine_id'], 'product_id' => $r['product_id'],
+                        'part_label' => $r['part_label'], 'qty_p' => $r['qty_p'],
+                        'qty_a' => $r['qty_a'], 'qty_ng' => $r['qty_ng'],
+                        'status' => $r['status'], 'process_id' => $r['process_id'],
+                        'is_completed' => $r['is_completed'], 'created_at' => $r['created_at'],
+                    ];
+                    if ($hasActiveSlotCol) $payload['active_slot_ids'] = $r['active_slot_ids'];
+                    if ($hasSlotCustomCol) $payload['slot_custom_times'] = $r['slot_custom_times'];
+
+                    $db->table('die_casting_production')->insert($payload);
+                    $sourceId = (int)$db->insertID();
+
+                    $wipStatus = ($g['date'] === $today) ? 'SCHEDULED' : 'WAITING';
+                    $this->upsertProductionWip(
+                        $db, $g['date'], $r['product_id'], $processIdDC, $processIdDC, $r['qty_p'],
+                        $wipStatus, 'die_casting_production', $sourceId, $r['qty_p'], 0, 0
+                    );
                 }
-                $this->rebuildDailyScheduleItems($db, $headerId, $itemsToInsert);
+
+                // Sync daily_schedule_items
+                $headerId = $this->upsertDailyScheduleHeader($db, $g['date'], $processIdDC, $g['shift_id'], 'Die Casting', null);
+                if ($headerId > 0) {
+                    $schedItems = [];
+                    foreach ($g['rows'] as $r) {
+                        $schedItems[] = [
+                            'daily_schedule_id' => $headerId, 'shift_id' => $g['shift_id'],
+                            'machine_id' => $r['machine_id'], 'product_id' => $r['product_id'],
+                            'cycle_time' => $r['_cycle'], 'cavity' => $r['_cavity'],
+                            'target_per_hour' => $r['_tph'], 'target_per_shift' => $r['qty_p'],
+                            'is_selected' => 1, 'end_time_slot_id' => null,
+                        ];
+                    }
+                    $this->rebuildDailyScheduleItems($db, $headerId, $schedItems);
+                }
             }
 
             if ($db->transStatus() === false) throw new \Exception('DB error');

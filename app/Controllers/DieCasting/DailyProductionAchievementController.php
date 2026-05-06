@@ -137,9 +137,11 @@ class DailyProductionAchievementController extends BaseController
                     dcp.qty_p AS target,
                     dcp.qty_a AS qty_a,
                     dcp.qty_ng AS qty_ng,
+                    dcp.qty_ng_blank AS qty_ng_blank,
                     IFNULL(SUM(dh.qty_fg),0) AS sum_hourly_fg,
                     IFNULL(SUM(dh.qty_ng),0) AS sum_hourly_ng,
                     MAX(dh.ng_category_id) AS ng_category_id,
+                    MAX(dh.downtime_category_id) AS downtime_category_id,
                     IFNULL(SUM(dh.downtime_minute),0) AS downtime
                 ")
                 ->join('machines m', 'm.id = dcp.machine_id', 'left')
@@ -155,7 +157,7 @@ class DailyProductionAchievementController extends BaseController
                 ->where('dcp.production_date', $date)
                 ->where('dcp.shift_id', $shift['id'])
                 ->where('dcp.qty_p >', 0)
-                ->groupBy('dcp.id, dcp.machine_id, dcp.product_id, dcp.qty_p, dcp.qty_a, dcp.qty_ng, m.machine_code, p.part_no, part_name')
+                ->groupBy('dcp.id, dcp.machine_id, dcp.product_id, dcp.qty_p, dcp.qty_a, dcp.qty_ng, dcp.qty_ng_blank, m.machine_code, p.part_no, part_name')
                 ->orderBy('m.line_position', 'ASC')
                 ->get()->getResultArray();
 
@@ -163,6 +165,7 @@ class DailyProductionAchievementController extends BaseController
                 // tampilkan actual: pakai header kalau sudah ada, fallback sum hourly
                 $it['fg_display'] = ((int)$it['qty_a'] > 0) ? (int)$it['qty_a'] : (int)$it['sum_hourly_fg'];
                 $it['ng_display'] = ((int)$it['qty_ng'] > 0) ? (int)$it['qty_ng'] : (int)$it['sum_hourly_ng'];
+                $it['ng_blank_display'] = (int)($it['qty_ng_blank'] ?? 0);
 
                 $allProductIds[] = (int)$it['product_id'];
                 $allDcpIds[]     = (int)$it['production_id'];
@@ -170,8 +173,91 @@ class DailyProductionAchievementController extends BaseController
             unset($it);
 
             $shift['items'] = $items;
+
+            // NG detail map untuk shift ini
+            $shift['ng_detail_map'] = [];
+            $shift['dt_detail_map'] = [];
+            if ($db->tableExists('die_casting_hourly_ng_details') && !empty($items)) {
+                $hourlyRows = $db->table('die_casting_hourly')
+                                 ->select('id, machine_id, product_id, time_slot_id, remark, downtime_category_id, downtime_minute')
+                                 ->where('production_date', $date)
+                                 ->where('shift_id', $shift['id'])
+                                 ->get()->getResultArray();
+                
+                $hourlyIds = array_column($hourlyRows, 'id');
+                
+                // Remarks Map
+                $shift['remark_map'] = [];
+                foreach ($hourlyRows as $h) {
+                    $m = (int)$h['machine_id'];
+                    $p = (int)$h['product_id'];
+                    $t = (int)$h['time_slot_id'];
+                    $shift['remark_map'][$m][$p][$t] = $h['remark'];
+
+                    // DT map: accumulate per machine/product/category
+                    $dtCatId = (int)($h['downtime_category_id'] ?? 0);
+                    $dtMins  = (int)($h['downtime_minute'] ?? 0);
+                    if ($dtCatId > 0 && $dtMins > 0) {
+                        if (!isset($dtSumsShift[$m][$p][$dtCatId])) $dtSumsShift[$m][$p][$dtCatId] = 0;
+                        $dtSumsShift[$m][$p][$dtCatId] += $dtMins;
+                    }
+                }
+
+                // Build dt_detail_map
+                $dtSumsShift = $dtSumsShift ?? [];
+                foreach ($dtSumsShift as $m => $prodArr) {
+                    foreach ($prodArr as $p => $catArr) {
+                        foreach ($catArr as $catId => $mins) {
+                            $shift['dt_detail_map'][$m][$p][] = ['downtime_category_id' => $catId, 'downtime_minute' => $mins];
+                        }
+                    }
+                }
+                $dtSumsShift = [];
+                
+                if (!empty($hourlyIds)) {
+                    $details = $db->table('die_casting_hourly_ng_details d')
+                        ->select('d.hourly_id, d.ng_category_id, d.qty')
+                        ->whereIn('d.hourly_id', $hourlyIds)
+                        ->get()->getResultArray();
+
+                    $hourlyIndex = [];
+                    foreach ($hourlyRows as $h) {
+                        $hourlyIndex[(int)$h['id']] = [
+                            'm' => (int)$h['machine_id'],
+                            'p' => (int)$h['product_id']
+                        ];
+                    }
+
+                    $shiftNgSums = [];
+                    foreach ($details as $d) {
+                        $hid = (int)$d['hourly_id'];
+                        $idx = $hourlyIndex[$hid] ?? null;
+                        if (!$idx) continue;
+                        $m = $idx['m'];
+                        $p = $idx['p'];
+                        $c = (int)$d['ng_category_id'];
+                        
+                        if (!isset($shiftNgSums[$m][$p][$c])) {
+                            $shiftNgSums[$m][$p][$c] = 0;
+                        }
+                        $shiftNgSums[$m][$p][$c] += (int)$d['qty'];
+                    }
+
+                    foreach ($shiftNgSums as $m => $prodArr) {
+                        foreach ($prodArr as $p => $catArr) {
+                            foreach ($catArr as $c => $qty) {
+                                $shift['ng_detail_map'][$m][$p][] = [
+                                    'ng_category_id' => $c,
+                                    'qty' => $qty
+                                ];
+                            }
+                        }
+                    }
+                }
+            }
         }
         unset($shift);
+
 
         $allProductIds = array_values(array_unique($allProductIds));
         $allDcpIds     = array_values(array_unique($allDcpIds));
@@ -257,10 +343,24 @@ class DailyProductionAchievementController extends BaseController
         }
         unset($shift);
 
+        $role = (string)(session()->get('role') ?? '');
+        $isAdmin = (strtoupper($role) === 'ADMIN');
+
+        $downtimes = [];
+        if ($db->tableExists('downtime_categories')) {
+            $downtimes = $db->table('downtime_categories')
+                ->where('process_id', $dcProcessId)
+                ->where('is_active', 1)
+                ->orderBy('downtime_name', 'ASC')
+                ->get()->getResultArray();
+        }
+
         return view('die_casting/daily_production_achievement/index', [
-            'date'        => $date,
+            'date'         => $date,
             'shifts'       => $shifts,
-            'ngCategories' => $ngCategories
+            'ngCategories' => $ngCategories,
+            'downtimes'    => $downtimes,
+            'isAdmin'      => $isAdmin
         ]);
     }
 
@@ -320,6 +420,14 @@ class DailyProductionAchievementController extends BaseController
                     'error',
                     'Waktu koreksi sudah habis. Koreksi hanya dapat dilakukan maksimal 1 jam setelah shift berakhir.'
                 );
+            }
+        }
+
+        $downtimeValues = [];
+        if ($db->tableExists('downtime_categories')) {
+            $dtRows = $db->table('downtime_categories')->get()->getResultArray();
+            foreach ($dtRows as $dt) {
+                $downtimeValues[(int)$dt['id']] = (int)$dt['value'];
             }
         }
 
@@ -450,9 +558,24 @@ class DailyProductionAchievementController extends BaseController
                     }
                 }
 
-                // 4) simpan ng category & downtime ke last slot saja
-                $ngCategoryId = $row['ng_category_id'] ?? null;
-                $downtime     = (int)($row['downtime'] ?? 0);
+                // 4) simpan ng details (multiple) & downtime ke last slot saja
+                $ngDetails = $row['ng_details'] ?? [];
+
+                // Support dt_details array (new inline DT) or legacy downtime_category_id
+                $dtDetails = $row['dt_details'] ?? [];
+                $dtId = 0;
+                $downtime = 0;
+                if (!empty($dtDetails) && is_array($dtDetails)) {
+                    foreach ($dtDetails as $dtEntry) {
+                        $downtime += (int)($dtEntry['downtime_minute'] ?? 0);
+                        if (!$dtId && !empty($dtEntry['downtime_category_id'])) {
+                            $dtId = (int)$dtEntry['downtime_category_id'];
+                        }
+                    }
+                } else {
+                    $dtId = (int)($row['downtime_category_id'] ?? 0);
+                    $downtime = $dtId > 0 ? ($downtimeValues[$dtId] ?? 0) : 0;
+                }
 
                 $lastSlot = $db->table('shift_time_slots sts')
                     ->select('ts.id AS time_slot_id')
@@ -475,6 +598,21 @@ class DailyProductionAchievementController extends BaseController
                             'ng_category_id'  => null,
                         ]);
 
+                    // hapus detail di jam mana pun untuk shift/mesin/produk ini
+                    $allHourlyIds = $db->table('die_casting_hourly')
+                        ->select('id')
+                        ->where([
+                            'production_date' => $date,
+                            'shift_id'        => $shiftId,
+                            'machine_id'      => $machineId,
+                            'product_id'      => $productId,
+                        ])->get()->getResultArray();
+                    
+                    if (!empty($allHourlyIds) && $db->tableExists('die_casting_hourly_ng_details')) {
+                        $ids = array_column($allHourlyIds, 'id');
+                        $db->table('die_casting_hourly_ng_details')->whereIn('hourly_id', $ids)->delete();
+                    }
+
                     $db->table('die_casting_hourly')
                         ->where([
                             'production_date' => $date,
@@ -484,10 +622,72 @@ class DailyProductionAchievementController extends BaseController
                             'time_slot_id'    => $lastSlotId,
                         ])
                         ->update([
-                            'downtime_minute' => $downtime,
-                            'ng_category_id'  => $ngCategoryId ?: null,
-                            'updated_at'      => $now->format('Y-m-d H:i:s')
+                            'downtime_category_id' => $dtId > 0 ? $dtId : null,
+                            'downtime_minute'      => $downtime,
+                            'updated_at'           => $now->format('Y-m-d H:i:s')
                         ]);
+
+                    $lastHourlyRow = $db->table('die_casting_hourly')
+                        ->select('id')
+                        ->where([
+                            'production_date' => $date,
+                            'shift_id'        => $shiftId,
+                            'machine_id'      => $machineId,
+                            'product_id'      => $productId,
+                            'time_slot_id'    => $lastSlotId,
+                        ])->get()->getRowArray();
+
+                    if ($lastHourlyRow && is_array($ngDetails) && !empty($ngDetails)) {
+                        $this->saveNgDetails($db, (int)$lastHourlyRow['id'], $ngDetails);
+                        $sumNg = $this->sumNgDetail($db, (int)$lastHourlyRow['id']);
+                        $db->table('die_casting_hourly')
+                           ->where('id', (int)$lastHourlyRow['id'])
+                           ->update(['qty_ng' => $sumNg]);
+                        
+                        // sinkronkan juga headernya (berjaga-jaga jika input ng dimanipulasi)
+                        $db->table('die_casting_production')
+                           ->where('id', $productionId)
+                           ->update(['qty_ng' => $sumNg]);
+                    }
+                }
+
+                // 5) simpan remarks per slot
+                $remarks = $row['remarks'] ?? [];
+                if (is_array($remarks)) {
+                    foreach ($remarks as $slotId => $rmk) {
+                        $sId = (int)$slotId;
+                        if ($sId <= 0) continue;
+                        
+                        // Cek apakah data hourly untuk slot ini sudah ada
+                        $hourlyRow = $db->table('die_casting_hourly')
+                            ->select('id')
+                            ->where([
+                                'production_date' => $date,
+                                'shift_id'        => $shiftId,
+                                'machine_id'      => $machineId,
+                                'product_id'      => $productId,
+                                'time_slot_id'    => $sId,
+                            ])->get()->getRowArray();
+
+                        if ($hourlyRow) {
+                            $db->table('die_casting_hourly')
+                               ->where('id', (int)$hourlyRow['id'])
+                               ->update(['remark' => $rmk ?: null]);
+                        } else if ($rmk) {
+                            // Jika belum ada tapi ada remark, buat row baru dengan 0 qty
+                            $db->table('die_casting_hourly')->insert([
+                                'production_date' => $date,
+                                'shift_id'        => $shiftId,
+                                'machine_id'      => $machineId,
+                                'product_id'      => $productId,
+                                'time_slot_id'    => $sId,
+                                'qty_fg'          => 0,
+                                'qty_ng'          => 0,
+                                'remark'          => $rmk,
+                                'created_at'      => $now->format('Y-m-d H:i:s'),
+                            ]);
+                        }
+                    }
                 }
             }
 
@@ -499,5 +699,43 @@ class DailyProductionAchievementController extends BaseController
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
         }
+    }
+    private function saveNgDetails($db, int $hourlyId, $ngDetails): void
+    {
+        if (!$db->tableExists('die_casting_hourly_ng_details')) return;
+        if (!is_array($ngDetails)) $ngDetails = [];
+
+        $db->table('die_casting_hourly_ng_details')->where('hourly_id', $hourlyId)->delete();
+
+        $grouped = [];
+        foreach ($ngDetails as $d) {
+            $ngId = (int)($d['ng_category_id'] ?? 0);
+            $qty  = (int)($d['qty'] ?? 0);
+            if ($ngId <= 0 || $qty <= 0) continue;
+            
+            if (!isset($grouped[$ngId])) $grouped[$ngId] = 0;
+            $grouped[$ngId] += $qty;
+        }
+
+        $batch = [];
+        foreach ($grouped as $ngId => $qty) {
+            $batch[] = [
+                'hourly_id'      => $hourlyId,
+                'ng_category_id' => $ngId,
+                'qty'            => $qty,
+                'created_at'     => date('Y-m-d H:i:s'),
+            ];
+        }
+
+        if (!empty($batch)) {
+            $db->table('die_casting_hourly_ng_details')->insertBatch($batch);
+        }
+    }
+
+    private function sumNgDetail($db, int $hourlyId): int
+    {
+        if (!$db->tableExists('die_casting_hourly_ng_details')) return 0;
+        $row = $db->table('die_casting_hourly_ng_details')->select('SUM(qty) AS s')->where('hourly_id', $hourlyId)->get()->getRowArray();
+        return (int)($row['s'] ?? 0);
     }
 }

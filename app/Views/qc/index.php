@@ -22,6 +22,14 @@
     .ng-row { background: #fff5f5; border: 1px solid #fed7d7; border-radius: 8px; padding: 16px; margin-bottom: 12px; position: relative;}
     .btn-remove-ng { position: absolute; top: 12px; right: 12px; color: #e53e3e; cursor: pointer; background: transparent; border: none; }
     .btn-remove-ng:hover { color: #c53030; }
+
+    @media print {
+        body * { visibility: hidden; }
+        .qc-card:nth-of-type(2), .qc-card:nth-of-type(2) * { visibility: visible; }
+        .qc-card:nth-of-type(2) { position: absolute; left: 0; top: 0; width: 100%; box-shadow: none; border: none; }
+        .qc-card-header button, .qc-card-header a { display: none !important; }
+        .badge, .badge-soft-success, .badge-soft-warning { border: 1px solid #000; color: #000 !important; background: transparent !important; }
+    }
 </style>
 
 <div class="d-flex justify-content-between align-items-center mb-4">
@@ -49,7 +57,7 @@
 
 <div class="row">
     <!-- COL 1: Waiting for Inspection -->
-    <div class="col-xl-12 mb-4">
+    <div class="col-xl-12 mb-4 d-print-none">
         <div class="qc-card bg-white">
             <div class="qc-card-header bg-gradient-qc">
                 <h4 class="qc-card-title text-white"><i class="bi bi-hourglass-split me-2"></i> Schedule Inspeksi Hari Ini</h4>
@@ -64,7 +72,7 @@
                             <th>Dari Proses</th>
                             <th class="text-center">Maksimal Inspeksi</th>
                             <th>Progress</th>
-                            <th class="text-center">Aksi</th>
+                            <th class="text-center d-print-none">Aksi</th>
                         </tr>
                     </thead>
                     <tbody>
@@ -97,7 +105,7 @@
                                             <span class="text-success">Done: <?= number_format((int)$wip['qty_inspected']) ?></span>
                                         </div>
                                     </td>
-                                    <td class="text-center">
+                                    <td class="text-center d-print-none">
                                         <button type="button" class="btn-inspect shadow-sm" 
                                                 onclick="openInspectionModal(<?= $wip['product_id'] ?>, <?= $wip['schedule_id'] ?>, '<?= esc($wip['part_no']) ?>', '<?= esc($wip['part_name']) ?>', <?= $stock ?>)">
                                             <i class="bi bi-search me-1"></i> Inspeksi
@@ -117,8 +125,16 @@
     <!-- COL 2: Today's Inspected Goods -->
     <div class="col-xl-12">
         <div class="qc-card bg-white border border-light">
-            <div class="qc-card-header">
-                <h4 class="qc-card-title"><i class="bi bi-ui-checks-grid text-primary me-2"></i> Hasil Inspeksi (<?= esc(date('d/m/Y', strtotime($date))) ?>)</h4>
+            <div class="qc-card-header d-flex justify-content-between align-items-center">
+                <h4 class="qc-card-title m-0"><i class="bi bi-ui-checks-grid text-primary me-2"></i> Hasil Inspeksi (<?= esc(date('d/m/Y', strtotime($date))) ?>)</h4>
+                <div class="d-flex gap-2">
+                    <a href="/qc/export?date=<?= esc($date) ?>" class="btn btn-outline-success btn-sm fw-bold shadow-sm">
+                        <i class="bi bi-file-earmark-excel"></i> Export Excel
+                    </a>
+                    <button class="btn btn-outline-danger btn-sm fw-bold shadow-sm" onclick="window.print()">
+                        <i class="bi bi-file-earmark-pdf"></i> Export PDF
+                    </button>
+                </div>
             </div>
             <div class="table-responsive">
                 <table class="qc-table table-hover">

@@ -3,12 +3,12 @@
 
 <div class="d-flex justify-content-between align-items-center mb-4">
     <div>
-        <h4 class="mb-0 fw-bold text-primary">STOCK INVENTORY - MACHINING</h4>
-        <small class="text-muted">Total Stock di station Machining (Per <?= esc($titleDate) ?>)</small>
+        <h4 class="mb-0 fw-bold text-primary">STOCK INVENTORY - <?= strtoupper(esc($category)) ?></h4>
+        <small class="text-muted">Total Stock di station <?= esc($category) ?> (Per <?= esc($titleDate) ?>)</small>
     </div>
     
     <div>
-        <a href="<?= base_url('machining/daily-schedule?date='.$date) ?>" class="btn btn-outline-secondary btn-sm fw-bold">
+        <a href="<?= base_url('machining/daily-schedule?category='.urlencode($category).'&date='.$date) ?>" class="btn btn-outline-secondary btn-sm fw-bold">
             <i class="bi bi-arrow-left me-1"></i> Kembali ke Schedule
         </a>
     </div>
@@ -19,6 +19,7 @@
         <?php if (!empty($isAdmin) && $isAdmin): ?>
             <form method="get" class="d-flex gap-2 align-items-center mb-0">
                 <label class="form-label mb-0 small fw-bold">Pilih Tanggal:</label>
+                <input type="hidden" name="category" value="<?= esc($category) ?>">
                 <input type="date" name="date" value="<?= esc($date) ?>" class="form-control form-control-sm w-auto">
                 <button class="btn btn-primary btn-sm text-white"><i class="bi bi-search"></i> Filter</button>
             </form>
@@ -35,7 +36,7 @@
                         <th style="width: 80px;" class="text-center">No</th>
                         <th style="width: 250px;">Part Number</th>
                         <th>Part Name</th>
-                        <th style="width: 200px;" class="text-end">Total Stock di Machining</th>
+                        <th style="width: 200px;" class="text-end">Total Stock di <?= esc($category) ?></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -43,7 +44,7 @@
                         <tr>
                             <td colspan="4" class="text-center py-5 text-muted">
                                 <i class="bi bi-inbox fs-2 d-block mb-2"></i>
-                                Tidak ada stock tersedia di area Machining.
+                                Tidak ada stock tersedia di area <?= esc($category) ?>.
                             </td>
                         </tr>
                     <?php else: ?>

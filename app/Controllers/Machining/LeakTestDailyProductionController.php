@@ -6,259 +6,740 @@ use App\Controllers\BaseController;
 
 class LeakTestDailyProductionController extends BaseController
 {
-    /* =====================================================
-     * HELPERS
-     * ===================================================== */
-    private function isAdmin(): bool
+    /* =========================
+     * ADMIN CHECK
+     * ========================= */
+    private function isAdminSession(): bool
     {
-        $role = session()->get('role')
-            ?? session()->get('role_name')
-            ?? session()->get('user_role')
-            ?? session()->get('level')
-            ?? '';
-
-        $role = strtolower((string)$role);
-        return in_array($role, ['admin','administrator','superadmin','super admin'], true);
+        $role = strtoupper((string)(session()->get('role') ?? ''));
+        return $role === 'ADMIN';
     }
 
-    private function getProcessIdByCode($db, string $code): ?int
+    /* =========================
+     * PROCESS ID
+     * ========================= */
+        private function getProcessIdByCode($db, string $code): int
+    {
+        $row = $db->table('production_processes')->where('process_code', $code)->get()->getRowArray();
+        return $row ? (int)$row['id'] : 0;
+    }
+
+    private function getProcessIdByName($db, string $processName): int
     {
         $row = $db->table('production_processes')
             ->select('id')
-            ->where('process_code', $code)
-            ->get()->getRowArray();
+            ->where('process_name', $processName)
+            ->get()
+            ->getRowArray();
 
-        return $row ? (int)$row['id'] : null;
+        return (int)($row['id'] ?? 0);
     }
 
-    private function getMcShiftIds($db): array
+    private function getProcessIdLeakTest($db): int
     {
-        $rows = $db->table('shifts')
-            ->select('id')
-            ->where('is_active', 1)
-            ->like('shift_name', 'MC')
-            ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
-            ->get()->getResultArray();
-
-        return array_values(array_map(fn($r) => (int)$r['id'], $rows));
+        $id = $this->getProcessIdByCode($db, 'LT');
+        if ($id <= 0) throw new \Exception('Process "Machining" belum ada di master production_processes');
+        return $id;
     }
 
-    private function isMcShift($db, int $shiftId): bool
+    /**
+     * Detect kolom tanggal yang dipakai di production_wip
+     */
+    private function detectWipDateColumn($db): string
     {
-        $shift = $db->table('shifts')
-            ->select('shift_name, is_active')
-            ->where('id', $shiftId)
-            ->get()->getRowArray();
+        if ($db->fieldExists('production_date', 'production_wip')) return 'production_date';
+        if ($db->fieldExists('schedule_date', 'production_wip'))   return 'schedule_date';
+        if ($db->fieldExists('wip_date', 'production_wip'))        return 'wip_date';
 
-        if (!$shift) return false;
-        if ((int)($shift['is_active'] ?? 0) !== 1) return false;
-        return (stripos((string)($shift['shift_name'] ?? ''), 'MC') !== false);
+        throw new \Exception('Tabel production_wip tidak punya kolom tanggal (production_date / schedule_date / wip_date).');
     }
 
-    private function getLastMachiningShift($db): ?array
+    /* =========================================================
+     * ✅ NG TOTAL CALC FROM DETAILS
+     * ========================================================= */
+    private function calcNgTotalFromDetails($ngDetails): int
     {
-        $row = $db->table('shifts')
+        $total = 0;
+        if (!is_array($ngDetails)) return 0;
+
+        foreach ($ngDetails as $d) {
+            $ngId = (int)($d['ng_category_id'] ?? 0);
+            $qty  = (int)($d['qty'] ?? 0);
+            if ($ngId > 0 && $qty > 0) $total += $qty;
+        }
+        return (int)$total;
+    }
+
+    /* =========================================================
+     * ✅ SAVE HOURLY
+     * ========================================================= */
+    private function saveHourlyRows($db, array $items, array $shiftOperators = [], array $shiftLeaders = []): void
+    {
+        $now = date('Y-m-d H:i:s');
+        $hasDetailTable = $db->tableExists('machining_leak_test_hourly_ng_details');
+
+        // Optimalisasi: Tarik master downtime 
+        $downtimeValues = [];
+        if ($db->tableExists('downtime_categories')) {
+            $dtRows = $db->table('downtime_categories')->get()->getResultArray();
+            foreach ($dtRows as $dt) {
+                $downtimeValues[(int)$dt['id']] = (int)$dt['value'];
+            }
+        }
+
+        foreach ($items as $row) {
+            if (
+                empty($row['date']) || empty($row['shift_id']) ||
+                empty($row['machine_id']) || empty($row['product_id']) ||
+                empty($row['time_slot_id'])
+            ) {
+                continue;
+            }
+
+            $date      = (string)$row['date'];
+            $shiftId   = (int)$row['shift_id'];
+            $machineId = (int)$row['machine_id'];
+            $productId = (int)$row['product_id'];
+            $slotId    = (int)$row['time_slot_id'];
+
+            $fg = (int)($row['fg'] ?? 0);
+            $target = isset($row['qty_target']) ? (int)$row['qty_target'] : null;
+
+            // Total NG dari detail
+            $ngDetails = $row['ng_details'] ?? [];
+            $ngTotal   = $this->calcNgTotalFromDetails($ngDetails);
+
+            // Downtime value from UI
+            $dtVal = (int)($row['downtime_penalty'] ?? 0);
+            $dtId = null;
+            $remark = $row['remark'] ?? null;
+            $ngBlank = (int)($row['ng_blank'] ?? 0);
+
+            $exist = $db->table('machining_leak_test_hourly')
+                ->where([
+                    'production_date' => $date,
+                    'shift_id'        => $shiftId,
+                    'machine_id'      => $machineId,
+                    'product_id'      => $productId,
+                    'time_slot_id'    => $slotId,
+                ])
+                ->get()
+                ->getRowArray();
+            $opName = $shiftOperators[$shiftId][$machineId][$slotId]
+                      ?? $shiftOperators[$shiftId][$machineId]['all']
+                      ?? (is_string($shiftOperators[$shiftId][$machineId] ?? null) ? $shiftOperators[$shiftId][$machineId] : null);
+            
+            $ldName = $shiftLeaders[$shiftId] ?? null;
+
+            if ($exist) {
+                $hourlyId = (int)$exist['id'];
+                $update = [
+                    'qty_fg'               => $fg,
+                    'qty_ok'               => $fg,
+                    'qty_ng'               => $ngTotal,
+                    'qty_ng_blank'         => $ngBlank,
+                    'qty_target'           => $target,
+                    
+                    'downtime_category_id' => $dtId > 0 ? $dtId : null,
+                    'downtime'             => $dtVal,
+                    'remark'               => $remark,
+                    'operator_name'        => $opName,
+                    'leader_name'          => $ldName,
+                ];
+                if ($db->fieldExists('updated_at', 'machining_leak_test_hourly')) $update['updated_at'] = $now;
+
+                $db->table('machining_leak_test_hourly')->where('id', $hourlyId)->update($update);
+            } else {
+                if ($fg == 0 && $ngTotal == 0 && $dtId == 0 && $dtVal == 0 && empty($opName) && empty($ldName) && $target === null) continue;
+
+                $insert = [
+                    'production_date'      => $date,
+                    'shift_id'             => $shiftId,
+                    'machine_id'           => $machineId,
+                    'product_id'           => $productId,
+                    'time_slot_id'         => $slotId,
+                    'qty_fg'               => $fg,
+                    'qty_ok'               => $fg,
+                    'qty_ng'               => $ngTotal,
+                    'qty_ng_blank'         => $ngBlank,
+                    'qty_target'           => $target,
+                    
+                    'downtime_category_id' => $dtId > 0 ? $dtId : null,
+                    'downtime'             => $dtVal,
+                    'remark'               => $remark,
+                    'operator_name'        => $opName,
+                    'leader_name'          => $ldName,
+                ];
+                if ($db->fieldExists('created_at', 'machining_leak_test_hourly')) $insert['created_at'] = $now;
+                if ($db->fieldExists('updated_at', 'machining_leak_test_hourly')) $insert['updated_at'] = $now;
+
+                $db->table('machining_leak_test_hourly')->insert($insert);
+                $hourlyId = (int)$db->insertID();
+            }
+
+            if ($hasDetailTable && $hourlyId > 0) {
+                $db->table('machining_leak_test_hourly_ng_details')
+                    ->where('machining_leak_test_hourly_id', $hourlyId)
+                    ->delete();
+
+                if (is_array($ngDetails)) {
+                    foreach ($ngDetails as $d) {
+                        $ngId = (int)($d['ng_category_id'] ?? 0);
+                        $qty  = (int)($d['qty'] ?? 0);
+                        if ($ngId <= 0 || $qty <= 0) continue;
+
+                        $payload = [
+                            'machining_leak_test_hourly_id' => $hourlyId,
+                            'ng_category_id'      => $ngId,
+                            'qty'                 => $qty,
+                            'created_at'          => $now,
+                        ];
+                        if ($db->fieldExists('updated_at', 'machining_leak_test_hourly_ng_details')) $payload['updated_at'] = $now;
+
+                        $db->table('machining_leak_test_hourly_ng_details')->insert($payload);
+                    }
+                }
+            }
+
+            // Save downtime details
+            $dtDetails = $row['dt_details'] ?? [];
+            if ($db->tableExists('machining_leak_test_hourly_downtime_details') && $hourlyId > 0) {
+                $db->table('machining_leak_test_hourly_downtime_details')
+                    ->where('machining_leak_test_hourly_id', $hourlyId)
+                    ->delete();
+
+                if (is_array($dtDetails)) {
+                    foreach ($dtDetails as $d) {
+                        $dtCatId = (int)($d['downtime_category_id'] ?? 0);
+                        $mins = (int)($d['downtime_minute'] ?? 0);
+                        if ($dtCatId <= 0 && $dtCatId !== -1) continue;
+
+                        $payload = [
+                            'machining_leak_test_hourly_id'  => $hourlyId,
+                            'downtime_category_id' => $dtCatId === -1 ? 0 : $dtCatId,
+                            'downtime_minute'      => $mins,
+                            'created_at'           => $now,
+                            'updated_at'           => $now,
+                        ];
+
+                        $db->table('machining_leak_test_hourly_downtime_details')->insert($payload);
+                    }
+                }
+            }
+        }
+    }
+
+    /* =========================
+     * SHIFT MC LIST + SHIFT 3 FLAG
+     * ========================= */
+    private function getMachiningShifts($db, string $date = null): array
+    {
+        $date = $date ?? date('Y-m-d');
+        $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
             ->where('is_active', 1)
+            ->where('day_group', $this->getDayGroup($date))
             ->like('shift_name', 'MC')
-            ->orderBy('CAST(shift_code AS UNSIGNED)', 'DESC')
-            ->get()->getRowArray();
+            ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
+            ->get()
+            ->getResultArray();
 
-        return $row ?: null;
+        foreach ($shifts as &$s) {
+            $code = (int)($s['shift_code'] ?? 0);
+            $name = (string)($s['shift_name'] ?? '');
+            $s['is_shift3'] = ($code === 3) || (preg_match('/\b3\b/', $name) === 1) || (stripos($name, 'shift 3') !== false);
+        }
+        unset($s);
+
+        return $shifts;
     }
 
-    private function isShiftEnded($db, int $shiftId, string $date): bool
+    private function getShiftEndDateTime($db, int $shiftId, string $date, \DateTimeZone $tz): ?\DateTime
     {
-        date_default_timezone_set('Asia/Jakarta');
-
         $slots = $db->table('shift_time_slots sts')
             ->select('ts.time_start, ts.time_end')
             ->join('time_slots ts', 'ts.id = sts.time_slot_id')
             ->where('sts.shift_id', $shiftId)
             ->orderBy('ts.time_start', 'ASC')
-            ->get()->getResultArray();
+            ->get()
+            ->getResultArray();
 
-        if (!$slots) return false;
+        if (!$slots) return null;
 
-        $firstStart = $slots[0]['time_start'];
-        $lastEnd    = $slots[count($slots) - 1]['time_end'];
+        $last = end($slots);
+        $startStr = (string)($last['time_start'] ?? '00:00:00');
+        $endStr   = (string)($last['time_end'] ?? '00:00:00');
 
-        $startDT = strtotime($date . ' ' . $firstStart);
-        $endDT   = strtotime($date . ' ' . $lastEnd);
-        if ($endDT <= $startDT) $endDT += 86400;
+        $startDT = new \DateTime($date . ' ' . $startStr, $tz);
+        $endDT   = new \DateTime($date . ' ' . $endStr, $tz);
 
-        return time() >= $endDT;
+        if ($endDT <= $startDT) $endDT->modify('+1 day');
+
+        return $endDT;
     }
 
-    private function resolvePrevProcessIdActive($db, int $productId, int $currentProcessId): ?int
+    private function canFinishShift($db, string $date): array
     {
-        if (!$db->tableExists('product_process_flows')) return null;
+        if ($this->isAdminSession()) {
+            return [true, null, null];
+        }
 
-        $cur = $db->table('product_process_flows')
-            ->select('sequence')
-            ->where([
-                'product_id' => $productId,
-                'process_id' => $currentProcessId,
-                'is_active'  => 1,
-            ])
-            ->get()->getRowArray();
+        $tz  = new \DateTimeZone('Asia/Jakarta');
+        $now = new \DateTime('now', $tz);
 
-        if (!$cur) return null;
+        $shifts = $this->getMachiningShifts($db, $date);
+        $shift3 = null;
 
-        $seq = (int)$cur['sequence'];
-        if ($seq <= 1) return null;
+        foreach ($shifts as $s) {
+            if (!empty($s['is_shift3'])) { $shift3 = $s; break; }
+        }
 
-        $prev = $db->table('product_process_flows')
-            ->select('process_id')
-            ->where([
-                'product_id' => $productId,
-                'sequence'   => $seq - 1,
-                'is_active'  => 1,
-            ])
-            ->get()->getRowArray();
+        if (!$shift3) return [false, null, 'Shift 3 Machining tidak ditemukan di master shifts'];
 
-        return $prev ? (int)$prev['process_id'] : null;
+        $endDT = $this->getShiftEndDateTime($db, (int)$shift3['id'], $date, $tz);
+        if (!$endDT) return [false, null, 'Time slot Shift 3 belum diset (shift_time_slots kosong)'];
+
+        if ($now < $endDT) return [false, $endDT, 'Finish Shift hanya bisa setelah Shift 3 selesai'];
+
+        return [true, $endDT, null];
     }
 
-    private function resolveNextProcessByFlow($db, int $productId, int $fromProcessId): ?int
+    /* =========================
+     * FLOW HELPERS
+     * ========================= */
+    private function resolveNextProcessId($db, int $productId, int $fromProcessId): ?int
     {
-        if (!$db->tableExists('product_process_flows')) return null;
-
         $flows = $db->table('product_process_flows')
             ->select('process_id, sequence')
             ->where('product_id', $productId)
             ->where('is_active', 1)
             ->orderBy('sequence', 'ASC')
-            ->get()->getResultArray();
+            ->get()
+            ->getResultArray();
 
         if (!$flows) return null;
 
         $idx = null;
         foreach ($flows as $i => $f) {
-            if ((int)$f['process_id'] === (int)$fromProcessId) {
-                $idx = $i;
-                break;
-            }
+            if ((int)$f['process_id'] === (int)$fromProcessId) { $idx = $i; break; }
         }
+        if ($idx === null) return null;
 
-        if ($idx === null) return isset($flows[1]) ? (int)$flows[1]['process_id'] : null;
         return isset($flows[$idx + 1]) ? (int)$flows[$idx + 1]['process_id'] : null;
     }
 
-    private function wipCols($db): array
+    private function resolvePrevProcessId($db, int $productId, int $toProcessId): ?int
     {
-        if (!$db->tableExists('production_wip')) {
-            return [
-                'qty' => false, 'qty_in' => false, 'qty_out' => false, 'stock' => false,
-                'source_table' => false, 'source_id' => false, 'created_at' => false, 'updated_at' => false,
-            ];
+        $flows = $db->table('product_process_flows')
+            ->select('process_id, sequence')
+            ->where('product_id', $productId)
+            ->where('is_active', 1)
+            ->orderBy('sequence', 'ASC')
+            ->get()
+            ->getResultArray();
+
+        if (!$flows) return null;
+
+        $idx = null;
+        foreach ($flows as $i => $f) {
+            if ((int)$f['process_id'] === (int)$toProcessId) { $idx = $i; break; }
+        }
+        if ($idx === null) return null;
+
+        return isset($flows[$idx - 1]) ? (int)$flows[$idx - 1]['process_id'] : null;
+    }
+
+    /* =========================================================
+     * UPDATE STOCK MACHINING saat hourly disimpan
+     * ========================================================= */
+    private function syncMachiningWipStockFromHourly($db, string $date): void
+    {
+        if (!$db->tableExists('production_wip')) return;
+        if (!$db->tableExists('machining_leak_test_hourly')) return;
+
+        $wipDateCol  = $this->detectWipDateColumn($db);
+        $mcProcessId = $this->getProcessIdLeakTest($db);
+
+        $hasQtyIn  = $db->fieldExists('qty_in', 'production_wip');
+        $hasQtyOut = $db->fieldExists('qty_out', 'production_wip');
+        $hasStock  = $db->fieldExists('stock', 'production_wip');
+
+        if (!$hasStock) return;
+
+        $items = $db->table('daily_schedule_items dsi')
+            ->select('dsi.id AS dsi_id, dsi.machine_id, dsi.product_id')
+            ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
+            ->where('ds.schedule_date', $date)
+            ->groupStart()->where('ds.section', 'Leak Test')->orWhere('ds.section', 'LEAK TEST')->groupEnd()
+            ->where('dsi.target_per_shift >', 0)
+            ->get()
+            ->getResultArray();
+
+        if (!$items) return;
+
+        $actualRows = $db->table('machining_leak_test_hourly')
+            ->select('machine_id, product_id, SUM(IFNULL(qty_fg, qty_ok)) AS fg_total')
+            ->where('production_date', $date)
+            ->groupBy('machine_id, product_id')
+            ->get()
+            ->getResultArray();
+
+        $actualMap = [];
+        foreach ($actualRows as $a) {
+            $mid = (int)$a['machine_id'];
+            $pid = (int)$a['product_id'];
+            $actualMap[$mid.'_'.$pid] = (int)($a['fg_total'] ?? 0);
         }
 
-        return [
-            'qty'         => $db->fieldExists('qty', 'production_wip'),
-            'qty_in'      => $db->fieldExists('qty_in', 'production_wip'),
-            'qty_out'     => $db->fieldExists('qty_out', 'production_wip'),
-            'stock'       => $db->fieldExists('stock', 'production_wip'),
-            'source_table'=> $db->fieldExists('source_table', 'production_wip'),
-            'source_id'   => $db->fieldExists('source_id', 'production_wip'),
-            'created_at'  => $db->fieldExists('created_at', 'production_wip'),
-            'updated_at'  => $db->fieldExists('updated_at', 'production_wip'),
+        $now = date('Y-m-d H:i:s');
+
+        foreach ($items as $si) {
+            $dsiId     = (int)$si['dsi_id'];
+            $machineId = (int)$si['machine_id'];
+            $productId = (int)$si['product_id'];
+
+            if ($dsiId <= 0 || $machineId <= 0 || $productId <= 0) continue;
+
+            $qtyA = (int)($actualMap[$machineId.'_'.$productId] ?? 0);
+
+            $prevProcessId = $this->resolvePrevProcessId($db, $productId, $mcProcessId);
+            if (!$prevProcessId) continue;
+
+            $key = [
+                $wipDateCol       => $date,
+                'product_id'      => $productId,
+                'from_process_id' => $prevProcessId,
+                'to_process_id'   => $mcProcessId,
+                'source_table'    => 'daily_schedule_items',
+                'source_id'       => $dsiId,
+            ];
+
+            $exist = $db->table('production_wip')->where($key)->get()->getRowArray();
+
+            if (!$exist) {
+                $payload = $key + [
+                    'qty'    => 0,
+                    'status' => 'SCHEDULED',
+                    'stock'  => $qtyA,
+                ];
+                if ($hasQtyIn)  $payload['qty_in']  = 0;
+                if ($hasQtyOut) $payload['qty_out'] = 0;
+
+                if ($db->fieldExists('created_at', 'production_wip')) $payload['created_at'] = $now;
+                if ($db->fieldExists('updated_at', 'production_wip')) $payload['updated_at'] = $now;
+
+                $db->table('production_wip')->insert($payload);
+            } else {
+                $upd = ['stock' => $qtyA];
+                if ($db->fieldExists('updated_at', 'production_wip')) $upd['updated_at'] = $now;
+                $db->table('production_wip')->where('id', (int)$exist['id'])->update($upd);
+            }
+        }
+    }
+
+    /* =========================
+     * WIP UPSERT (NEXT PROCESS)
+     * ========================= */
+    private function upsertWipNextProcess(
+        $db, string $date, int $productId, int $fromProcessId, int $toProcessId,
+        int $qtyMove, string $sourceTable, int $sourceId
+    ): void {
+        if (!$db->tableExists('production_wip')) return;
+
+        $wipDateCol = $this->detectWipDateColumn($db);
+
+        $key = [
+            $wipDateCol        => $date,
+            'product_id'       => $productId,
+            'from_process_id'  => $fromProcessId,
+            'to_process_id'    => $toProcessId,
+            'source_table'     => $sourceTable,
+            'source_id'        => $sourceId,
         ];
+
+        $exist = $db->table('production_wip')->where($key)->get()->getRowArray();
+        $now = date('Y-m-d H:i:s');
+
+        $payload = $key + ['qty' => $qtyMove, 'status' => 'WAITING'];
+
+        if ($db->fieldExists('qty_in', 'production_wip'))  $payload['qty_in']  = $qtyMove;
+        if ($db->fieldExists('qty_out', 'production_wip')) $payload['qty_out'] = 0;
+        
+        if ($db->fieldExists('stock', 'production_wip')) {
+            // JANGAN hardcode stock = 0. Tarik running balance terakhir proses tujuan
+            // agar flow ledger tidak ter-reset ke 0 oleh scheduler!
+            $stockCol = 'stock';
+            $wipRow = $db->table('production_wip')
+                         ->select($stockCol)
+                         ->where('to_process_id', $toProcessId)
+                         ->where('product_id', $productId)
+                         ->where("$wipDateCol <=", $date)
+                         ->orderBy($wipDateCol, 'DESC')
+                         ->orderBy('id', 'DESC')
+                         ->limit(1)
+                         ->get()->getRowArray();
+            $payload['stock'] = $wipRow ? (int)$wipRow[$stockCol] : 0;
+        }
+
+        if ($db->fieldExists('updated_at', 'production_wip')) $payload['updated_at'] = $now;
+
+        if ($exist) {
+            if (strtoupper((string)($exist['status'] ?? '')) === 'DONE') return;
+            $db->table('production_wip')->where('id', (int)$exist['id'])->update($payload);
+        } else {
+            if ($db->fieldExists('created_at', 'production_wip')) $payload['created_at'] = $now;
+            $db->table('production_wip')->insert($payload);
+        }
     }
 
-    private function dbFail($db, string $context): void
+    /* =========================
+     * FINISH SHIFT TRANSFER (Machining)
+     * ========================= */
+    private function finishMachiningTransferFlow($db, string $date, bool $forceAdmin = false): int
     {
-        $err  = $db->error();
-        $msg  = $err['message'] ?? 'Unknown DB error';
-        $code = $err['code'] ?? 0;
-        throw new \RuntimeException("{$context}: [{$code}] {$msg}");
+        if (!$db->tableExists('production_wip')) return 0;
+        if (!$db->tableExists('machining_leak_test_hourly')) return 0;
+
+        $wipDateCol  = $this->detectWipDateColumn($db);
+        $mcProcessId = $this->getProcessIdLeakTest($db);
+
+        $hasQtyIn  = $db->fieldExists('qty_in', 'production_wip');
+        $hasQtyOut = $db->fieldExists('qty_out', 'production_wip');
+        $hasStock  = $db->fieldExists('stock', 'production_wip');
+
+        $now = date('Y-m-d H:i:s');
+
+        $items = $db->table('daily_schedule_items dsi')
+            ->select('dsi.id AS dsi_id, dsi.machine_id, dsi.product_id, dsi.target_per_shift')
+            ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
+            ->where('ds.schedule_date', $date)
+            ->groupStart()->where('ds.section', 'Leak Test')->orWhere('ds.section', 'LEAK TEST')->groupEnd()
+            ->where('dsi.target_per_shift >', 0)
+            ->get()
+            ->getResultArray();
+
+        if (!$items) return 0;
+
+        $actualRows = $db->table('machining_leak_test_hourly')
+            ->select('machine_id, product_id, SUM(IFNULL(qty_fg, qty_ok)) AS fg_total')
+            ->where('production_date', $date)
+            ->groupBy('machine_id, product_id')
+            ->get()
+            ->getResultArray();
+
+        $actualMap = [];
+        foreach ($actualRows as $a) {
+            $mid = (int)$a['machine_id'];
+            $pid = (int)$a['product_id'];
+            $actualMap[$mid.'_'.$pid] = (int)($a['fg_total'] ?? 0);
+        }
+
+        $processed = 0;
+
+        foreach ($items as $si) {
+            $dsiId     = (int)$si['dsi_id'];
+            $machineId = (int)$si['machine_id'];
+            $productId = (int)$si['product_id'];
+            $qtyPlan   = (int)($si['target_per_shift'] ?? 0);
+
+            if ($dsiId <= 0 || $machineId <= 0 || $productId <= 0) continue;
+
+            $qtyA = (int)($actualMap[$machineId.'_'.$productId] ?? 0);
+
+            $prevProcessId = $this->resolvePrevProcessId($db, $productId, $mcProcessId);
+            $nextProcessId = $this->resolveNextProcessId($db, $productId, $mcProcessId);
+
+            if ($prevProcessId) {
+                $keyInbound = [
+                    $wipDateCol        => $date,
+                    'product_id'       => $productId,
+                    'from_process_id'  => $prevProcessId,
+                    'to_process_id'    => $mcProcessId,
+                    'source_table'     => 'daily_schedule_items',
+                    'source_id'        => $dsiId,
+                ];
+
+                $inbound = $db->table('production_wip')->where($keyInbound)->get()->getRowArray();
+
+                if (!$inbound) {
+                    $ins = $keyInbound + ['qty' => $qtyPlan, 'status' => 'WAITING'];
+                    if ($hasQtyIn)  $ins['qty_in']  = max(0, $qtyPlan - $qtyA);
+                    if ($hasQtyOut) $ins['qty_out'] = 0;
+                    if ($hasStock)  $ins['stock']   = $qtyA;
+
+                    if ($db->fieldExists('created_at', 'production_wip')) $ins['created_at'] = $now;
+                    if ($db->fieldExists('updated_at', 'production_wip')) $ins['updated_at'] = $now;
+
+                    $db->table('production_wip')->insert($ins);
+                    $inbound = $db->table('production_wip')->where($keyInbound)->get()->getRowArray();
+                }
+
+                if ($inbound && !$forceAdmin && strtoupper((string)($inbound['status'] ?? '')) === 'DONE') {
+                    $processed++;
+                    continue;
+                }
+
+                $stockNow    = $hasStock ? (int)($inbound['stock'] ?? 0) : 0;
+                $transferQty = max($stockNow, $qtyA);
+
+                $updA = ['status' => 'DONE'];
+                if ($hasQtyOut) $updA['qty_out'] = $transferQty;
+                if ($hasStock)  $updA['stock']   = 0;
+                if ($hasQtyIn)  $updA['qty_in']  = max(0, $qtyPlan - $transferQty);
+                if ($db->fieldExists('updated_at', 'production_wip')) $updA['updated_at'] = $now;
+
+                $db->table('production_wip')->where('id', (int)$inbound['id'])->update($updA);
+
+                if ($nextProcessId > 0 && $transferQty > 0) {
+                    $this->upsertWipNextProcess(
+                        $db, $date, $productId, $mcProcessId, (int)$nextProcessId,
+                        $transferQty, 'daily_schedule_items', $dsiId
+                    );
+                }
+            }
+            $processed++;
+        }
+        return $processed;
     }
 
-
-    /* =====================================================
-     * INDEX
-     * ===================================================== */
+    /* =========================
+     * INDEX (Menampilkan View)
+     * ========================= */
     public function index()
     {
         $db       = db_connect();
         $date     = $this->request->getGet('date') ?? date('Y-m-d');
-        $operator = session()->get('fullname') ?? '-';
+        $isAdmin  = $this->isAdminSession();
 
-        // ✅ NG Categories
-        $ngCategories = [];
-        if ($db->tableExists('ng_categories')) {
-            $ngCategories = $db->table('ng_categories')
-                ->select('id, ng_code, ng_name')
+        $operatorModel = new \App\Models\MasterOperatorModel();
+        $operators = $operatorModel->where('section', 'Machining')->orderBy('operator_name', 'ASC')->findAll();
+
+        // ✅ NG Categories master 
+        $ngCategories = $db->table('ng_categories')
+            ->select('id, ng_code, ng_name')
+            ->where('process_name', 'LEAK TEST')
+            ->where('is_active', 1)
+            ->orderBy('ng_code', 'ASC')
+            ->get()
+            ->getResultArray();
+
+        $mcProcessId = $this->getProcessIdLeakTest($db);
+        
+        // Master Downtime Categories
+        $downtimes = [];
+        if ($db->tableExists('downtime_categories')) {
+            $downtimes = $db->table('downtime_categories')
+                ->where('process_id', $mcProcessId)
                 ->where('is_active', 1)
-                ->orderBy('ng_code', 'ASC')
+                ->orderBy('downtime_name', 'ASC')
                 ->get()->getResultArray();
-        } else {
-            $ngCategories = [
-                ['id' => 1, 'ng_code' => 1, 'ng_name' => 'BOCOR'],
-                ['id' => 2, 'ng_code' => 2, 'ng_name' => 'CRACK'],
-                ['id' => 3, 'ng_code' => 3, 'ng_name' => 'SCRATCH'],
-                ['id' => 4, 'ng_code' => 4, 'ng_name' => 'POROS'],
-                ['id' => 5, 'ng_code' => 5, 'ng_name' => 'DIMENSI'],
-                ['id' => 6, 'ng_code' => 6, 'ng_name' => 'LAINNYA'],
-            ];
         }
 
-        $shifts = $db->table('shifts')
-            ->where('is_active', 1)
-            ->like('shift_name', 'MC')
-            ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
-            ->get()->getResultArray();
+        $shifts = $this->getMachiningShifts($db, $date);
 
         foreach ($shifts as &$shift) {
-            $shift['slots'] = $db->table('shift_time_slots sts')
-                ->select('ts.id, ts.time_start, ts.time_end')
-                ->join('time_slots ts', 'ts.id = sts.time_slot_id')
-                ->where('sts.shift_id', $shift['id'])
-                ->orderBy('ts.time_start', 'ASC')
-                ->get()->getResultArray();
+
+            // Dapatkan seluruh Slot Waktu — raw query untuk is_break
+            $allSlots = $db->query(
+                "SELECT ts.id, ts.time_start, ts.time_end, sts.is_break
+                 FROM shift_time_slots sts
+                 JOIN time_slots ts ON ts.id = sts.time_slot_id
+                 WHERE sts.shift_id = ?
+                 ORDER BY sts.id ASC",
+                [(int)$shift['id']]
+            )->getResultArray();
+
+            $filteredSlots = $allSlots;
 
             $totalMinute = 0;
-            foreach ($shift['slots'] as &$slot) {
+            foreach ($filteredSlots as &$slot) {
                 $start = strtotime($slot['time_start']);
                 $end   = strtotime($slot['time_end']);
                 if ($end <= $start) $end += 86400;
+                $mins = (int)(($end - $start) / 60);
 
-                $slot['minute'] = (int)(($end - $start) / 60);
-                $totalMinute   += $slot['minute'];
+                // Slot istirahat: tidak masuk hitungan total menit aktif
+                $isBreak = (int)($slot['is_break'] ?? 0);
+                $slot['minute']   = $isBreak ? 0 : max(0, $mins);
+                $slot['is_break'] = $isBreak;
+                if (!$isBreak) $totalMinute += max(0, $mins);
             }
             unset($slot);
+
+            $shift['slots'] = $filteredSlots;
             $shift['total_minute'] = $totalMinute;
 
-            $shift['items'] = $db->table('daily_schedule_items dsi')
+            // Dandori Map: machine_id => time_slot_id => { activity, product_id }
+            $dandoriRecords = $db->table('machining_dandori')
+                ->where('dandori_date', $date)
+                ->where('shift_id', $shift['id'])
+                ->get()->getResultArray();
+
+            $shift['dandori_map'] = []; // machine_id => time_slot_id => info
+            foreach ($dandoriRecords as $d) {
+                $mId = (int)$d['machine_id'];
+                $tId = (int)($d['time_slot_id'] ?? 0);
+                if ($tId > 0) {
+                    $shift['dandori_map'][$mId][$tId] = [
+                        'activity'   => $d['activity'] ?? 'Dandori',
+                        'product_id' => (int)$d['product_id'],
+                        'dandori_minute' => (int)($d['dandori_minute'] ?? 0),
+                    ];
+                }
+            }
+
+            // 3. Items Schedule
+            $rawItems = $db->table('daily_schedule_items dsi')
                 ->select('
-                    dsi.id as schedule_item_id,
+                    dsi.id AS dsi_id,
                     dsi.machine_id,
-                    m.machine_code,
                     m.line_position,
+                    m.machine_code,
                     dsi.product_id,
                     p.part_no,
                     p.part_name,
-                    dsi.target_per_shift
+                    IFNULL(p.weight_machining, 0) AS weight_mc,
+                    dsi.target_per_shift,
+                    dsi.end_time_slot_id,
+                    dsi.active_slot_ids,
+                    dsi.slot_custom_times
                 ')
                 ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
                 ->join('machines m', 'm.id = dsi.machine_id')
                 ->join('products p', 'p.id = dsi.product_id')
                 ->where('ds.schedule_date', $date)
                 ->where('ds.shift_id', $shift['id'])
-                ->groupStart()
-                    ->where('ds.section', 'Leak Test')
-                    ->orWhere('ds.section', 'LEAK TEST')
-                ->groupEnd()
-                ->orderBy('m.line_position', 'ASC')
-                ->get()->getResultArray();
+                ->groupStart()->where('ds.section', 'Leak Test')->orWhere('ds.section', 'LEAK TEST')->groupEnd()
+                ->orderBy('m.line_position')
+                ->get()
+                ->getResultArray();
 
+            $shift['items'] = [];
+            foreach ($rawItems as $ritem) {
+                $mId = $ritem['machine_id'];
+                $pId = $ritem['product_id'];
+                $isDandori = isset($shift['dandori_map'][$mId][$pId]['is_dandori']);
+                if ($ritem['target_per_shift'] > 0 || $isDandori) {
+                    $shift['items'][] = $ritem;
+                }
+            }
+
+            // weight_mc_map: product_id => weight_machining (gram)
+            $shift['weight_mc_map'] = [];
+            foreach ($shift['items'] as $it) {
+                $pid = (int)$it['product_id'];
+                $shift['weight_mc_map'][$pid] = (float)($it['weight_mc'] ?? 0);
+            }
+
+            // 4. Hourly Maps
             $hourly = $db->table('machining_leak_test_hourly')
                 ->where('production_date', $date)
                 ->where('shift_id', $shift['id'])
-                ->get()->getResultArray();
+                ->get()
+                ->getResultArray();
 
             $shift['hourly_map'] = [];
-            $shift['ng_detail_map'] = [];
+            $hourlyIdMap = [];
 
             foreach ($hourly as $h) {
                 $mid = (int)$h['machine_id'];
@@ -266,213 +747,179 @@ class LeakTestDailyProductionController extends BaseController
                 $sid = (int)$h['time_slot_id'];
 
                 $shift['hourly_map'][$mid][$pid][$sid] = $h;
+                if (isset($h['id'])) $hourlyIdMap[$mid.'_'.$pid.'_'.$sid] = (int)$h['id'];
+            }
 
-                $raw = (string)($h['ng_category'] ?? '');
-                $details = [];
+            // 5. NG Detail Maps
+            $shift['ng_detail_map'] = [];
+            if ($db->tableExists('machining_leak_test_hourly_ng_details') && $hourlyIdMap) {
+                $ids = array_values(array_unique(array_filter(array_map('intval', $hourlyIdMap))));
+                if ($ids) {
+                    $rows = $db->table('machining_leak_test_hourly_ng_details')
+                        ->whereIn('machining_leak_test_hourly_id', $ids)
+                        ->get()
+                        ->getResultArray();
 
-                if ($raw !== '') {
-                    $decoded = json_decode($raw, true);
-                    if (is_array($decoded)) {
-                        foreach ($decoded as $d) {
-                            $details[] = [
-                                'ng_category_id' => (int)($d['ng_category_id'] ?? 0),
-                                'qty'            => (int)($d['qty'] ?? 0),
-                            ];
-                        }
-                    } else {
-                        $details[] = ['ng_category_id' => 0, 'qty' => (int)($h['qty_ng'] ?? 0)];
+                    $byHourlyId = [];
+                    foreach ($rows as $r) {
+                        $hid = (int)($r['machining_leak_test_hourly_id'] ?? 0);
+                        if ($hid <= 0) continue;
+                        $byHourlyId[$hid][] = [
+                            'ng_category_id' => (int)($r['ng_category_id'] ?? 0),
+                            'qty'            => (int)($r['qty'] ?? 0),
+                        ];
+                    }
+
+                    foreach ($hourlyIdMap as $k => $hid) {
+                        [$midStr, $pidStr, $sidStr] = explode('_', $k);
+                        $mid = (int)$midStr; $pid = (int)$pidStr; $sid = (int)$sidStr;
+                        $shift['ng_detail_map'][$mid][$pid][$sid] = $byHourlyId[$hid] ?? [];
                     }
                 }
+            }
 
-                $shift['ng_detail_map'][$mid][$pid][$sid] = $details;
+            // 6. Downtime Detail Maps
+            $shift['dt_detail_map'] = [];
+            if ($db->tableExists('machining_leak_test_hourly_downtime_details') && $hourlyIdMap) {
+                $ids = array_values(array_unique(array_filter(array_map('intval', $hourlyIdMap))));
+                if ($ids) {
+                    $rows = $db->table('machining_leak_test_hourly_downtime_details d')
+                        ->select('d.machining_leak_test_hourly_id, d.downtime_category_id, d.downtime_minute, dc.downtime_name')
+                        ->join('downtime_categories dc', 'dc.id = d.downtime_category_id', 'left')
+                        ->whereIn('d.machining_leak_test_hourly_id', $ids)
+                        ->get()
+                        ->getResultArray();
+
+                    $byHourlyId = [];
+                    foreach ($rows as $r) {
+                        $hid = (int)($r['machining_leak_test_hourly_id'] ?? 0);
+                        if ($hid <= 0) continue;
+                        
+                        $catId = (int)($r['downtime_category_id'] ?? 0);
+                        if ($catId === 0) $catId = -1; // -1 represents Dandori in the UI
+
+                        $byHourlyId[$hid][] = [
+                            'downtime_category_id' => $catId,
+                            'downtime_minute'      => (int)($r['downtime_minute'] ?? 0),
+                            'downtime_name'        => $catId === -1 ? 'Dandori' : (string)($r['downtime_name'] ?? ''),
+                        ];
+                    }
+
+                    foreach ($hourlyIdMap as $k => $hid) {
+                        [$midStr, $pidStr, $sidStr] = explode('_', $k);
+                        $mid = (int)$midStr; $pid = (int)$pidStr; $sid = (int)$sidStr;
+                        $shift['dt_detail_map'][$mid][$pid][$sid] = $byHourlyId[$hid] ?? [];
+                    }
+                }
             }
         }
         unset($shift);
 
+        [$canFinish, $shift3EndDT, $finishError] = $this->canFinishShift($db, $date);
+
         return view('machining/leak_test/daily_production/index', [
             'date'         => $date,
-            'operator'     => $operator,
+            'operators'    => $operators,
             'shifts'       => $shifts,
-            'isAdmin'      => $this->isAdmin(),
+            'canFinish'    => $canFinish,
+            'isAdmin'      => $isAdmin,
+            'shift3EndAt'  => $shift3EndDT ? $shift3EndDT->format('Y-m-d H:i:s') : null,
+            'finishError'  => $finishError,
             'ngCategories' => $ngCategories,
+            'downtimes'    => $downtimes
         ]);
     }
 
-    /* =====================================================
-     * STORE HOURLY
-     * ===================================================== */
+    /* =========================
+     * STORE
+     * ========================= */
     public function store()
     {
         $db    = db_connect();
-        $items = $this->request->getPost('items');
+        // Support JSON-consolidated items to bypass max_input_vars limit
+        $itemsJson = $this->request->getPost('items_json');
+        $items = $itemsJson ? json_decode($itemsJson, true) : ($this->request->getPost('items') ?? []);
+        $shiftOperators = $this->request->getPost('operators') ?? [];
+        $shiftLeaders   = $this->request->getPost('leaders') ?? [];
 
-        if (!$items || !is_array($items)) {
-            return redirect()->back()->with('error', 'Data kosong / terpotong');
+        $date = null;
+        foreach ($items as $r) {
+            if (!empty($r['date'])) { $date = (string)$r['date']; break; }
         }
-
-        if (!$db->tableExists('machining_leak_test_hourly')) {
-            return redirect()->back()->with('error', 'Tabel machining_leak_test_hourly tidak ditemukan');
-        }
-
-        if (!$db->fieldExists('qty_ok', 'machining_leak_test_hourly')) {
-            return redirect()->back()->with('error', 'Kolom machining_leak_test_hourly.qty_ok tidak ditemukan');
-        }
-
-        $hourlyHasQtyNg   = $db->fieldExists('qty_ng', 'machining_leak_test_hourly');
-        $hourlyHasNgCat   = $db->fieldExists('ng_category', 'machining_leak_test_hourly');
-        $hourlyHasCreated = $db->fieldExists('created_at', 'machining_leak_test_hourly');
-        $hourlyHasUpdated = $db->fieldExists('updated_at', 'machining_leak_test_hourly');
-
-        $isAdmin = $this->isAdmin();
-        $now     = date('Y-m-d H:i:s');
 
         $db->transBegin();
-
         try {
-            $shiftTouched = [];
-            $dateTouched  = null;
+            $this->saveHourlyRows($db, $items, $shiftOperators, $shiftLeaders);
 
-            foreach ($items as $row) {
-                $date      = (string)($row['date'] ?? '');
-                $shiftId   = (int)($row['shift_id'] ?? 0);
-                $machineId = (int)($row['machine_id'] ?? 0);
-                $productId = (int)($row['product_id'] ?? 0);
-                $slotId    = (int)($row['time_slot_id'] ?? 0);
+            if ($date) {
+                $this->syncMachiningWipStockFromHourly($db, $date);
 
-                if ($date === '' || $shiftId <= 0 || $machineId <= 0 || $productId <= 0 || $slotId <= 0) {
-                    continue;
-                }
-
-                $dateTouched = $date;
-                $shiftTouched[$shiftId] = true;
-
-                $okQty = (int)($row['ok'] ?? 0);
-
-                $ngDetails = $row['ng_details'] ?? [];
-                $ngTotal = 0;
-                $cleanDetails = [];
-
-                if (is_array($ngDetails)) {
-                    foreach ($ngDetails as $d) {
-                        $ngId = (int)($d['ng_category_id'] ?? 0);
-                        $qty  = (int)($d['qty'] ?? 0);
-                        $cleanDetails[] = ['ng_category_id' => $ngId, 'qty' => $qty];
-                        if ($ngId > 0 && $qty > 0) $ngTotal += $qty;
-                    }
-                }
-
-                $ngCategoryJson = $hourlyHasNgCat ? json_encode($cleanDetails, JSON_UNESCAPED_UNICODE) : null;
-
-                $where = [
-                    'production_date' => $date,
-                    'shift_id'        => $shiftId,
-                    'machine_id'      => $machineId,
-                    'product_id'      => $productId,
-                    'time_slot_id'    => $slotId,
-                ];
-
-                $exist = $db->table('machining_leak_test_hourly')->where($where)->get()->getRowArray();
-
-                if ($exist) {
-                    $upd = [
-                        'qty_ok' => $okQty,
-                    ];
-                    if ($hourlyHasQtyNg) $upd['qty_ng'] = $ngTotal;
-                    if ($hourlyHasNgCat) $upd['ng_category'] = $ngCategoryJson;
-                    if ($hourlyHasUpdated) $upd['updated_at'] = $now;
-
-                    $ok = $db->table('machining_leak_test_hourly')->where('id', (int)$exist['id'])->update($upd);
-                    if ($ok === false) $this->dbFail($db, 'Update machining_leak_test_hourly');
-                } else {
-                    $ins = $where + [
-                        'qty_ok' => $okQty,
-                    ];
-                    if ($hourlyHasQtyNg) $ins['qty_ng'] = $ngTotal;
-                    if ($hourlyHasNgCat) $ins['ng_category'] = $ngCategoryJson;
-                    if ($hourlyHasCreated) $ins['created_at'] = $now;
-                    if ($hourlyHasUpdated) $ins['updated_at'] = $now;
-
-                    $ok = $db->table('machining_leak_test_hourly')->insert($ins);
-                    if ($ok === false) $this->dbFail($db, 'Insert machining_leak_test_hourly');
+                $rowTargets = $this->request->getPost('row_targets') ?? [];
+                if (!empty($rowTargets)) {
+                    $this->syncRowTargets($db, $date, $rowTargets);
                 }
             }
 
-            if (!$dateTouched || empty($shiftTouched)) {
-                $db->transCommit();
-                return redirect()->back()->with('success', 'Tidak ada data valid untuk disimpan.');
-            }
-
-            foreach (array_keys($shiftTouched) as $sid) {
-                $this->syncLeakTestRealtime($db, $dateTouched, (int)$sid, $isAdmin);
-            }
-
-            if ($db->transStatus() === false) {
-                $this->dbFail($db, 'Store transaction failed');
-            }
-
+            if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
-            return redirect()->back()->with('success', 'Leak Test hourly tersimpan & realtime WIP tersync.');
 
+            return redirect()->back()->with('success', 'Hourly Leak Test tersimpan + Stock WIP Leak Test ter-update');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', $e->getMessage());
         }
     }
 
-    /* =====================================================
+    /* =========================
      * FINISH SHIFT
-     * ===================================================== */
+     * ========================= */
     public function finishShift()
     {
-        $db      = db_connect();
-        $date    = (string)($this->request->getPost('date') ?? date('Y-m-d'));
-        $shiftId = (int)($this->request->getPost('shift_id') ?? 0);
+        $db    = db_connect();
+        // Support JSON-consolidated items to bypass max_input_vars limit
+        $itemsJson = $this->request->getPost('items_json');
+        $items = $itemsJson ? json_decode($itemsJson, true) : $this->request->getPost('items');
+        $date  = $this->request->getPost('global_date'); 
+        $shiftOperators = $this->request->getPost('operators') ?? [];
+        $shiftLeaders   = $this->request->getPost('leaders') ?? [];
 
-        if ($date === '' || $shiftId <= 0) {
-            return redirect()->back()->with('error', 'Data tidak lengkap (date/shift_id).');
+        if (!$items || !is_array($items) || empty($date)) {
+            return redirect()->back()->with('error', 'Data gagal disimpan. Coba lagi.');
         }
 
-        $isAdmin = $this->isAdmin();
-
-        if (!$this->isMcShift($db, $shiftId)) {
-            return redirect()->back()->with('error', 'Finish Shift hanya boleh untuk shift MC.');
+        [$canFinish, $shift3EndDT, $finishError] = $this->canFinishShift($db, $date);
+        if (!$canFinish) {
+            $msg = $finishError ?: 'Belum bisa Finish Shift';
+            if ($shift3EndDT) $msg .= ' (Shift 3 selesai: '.$shift3EndDT->format('Y-m-d H:i:s').')';
+            return redirect()->back()->with('error', $msg);
         }
 
-        if (!$isAdmin) {
-            $lastShift = $this->getLastMachiningShift($db);
-            if (!$lastShift) return redirect()->back()->with('error', 'Tidak ditemukan shift MC aktif.');
-            if ((int)$lastShift['id'] !== $shiftId) {
-                return redirect()->back()->with('error', 'Finish Shift hanya boleh pada shift terakhir MC (admin bisa override).');
-            }
-            if (!$this->isShiftEnded($db, $shiftId, $date)) {
-                return redirect()->back()->with('error', 'Shift belum berakhir (admin bisa override).');
-            }
-        }
-
-        $ltProcessId = $this->getProcessIdByCode($db, 'LT');
-        if (!$ltProcessId) return redirect()->back()->with('error', 'Process LT (Leak Test) tidak ditemukan.');
-
-        $mcShiftIds = $this->getMcShiftIds($db);
-        if (empty($mcShiftIds)) return redirect()->back()->with('error', 'Tidak ada shift MC aktif.');
+        $forceAdmin = $this->isAdminSession();
 
         $db->transBegin();
-
         try {
-            foreach ($mcShiftIds as $sid) {
-                $this->syncLeakTestRealtime($db, $date, (int)$sid, $isAdmin);
+            // 1) simpan hourly (dengan NG detail)
+            $this->saveHourlyRows($db, $items, $shiftOperators, $shiftLeaders);
+
+            // 1.5) update row target sum to schedule
+            $rowTargets = $this->request->getPost('row_targets') ?? [];
+            if (!empty($rowTargets)) {
+                $this->syncRowTargets($db, $date, $rowTargets);
             }
 
-            $count = $this->finishShiftTransferFlowAllLt($db, $date, (int)$ltProcessId, $isAdmin);
+            // 2) update stock dari qty A
+            $this->syncMachiningWipStockFromHourly($db, $date);
 
-            if ($db->transStatus() === false) $this->dbFail($db, 'FinishShift transaction failed');
+            // 3) transfer flow 
+            $processed = $this->finishMachiningTransferFlow($db, $date, $forceAdmin);
 
+            if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
 
-            $msg = $isAdmin
-                ? "Finish Shift Leak Test OK (ADMIN override). Transferred rows: {$count}"
-                : "Finish Shift Leak Test OK. Transferred rows: {$count}";
-
-            return redirect()->back()->with('success', $msg);
+            return redirect()->back()->with(
+                'success',
+                'Finish Shift sukses. Transfer ke proses berikutnya selesai. (rows: '.$processed.')'
+            );
 
         } catch (\Throwable $e) {
             $db->transRollback();
@@ -480,211 +927,87 @@ class LeakTestDailyProductionController extends BaseController
         }
     }
 
-    /* =====================================================
-     * SYNC REALTIME
-     * ===================================================== */
-    private function syncLeakTestRealtime($db, string $date, int $shiftId, bool $forceAdmin = false): void
+    public function endDandori()
     {
-        if (!$db->tableExists('machining_leak_test_hourly')) return;
-        if (!$db->fieldExists('qty_ok', 'machining_leak_test_hourly')) return;
+        $db = db_connect();
+        $date       = $this->request->getPost('date');
+        $shiftId    = (int)$this->request->getPost('shift_id');
+        $machineId  = (int)$this->request->getPost('machine_id');
+        $timeSlotId = (int)$this->request->getPost('time_slot_id');
 
-        $rows = $db->table('daily_schedule_items dsi')
-            ->select('dsi.id AS dsi_id, dsi.machine_id, dsi.product_id, ds.process_id AS lt_process_id')
-            ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
-            ->where('ds.schedule_date', $date)
-            ->where('ds.shift_id', $shiftId)
-            ->groupStart()
-                ->where('ds.section', 'Leak Test')
-                ->orWhere('ds.section', 'LEAK TEST')
-            ->groupEnd()
-            ->get()->getResultArray();
-
-        if (!$rows) return;
-
-        $now = date('Y-m-d H:i:s');
-
-        $dsiHasQtyOk = $db->fieldExists('qty_ok', 'daily_schedule_items');
-        $dsiHasQtyA  = $db->fieldExists('qty_a', 'daily_schedule_items');
-
-        $w = $this->wipCols($db);
-
-        foreach ($rows as $r) {
-            $dsiId     = (int)$r['dsi_id'];
-            $machineId = (int)$r['machine_id'];
-            $productId = (int)$r['product_id'];
-            if ($dsiId <= 0 || $machineId <= 0 || $productId <= 0) continue;
-
-            $sumRow = $db->table('machining_leak_test_hourly')
-                ->select('SUM(qty_ok) AS ok_total')
-                ->where('production_date', $date)
-                ->where('shift_id', $shiftId)
-                ->where('machine_id', $machineId)
-                ->where('product_id', $productId)
-                ->get()->getRowArray();
-
-            $okTotal = (int)($sumRow['ok_total'] ?? 0);
-
-            if ($dsiHasQtyOk) {
-                $ok = $db->table('daily_schedule_items')->where('id', $dsiId)->update(['qty_ok' => $okTotal]);
-                if ($ok === false) $this->dbFail($db, 'Update daily_schedule_items.qty_ok');
-            } elseif ($dsiHasQtyA) {
-                $ok = $db->table('daily_schedule_items')->where('id', $dsiId)->update(['qty_a' => $okTotal]);
-                if ($ok === false) $this->dbFail($db, 'Update daily_schedule_items.qty_a');
-            }
-
-            $ltProcessId = (int)($r['lt_process_id'] ?? 0);
-            if ($ltProcessId <= 0) $ltProcessId = (int)($this->getProcessIdByCode($db, 'LT') ?? 0);
-            if ($ltProcessId <= 0) continue;
-
-            if (!$db->tableExists('production_wip')) continue;
-
-            $prevProcessId = $this->resolvePrevProcessIdActive($db, $productId, $ltProcessId);
-
-            $where = [
-                'production_date' => $date,
-                'product_id'      => $productId,
-                'to_process_id'   => $ltProcessId,
-                'source_table'    => 'daily_schedule_items',
-                'source_id'       => $dsiId,
-            ];
-
-            $exist = $db->table('production_wip')->where($where)->get()->getRowArray();
-
-            $payload = [
-                'from_process_id' => $prevProcessId,
-                'status'          => 'SCHEDULED',
-            ];
-            if ($w['qty_out'])    $payload['qty_out'] = $okTotal;
-            if ($w['stock'])      $payload['stock']   = $okTotal;
-            if ($w['updated_at']) $payload['updated_at'] = $now;
-
-            if ($exist) {
-                if (!$forceAdmin && strtoupper((string)($exist['status'] ?? '')) === 'DONE') continue;
-                $ok = $db->table('production_wip')->where('id', (int)$exist['id'])->update($payload);
-                if ($ok === false) $this->dbFail($db, 'Update production_wip inbound realtime');
-            } else {
-                $ins = $where + $payload;
-                if ($w['qty'])    $ins['qty'] = 0;
-                if ($w['qty_in']) $ins['qty_in'] = 0;
-                if ($w['created_at']) $ins['created_at'] = $now;
-                if ($w['updated_at']) $ins['updated_at'] = $now;
-
-                $ok = $db->table('production_wip')->insert($ins);
-                if (!$ok) $this->dbFail($db, 'Insert production_wip inbound realtime');
-            }
+        if (!$date || !$shiftId || !$machineId || !$timeSlotId) {
+            return $this->response->setJSON(['ok' => false, 'msg' => 'Invalid parameters']);
         }
+
+        $now = time();
+
+        $dandoriRecord = $db->table('machining_dandori')
+            ->where('dandori_date', $date)
+            ->where('shift_id', $shiftId)
+            ->where('machine_id', $machineId)
+            ->where('time_slot_id', $timeSlotId)
+            ->get()->getRowArray();
+
+        if (!$dandoriRecord) {
+            return $this->response->setJSON(['ok' => false, 'msg' => 'Dandori record not found']);
+        }
+
+        $slot = $db->table('time_slots')->where('id', $timeSlotId)->get()->getRowArray();
+        if (!$slot) {
+            return $this->response->setJSON(['ok' => false, 'msg' => 'Time slot not found']);
+        }
+
+        $prodDateISO = $date;
+        $startStr = substr((string)($slot['time_start'] ?? ''), 0, 5);
+        $startDate = date('Y-m-d H:i:s', strtotime("{$prodDateISO} {$startStr}:00"));
+        
+        $startHour = (int)date('H', strtotime($startDate));
+        if ($startHour >= 0 && $startHour < 7) {
+            $startDate = date('Y-m-d H:i:s', strtotime($startDate . ' +1 day'));
+        }
+
+        $startTs = strtotime($startDate);
+        if ($now <= $startTs) {
+            $diffMins = 0;
+        } else {
+            $diffMins = (int)floor(($now - $startTs) / 60);
+        }
+
+        // Limit the actual dandori minutes to the original scheduled minutes
+        $originalMins = (int)($dandoriRecord['dandori_minute'] ?? 0);
+        if ($diffMins > $originalMins) $diffMins = $originalMins;
+
+        $db->table('machining_dandori')
+            ->where('id', $dandoriRecord['id'])
+            ->update(['dandori_minute' => $diffMins]);
+
+        return $this->response->setJSON(['ok' => true, 'dandori_minute' => $diffMins, 'msg' => 'Dandori ended']);
     }
 
-    private function finishShiftTransferFlowAllLt($db, string $date, int $ltProcessId, bool $forceAdmin = false): int
+    private function syncRowTargets($db, string $date, array $rowTargets): void
     {
-        if (!$db->tableExists('production_wip')) return 0;
-
-        $w = $this->wipCols($db);
-        $now = date('Y-m-d H:i:s');
-
-        $inRows = $db->table('production_wip')
-            ->where('production_date', $date)
-            ->where('to_process_id', $ltProcessId)
-            ->groupStart()
-                ->whereIn('status', ['SCHEDULED','WAITING','IN_PROGRESS'])
-                ->orWhere('status IS NULL', null, false)
-            ->groupEnd()
-            ->orderBy('id', 'ASC')
-            ->get()->getResultArray();
-
-        if (!$inRows) return 0;
-
-        $processed = 0;
-        $byProduct = [];
-
-        foreach ($inRows as $r) {
-            $wipId     = (int)($r['id'] ?? 0);
-            $productId = (int)($r['product_id'] ?? 0);
-            if ($wipId <= 0 || $productId <= 0) continue;
-
-            if (!$forceAdmin && strtoupper((string)($r['status'] ?? '')) === 'DONE') continue;
-
-            $stockNow = $w['stock'] ? (int)($r['stock'] ?? 0) : 0;
-            $outNow   = $w['qty_out'] ? (int)($r['qty_out'] ?? 0) : 0;
-            $inNow    = $w['qty_in'] ? (int)($r['qty_in'] ?? 0) : 0;
-
-            $transferQty = max($stockNow, $outNow, $inNow);
-
-            $updA = ['status' => 'DONE'];
-            if ($w['qty_out']) $updA['qty_out'] = $transferQty;
-            if ($w['qty_in'])  $updA['qty_in']  = 0;
-            if ($w['stock'])   $updA['stock']   = 0;
-            if ($w['updated_at']) $updA['updated_at'] = $now;
-
-            $ok = $db->table('production_wip')->where('id', $wipId)->update($updA);
-            if ($ok === false) $this->dbFail($db, 'Update production_wip inbound DONE');
-
-            $processed++;
-
-            if ($transferQty <= 0) continue;
-
-            if (!isset($byProduct[$productId])) {
-                $nextProcessId = $this->resolveNextProcessByFlow($db, $productId, $ltProcessId) ?? 0;
-                $byProduct[$productId] = [
-                    'qty' => 0,
-                    'next_process_id' => (int)$nextProcessId,
-                    'source_wip_id' => $wipId,
-                ];
-            }
-            $byProduct[$productId]['qty'] += $transferQty;
-        }
-
-        foreach ($byProduct as $productId => $agg) {
-            $qty = (int)$agg['qty'];
-            $nextProcessId = (int)$agg['next_process_id'];
-            if ($qty <= 0 || $nextProcessId <= 0) continue;
-
-            $whereB = [
-                'production_date' => $date,
-                'product_id'      => $productId,
-                'from_process_id' => $ltProcessId,
-                'to_process_id'   => $nextProcessId,
-            ];
-
-            $existB = $db->table('production_wip')->where($whereB)->get()->getRowArray();
-
-            if ($existB) {
-                $updB = ['status' => 'WAITING'];
-                if ($w['updated_at']) $updB['updated_at'] = $now;
-
-                if ($w['qty_in']) {
-                    $oldIn = (int)($existB['qty_in'] ?? 0);
-                    $updB['qty_in'] = $oldIn + $qty;
+        foreach ($rowTargets as $key => $sumTarget) {
+            $parts = explode('_', $key);
+            if (count($parts) === 3) {
+                $sId = (int)$parts[0];
+                $mId = (int)$parts[1];
+                $pId = (int)$parts[2];
+                
+                $dsRows = $db->table('daily_schedules')
+                    ->select('id')
+                    ->where('schedule_date', $date)
+                    ->where('shift_id', $sId)
+                    ->get()->getResultArray();
+                    
+                $dsIds = array_column($dsRows, 'id');
+                if (!empty($dsIds)) {
+                    $db->table('daily_schedule_items')
+                        ->whereIn('daily_schedule_id', $dsIds)
+                        ->where('machine_id', $mId)
+                        ->where('product_id', $pId)
+                        ->update(['target_per_shift' => (int)$sumTarget]);
                 }
-                if ($w['qty_out']) {
-                    $oldOut = (int)($existB['qty_out'] ?? 0);
-                    $updB['qty_out'] = $oldOut + $qty;
-                }
-                if ($w['stock']) {
-                    $oldStock = (int)($existB['stock'] ?? 0);
-                    $updB['stock'] = $oldStock + $qty;
-                }
-
-                $ok = $db->table('production_wip')->where('id', (int)$existB['id'])->update($updB);
-                if ($ok === false) $this->dbFail($db, 'Update production_wip outbound WAITING');
-            } else {
-                $insB = $whereB + ['status' => 'WAITING'];
-                if ($w['qty']) $insB['qty'] = 0;
-                if ($w['qty_in'])  $insB['qty_in']  = $qty;
-                if ($w['qty_out']) $insB['qty_out'] = $qty;
-                if ($w['stock'])   $insB['stock']   = $qty;
-
-                if ($w['source_table']) $insB['source_table'] = 'production_wip';
-                if ($w['source_id'])    $insB['source_id'] = (int)($agg['source_wip_id'] ?? null);
-
-                if ($w['created_at']) $insB['created_at'] = $now;
-                if ($w['updated_at']) $insB['updated_at'] = $now;
-
-                $ok = $db->table('production_wip')->insert($insB);
-                if (!$ok) $this->dbFail($db, 'Insert production_wip outbound WAITING');
             }
         }
-
-        return $processed;
     }
 }

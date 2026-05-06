@@ -6,22 +6,22 @@ use App\Controllers\BaseController;
 
 class DailyScheduleController extends BaseController
 {
-    private function getProcessIdMachining($db): int
+    private function getProcessIdByCategory($db, string $category): int
     {
         $row = $db->table('production_processes')
             ->select('id')
-            ->where('process_name', 'Machining')
+            ->where('process_name', $category)
             ->get()
             ->getRowArray();
 
-        if (!$row) throw new \Exception('Process "Machining" belum ada di master production_processes');
+        if (!$row) throw new \Exception('Process "' . $category . '" belum ada di master production_processes');
         return (int)$row['id'];
     }
 
     private function getTotalSecondShift($db, int $shiftId, ?int $endSlotId = null): int
     {
         $slots = $db->table('shift_time_slots sts')
-            ->select('ts.id, ts.time_start, ts.time_end')
+            ->select('ts.id, ts.time_start, ts.time_end, sts.is_break')
             ->join('time_slots ts', 'ts.id = sts.time_slot_id')
             ->where('sts.shift_id', $shiftId)
             ->orderBy('sts.id', 'ASC')
@@ -33,7 +33,10 @@ class DailyScheduleController extends BaseController
             $start = strtotime($s['time_start']);
             $end   = strtotime($s['time_end']);
             if ($end <= $start) $end += 86400; // Lewat tengah malam
-            $totalSecond += ($end - $start);
+            
+            if (empty($s['is_break'])) {
+                $totalSecond += ($end - $start);
+            }
 
             if ($endSlotId !== null && (int)$s['id'] === $endSlotId) {
                 break; // Stop perhitungan jika ini adalah slot terakhir shift yang disetel
@@ -47,32 +50,50 @@ class DailyScheduleController extends BaseController
         $db   = db_connect();
         $date = $this->request->getGet('date') ?? date('Y-m-d', strtotime('+1 day'));
         
-        $processIdMC = $this->getProcessIdMachining($db);
+        // Auto-add kolom active_slot_ids dan slot_custom_times ke daily_schedule_items jika belum ada
+        if (!$db->fieldExists('active_slot_ids', 'daily_schedule_items')) {
+            try { $db->query("ALTER TABLE daily_schedule_items ADD COLUMN active_slot_ids TEXT NULL AFTER end_time_slot_id"); } catch (\Throwable $e) {}
+        }
+        if (!$db->fieldExists('slot_custom_times', 'daily_schedule_items')) {
+            try { $db->query("ALTER TABLE daily_schedule_items ADD COLUMN slot_custom_times TEXT NULL AFTER active_slot_ids"); } catch (\Throwable $e) {}
+        }
+
+        $category = $this->request->getGet('category') ?? 'Machining';
+        $processIdMC = $this->getProcessIdByCategory($db, $category);
+
+        // Ambil process code dari category untuk filter shift
+        $processRow = $db->table('production_processes')
+            ->select('process_code')
+            ->where('process_name', $category)
+            ->get()->getRowArray();
+        $processCode = $processRow['process_code'] ?? 'MC';
 
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
             ->where('is_active', 1)
-            ->like('shift_name', 'MC')
+            ->where('day_group', $this->getDayGroup($date))
+            ->like('shift_name', $processCode)
             ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
             ->get()
             ->getResultArray();
 
-        // Ambil Data Header Schedule untuk mengetahui Waktu Berakhir (End Slot) yang tersimpan
-        $dailySchedules = $db->table('daily_schedules')
-            ->where('schedule_date', $date)
-            ->where('section', 'Machining')
-            ->get()->getResultArray();
-            
-        $shiftEndSlots = [];
-        foreach ($dailySchedules as $ds) {
-            $shiftEndSlots[$ds['shift_id']] = $ds['end_time_slot_id'];
+        // Fallback: kalau tidak ada shift untuk process code ini, pakai shift MC
+        if (empty($shifts)) {
+            $shifts = $db->table('shifts')
+                ->select('id, shift_code, shift_name')
+                ->where('is_active', 1)
+                ->where('day_group', $this->getDayGroup($date))
+                ->like('shift_name', 'MC')
+                ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
+                ->get()
+                ->getResultArray();
         }
 
         // Susun Time Slots per Shift
         $shiftSlots = [];
         foreach ($shifts as &$shift) {
             $slots = $db->table('shift_time_slots sts')
-                ->select('ts.id as time_slot_id, ts.time_start, ts.time_end')
+                ->select('ts.id as time_slot_id, ts.time_start, ts.time_end, sts.is_break')
                 ->join('time_slots ts', 'ts.id = sts.time_slot_id')
                 ->where('sts.shift_id', (int)$shift['id'])
                 ->orderBy('sts.id', 'ASC')
@@ -85,9 +106,14 @@ class DailyScheduleController extends BaseController
                 if ($end <= $start) $end += 86400;
                 $secs = ($end - $start);
                 
-                $s['seconds'] = $secs;
+                if (!empty($s['is_break'])) {
+                    $s['seconds'] = 0;
+                } else {
+                    $s['seconds'] = $secs;
+                    $totalSecond += $secs;
+                }
+                
                 $s['label']   = substr($s['time_start'], 0, 5) . ' - ' . substr($s['time_end'], 0, 5);
-                $totalSecond += $secs;
             }
             $shift['total_second'] = $totalSecond;
             $shiftSlots[$shift['id']] = $slots;
@@ -97,16 +123,28 @@ class DailyScheduleController extends BaseController
         $machines = $db->table('machines m')
             ->select('m.id, m.machine_code, m.machine_name, m.line_position')
             ->join('production_processes pp', 'pp.id = m.process_id')
-            ->where('pp.process_name', 'Machining')
+            ->where('pp.process_name', $category)
             ->orderBy('m.line_position')
             ->get()
             ->getResultArray();
+
+        // Fallback: jika tidak ada mesin untuk kategori ini, tampilkan mesin Machining
+        if (empty($machines) && $category !== 'Machining') {
+            $machines = $db->table('machines m')
+                ->select('m.id, m.machine_code, m.machine_name, m.line_position')
+                ->join('production_processes pp', 'pp.id = m.process_id')
+                ->where('pp.process_name', 'Machining')
+                ->orderBy('m.line_position')
+                ->get()
+                ->getResultArray();
+        }
 
         $existing = $db->table('daily_schedule_items dsi')
             ->select('ds.shift_id, dsi.machine_id, dsi.product_id, dsi.cycle_time, dsi.target_per_shift')
             ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
             ->where('ds.schedule_date', $date)
-            ->where('ds.section', 'Machining')
+            ->where('ds.section', $category)
+            ->orderBy('dsi.id', 'ASC')
             ->get()
             ->getResultArray();
 
@@ -140,7 +178,58 @@ class DailyScheduleController extends BaseController
         
         $dandoriMap = [];
         foreach ($dandoriRecords as $d) {
-            $dandoriMap[$d['shift_id']][$d['machine_id']][$d['product_id']] = $d['time_slot_id'];
+            $sId = (int)$d['shift_id'];
+            $mId = (int)$d['machine_id'];
+            $pId = (int)$d['product_id'];
+            
+            if (!isset($dandoriMap[$sId][$mId][$pId])) {
+                $dandoriMap[$sId][$mId][$pId] = [
+                    'time_slot_ids' => [],
+                    'slot_minutes'  => [],
+                ];
+            }
+            if (!empty($d['time_slot_id'])) {
+                $slotId = (int)$d['time_slot_id'];
+                $dandoriMap[$sId][$mId][$pId]['time_slot_ids'][] = $slotId;
+                $dandoriMap[$sId][$mId][$pId]['slot_minutes'][] = [
+                    'slot_id' => $slotId,
+                    'minute'  => (int)($d['dandori_minute'] ?? 0),
+                ];
+            }
+        }
+
+        // Active Slot IDs + Custom Times per machine per shift
+        $activeSlotMap = [];
+        $slotCustomTimesMap = [];
+        $mapCount = [];
+        $hasSlotCustomCol = $db->fieldExists('slot_custom_times', 'daily_schedule_items');
+        $slotSelect = 'dsi.shift_id, dsi.machine_id, dsi.active_slot_ids';
+        if ($hasSlotCustomCol) $slotSelect .= ', dsi.slot_custom_times';
+        $existingSlots = $db->table('daily_schedule_items dsi')
+            ->select($slotSelect)
+            ->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id')
+            ->where('ds.schedule_date', $date)
+            ->where('ds.section', $category)
+            ->orderBy('dsi.id', 'ASC')
+            ->get()->getResultArray();
+            
+        foreach ($existingSlots as $e) {
+            $sId = (int)($e['shift_id'] ?? 0);
+            if ($sId <= 0) continue;
+            $mId = (int)$e['machine_id'];
+            
+            if (!isset($mapCount[$sId][$mId])) {
+                $mapCount[$sId][$mId] = 0;
+            }
+            $idx = $mapCount[$sId][$mId];
+
+            $raw = $e['active_slot_ids'] ?? null;
+            $activeSlotMap[$sId][$mId][$idx] = $raw ? array_map('intval', explode(',', $raw)) : null;
+            if ($hasSlotCustomCol) {
+                $slotCustomTimesMap[$sId][$mId][$idx] = $e['slot_custom_times'] ?? null;
+            }
+            
+            $mapCount[$sId][$mId]++;
         }
 
         // Cek Role Admin
@@ -148,15 +237,18 @@ class DailyScheduleController extends BaseController
         $isAdmin = (strtoupper($role) === 'ADMIN');
 
         return view('machining/schedule/index', [
-            'date'          => $date,
-            'shifts'        => $shifts,
-            'shiftSlots'    => $shiftSlots,
-            'shiftEndSlots' => $shiftEndSlots,
-            'machines'      => $machines,
-            'planMap'       => $planMap,
-            'actualMap'     => $actualMap,
-            'dandoriMap'    => $dandoriMap,
-            'isAdmin'       => $isAdmin // Pass ke view
+            'category'           => $category,
+            'processCode'        => $processCode,
+            'date'               => $date,
+            'shifts'             => $shifts,
+            'shiftSlots'         => $shiftSlots,
+            'machines'           => $machines,
+            'planMap'            => $planMap,
+            'actualMap'          => $actualMap,
+            'dandoriMap'         => $dandoriMap,
+            'activeSlotMap'      => $activeSlotMap,
+            'slotCustomTimesMap' => $slotCustomTimesMap,
+            'isAdmin'            => $isAdmin
         ]);
     }
 
@@ -169,7 +261,8 @@ class DailyScheduleController extends BaseController
 
         if ($shiftId <= 0) return $this->response->setJSON([]);
 
-        $processIdMC = $this->getProcessIdMachining($db);
+        $category = $this->request->getGet('category') ?? 'Machining';
+        $processIdMC = $this->getProcessIdByCategory($db, $category);
         $hasCtMach   = $db->fieldExists('cycle_time_machining', 'products');
 
         $totalSecond = $this->getTotalSecondShift($db, $shiftId);
@@ -185,6 +278,22 @@ class DailyScheduleController extends BaseController
             ->orderBy('p.part_no', 'ASC')
             ->get()
             ->getResultArray();
+
+        // Fallback: jika kategori khusus tidak ada produk, gunakan produk dari Machining
+        if (empty($products) && $category !== 'Machining') {
+            $machiningProcessId = $this->getProcessIdByCategory($db, 'Machining');
+            $products = $db->table('product_process_flows ppf')
+                ->select('p.id, p.part_no, p.part_name, p.cavity, p.efficiency_rate'
+                    . ($hasCtMach ? ', p.cycle_time_machining' : ', p.cycle_time'))
+                ->join('products p', 'p.id = ppf.product_id')
+                ->where('ppf.is_active', 1)
+                ->where('p.is_active', 1)
+                ->where('ppf.process_id', $machiningProcessId)
+                ->groupBy('p.id')
+                ->orderBy('p.part_no', 'ASC')
+                ->get()
+                ->getResultArray();
+        }
 
         foreach ($products as &$p) {
             $cycle  = $hasCtMach ? (int)($p['cycle_time_machining'] ?? 0) : (int)($p['cycle_time'] ?? 0);
@@ -323,15 +432,20 @@ class DailyScheduleController extends BaseController
     {
         $db    = db_connect();
         $date  = trim((string)$this->request->getPost('date'));
-        $items = $this->request->getPost('items');
+        // Support JSON-consolidated items to bypass max_input_vars limit
+        $itemsJson = $this->request->getPost('items_json');
+        if ($itemsJson) {
+            $items = json_decode($itemsJson, true);
+        } else {
+            $items = $this->request->getPost('items');
+        }
         
-        $shiftEndSlots = $this->request->getPost('shift_end_slots') ?? [];
-
         if ($date === '' || !$items || !is_array($items)) {
             return redirect()->back()->with('error', 'Data tidak valid');
         }
 
-        $processIdMC   = $this->getProcessIdMachining($db);
+        $category = trim((string)$this->request->getPost('category')) ?: 'Machining';
+        $processIdMC = $this->getProcessIdByCategory($db, $category);
         $hasCtMach     = $db->fieldExists('cycle_time_machining', 'products');
         $hasEndSlotCol = $db->fieldExists('end_time_slot_id', 'daily_schedules');
         $now           = date('Y-m-d H:i:s');
@@ -353,23 +467,45 @@ class DailyScheduleController extends BaseController
 
                 if ($shiftId <= 0 || $machineId <= 0 || $productId <= 0) continue;
                 
-                $endSlotId = !empty($shiftEndSlots[$shiftId]) ? (int)$shiftEndSlots[$shiftId] : null;
+                $endSlotId = !empty($row['end_time_slot_id']) ? (int)$row['end_time_slot_id'] : null;
 
-                // Cek Isian Dandori
+                // Cek Isian Dandori (format slot_data baru)
                 $isDandori = isset($row['is_dandori']) && $row['is_dandori'] == 1;
-                $dandoriTimeSlotId = (!empty($row['dandori_time_slot_id'])) ? (int)$row['dandori_time_slot_id'] : null;
 
-                // Insert ke tabel Machining Dandori jika dicentang
+                // Insert ke tabel Machining Dandori dengan format slot_data baru
                 if ($isDandori && $db->tableExists('machining_dandori')) {
-                    $db->table('machining_dandori')->insert([
-                        'dandori_date' => $date, 
-                        'shift_id'     => $shiftId, 
-                        'machine_id'   => $machineId,
-                        'product_id'   => $productId, 
-                        'time_slot_id' => $dandoriTimeSlotId,
-                        'activity'     => 'Setup/Dandori Preparation', 
-                        'created_at'   => $now
-                    ]);
+                    $slotData = $row['slot_data'] ?? [];
+                    $hasAnySlot = false;
+
+                    foreach ($slotData as $tsId => $slotInfo) {
+                        if (empty($slotInfo['selected'])) continue;
+                        $tsId = (int)$tsId;
+                        $dandoriMinute = (int)($slotInfo['minute'] ?? 0);
+                        $db->table('machining_dandori')->insert([
+                            'dandori_date'   => $date,
+                            'shift_id'       => $shiftId,
+                            'machine_id'     => $machineId,
+                            'product_id'     => $productId,
+                            'time_slot_id'   => $tsId,
+                            'dandori_minute' => $dandoriMinute,
+                            'activity'       => 'Dandori',
+                            'created_at'     => $now
+                        ]);
+                        $hasAnySlot = true;
+                    }
+
+                    if (!$hasAnySlot) {
+                        $db->table('machining_dandori')->insert([
+                            'dandori_date'   => $date,
+                            'shift_id'       => $shiftId,
+                            'machine_id'     => $machineId,
+                            'product_id'     => $productId,
+                            'time_slot_id'   => null,
+                            'dandori_minute' => 0,
+                            'activity'       => 'Dandori',
+                            'created_at'     => $now
+                        ]);
+                    }
                 }
 
                 // Jika target = 0 dan tidak ada dandori, tidak usah dijadwalkan
@@ -380,7 +516,7 @@ class DailyScheduleController extends BaseController
                     ->where([
                         'schedule_date' => $date, 
                         'shift_id'      => $shiftId, 
-                        'section'       => 'Machining',
+                        'section'       => $category,
                         'process_id'    => $processIdMC
                     ])
                     ->get()->getRowArray();
@@ -390,18 +526,18 @@ class DailyScheduleController extends BaseController
                         'schedule_date' => $date,
                         'process_id'    => $processIdMC, 
                         'shift_id'      => $shiftId,
-                        'section'       => 'Machining',
+                        'section'       => $category,
                         'is_completed'  => 0,
                         'created_at'    => $now
                     ];
-                    if ($hasEndSlotCol) $insertData['end_time_slot_id'] = $endSlotId;
+                    // We no longer set end_time_slot_id to schedule (header)
                     
                     $db->table('daily_schedules')->insert($insertData);
                     $scheduleId = (int)$db->insertID();
                 } else {
                     $scheduleId = (int)$schedule['id'];
                     $updateData = ['updated_at' => $now];
-                    if ($hasEndSlotCol) $updateData['end_time_slot_id'] = $endSlotId;
+                    // We no longer set end_time_slot_id to schedule (header)
                     
                     $db->table('daily_schedules')->where('id', $scheduleId)->update($updateData);
                 }
@@ -420,8 +556,10 @@ class DailyScheduleController extends BaseController
                 $oldPlan = $existItem ? (int)($existItem['target_per_shift'] ?? 0) : 0;
                 $isPlanChanged = (!$existItem) || ($oldPlan !== $planInput);
 
-                // --- LOG JADWAL KE WIP ---
-                if ($isPlanChanged) {
+                // --- LOG JADWAL KE WIP (hanya untuk category Machining) ---
+                // Untuk kategori proses khusus (Leak Test, Assy Bushing, dll), WIP dikelola oleh
+                // masing-masing hourly controller saat operator input data produksi.
+                if ($isPlanChanged && $category === 'Machining') {
                     $wipNew = $db->table('production_wip')
                                  ->where(['product_id' => $productId, 'to_process_id' => $processIdMC])
                                  ->orderBy('id', 'DESC')->limit(1)->get()->getRowArray();
@@ -448,6 +586,10 @@ class DailyScheduleController extends BaseController
                 $cavity  = (int)($product['cavity'] ?? 0);
                 $targetHour = ($cycle > 0) ? (int)floor((3600 / $cycle) * $cavity * (($product['efficiency_rate']??100)/100)) : 0;
 
+                // Simpan active_slot_ids per mesin
+                $activeSlotIds = !empty($row['active_slot_ids']) ? (string)$row['active_slot_ids'] : null;
+                $slotCustomTimes = !empty($row['slot_custom_times']) ? (string)$row['slot_custom_times'] : null;
+
                 $activeSchedules[$scheduleId][] = [
                     'daily_schedule_id' => $scheduleId,
                     'shift_id'          => $shiftId,
@@ -457,7 +599,10 @@ class DailyScheduleController extends BaseController
                     'cavity'            => $cavity,
                     'target_per_hour'   => $targetHour,
                     'target_per_shift'  => $planInput,
-                    'is_selected'       => 1
+                    'is_selected'       => 1,
+                    'end_time_slot_id'  => null,
+                    'active_slot_ids'   => $activeSlotIds,
+                    'slot_custom_times' => $slotCustomTimes,
                 ];
             }
 
@@ -474,7 +619,7 @@ class DailyScheduleController extends BaseController
             }
             
             $db->transCommit();
-            return redirect()->back()->with('success', 'Jadwal Machining berhasil disimpan.');
+            return redirect()->back()->with('success', 'Jadwal ' . $category . ' berhasil disimpan.');
 
         } catch (\Throwable $e) {
             $db->transRollback();
@@ -496,7 +641,8 @@ class DailyScheduleController extends BaseController
         $m = (int)date('n', $ts);
         $titleDate = date('d', $ts) . ' ' . ($bulan[$m] ?? date('M',$ts)) . ' ' . date('Y', $ts);
 
-        $processIdMC = $this->getProcessIdMachining($db);
+        $category = $this->request->getGet('category') ?? 'Machining';
+        $processIdMC = $this->getProcessIdByCategory($db, $category);
 
         $productData = [];
 
@@ -537,6 +683,7 @@ class DailyScheduleController extends BaseController
         });
 
         return view('machining/schedule/inventory', [
+            'category'    => $category,
             'date'        => $date,
             'titleDate'   => $titleDate,
             'isAdmin'     => $isAdmin,

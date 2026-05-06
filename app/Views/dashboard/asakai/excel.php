@@ -51,22 +51,37 @@
             <?php else: ?>
                 <?php foreach ($summaryData as $sectionName => $products): ?>
                     <?php 
-                        $rowspan = count($products) > 0 ? count($products) : 1; 
-                        $firstRow = true;
+                        $rowspan = count($products) > 0 ? count($products) + 2 : 2; 
                     ?>
                     
+                    <tr>
+                        <td class="section-name" rowspan="<?= $rowspan ?>"><?= esc($sectionName) ?></td>
+                        <td class="part-name"><strong>Nama Operator</strong></td>
+                        <?php foreach ($shifts as $shift): 
+                            $opStr = $operatorData[$sectionName][$shift['id']] ?? '-';
+                        ?>
+                            <td colspan="3" style="font-weight:bold; color:blue;"><?= esc($opStr ?: '-') ?></td>
+                        <?php endforeach; ?>
+                        <td colspan="3" class="total-col"></td>
+                    </tr>
+                    
+                    <tr>
+                        <td class="part-name"><strong>Nama Leader</strong></td>
+                        <?php foreach ($shifts as $shift): 
+                            $ldStr = $leaderData[$sectionName][$shift['id']] ?? '-';
+                        ?>
+                            <td colspan="3" style="font-weight:bold; color:green;"><?= esc($ldStr ?: '-') ?></td>
+                        <?php endforeach; ?>
+                        <td colspan="3" class="total-col"></td>
+                    </tr>
+
                     <?php if(empty($products)): ?>
                         <tr>
-                            <td class="section-name"><?= esc($sectionName) ?></td>
                             <td colspan="<?= (count($shifts) * 3) + 4 ?>">Tidak ada product di section ini hari ini</td>
                         </tr>
                     <?php else: ?>
                         <?php foreach ($products as $prod): ?>
                             <tr>
-                                <?php if ($firstRow): ?>
-                                    <td class="section-name" rowspan="<?= $rowspan ?>"><?= esc($sectionName) ?></td>
-                                    <?php $firstRow = false; ?>
-                                <?php endif; ?>
 
                                 <td class="part-name">
                                     <strong><?= esc($prod['part_no']) ?></strong><br>

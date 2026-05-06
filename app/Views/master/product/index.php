@@ -199,7 +199,8 @@
             <th style="width:120px;" class="num">Ascas (gr)</th>
             <th style="width:120px;" class="num">Runner (gr)</th>
             <th style="width:140px;" class="num">Die Casting (gr)</th>
-            <th style="width:140px;" class="num">Machining (gr)</th>
+            <th style="width:140px;" class="num">Shot Weight (gr)</th>
+            <th style="width:140px;" class="num">Machining (kg)</th>
             <th style="width:110px;" class="ctr">CT DC (sec)</th>
             <th style="width:130px;" class="ctr">CT Mach (sec)</th>
             <th style="width:90px;" class="ctr">Cavity</th>
@@ -231,7 +232,8 @@
               <td class="num"><?= number_format($asc, 0) ?></td>
               <td class="num"><?= number_format($run, 0) ?></td>
               <td class="num"><?= number_format($die, 0) ?></td>
-              <td class="num"><?= number_format((float)($p['weight_machining'] ?? 0), 0) ?></td>
+              <td class="num"><?= number_format((float)($p['shot_weight'] ?? 0), 0) ?></td>
+              <td class="num"><?= number_format((float)($p['weight_machining'] ?? 0), 2) ?></td>
               <td class="ctr"><?= esc($p['cycle_time'] ?? 0) ?></td>
               <td class="ctr"><?= esc($p['cycle_time_machining'] ?? 0) ?></td>
               <td class="ctr"><?= esc($p['cavity'] ?? 0) ?></td>
@@ -250,6 +252,7 @@
                   data-customer_id="<?= esc($p['customer_id'] ?? '', 'attr') ?>"
                   data-weight_ascas="<?= esc($p['weight_ascas'] ?? 0, 'attr') ?>"
                   data-weight_runner="<?= esc($p['weight_runner'] ?? 0, 'attr') ?>"
+                  data-shot_weight="<?= esc($p['shot_weight'] ?? 0, 'attr') ?>"
                   data-weight_machining="<?= esc($p['weight_machining'] ?? 0, 'attr') ?>"
                   data-cycle_time="<?= esc($p['cycle_time'] ?? 0, 'attr') ?>"
                   data-cycle_time_machining="<?= esc($p['cycle_time_machining'] ?? 0, 'attr') ?>"
@@ -345,7 +348,12 @@
             </div>
 
             <div class="row-item">
-              <label>Weight (Machining)</label>
+              <label>Shot Weight (gr)</label>
+              <input type="number" step="1" name="shot_weight" class="form-control" value="0">
+            </div>
+
+            <div class="row-item">
+              <label>Weight (Machining - kg)</label>
               <input type="number" step="0.01" name="weight_machining" class="form-control" value="0">
             </div>
 
@@ -445,7 +453,12 @@
             </div>
 
             <div class="row-item">
-              <label>Weight (Machining)</label>
+              <label>Shot Weight (gr)</label>
+              <input type="number" step="1" id="edit_shot_weight" name="shot_weight" class="form-control" value="0">
+            </div>
+
+            <div class="row-item">
+              <label>Weight (Machining - kg)</label>
               <input type="number" step="0.01" id="edit_weight_machining" name="weight_machining" class="form-control" value="0">
             </div>
 
@@ -523,6 +536,7 @@
           er.value = d.weight_runner || 0;
           calcDieCasting(ea, er, ed);
 
+          document.getElementById('edit_shot_weight').value = d.shot_weight || 0;
           document.getElementById('edit_weight_machining').value = d.weight_machining || 0;
           document.getElementById('edit_cycle_time').value = d.cycle_time || 0;
           document.getElementById('edit_cycle_time_machining').value = d.cycle_time_machining || 0;

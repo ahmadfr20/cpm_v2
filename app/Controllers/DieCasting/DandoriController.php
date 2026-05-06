@@ -14,6 +14,7 @@ class DandoriController extends BaseController
         // 1. Ambil Data Shift Die Casting
         $shifts = $db->table('shifts')
             ->where('is_active', 1)
+            ->where('day_group', $this->getDayGroup($date))
             ->like('shift_name', 'DC')
             ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
             ->get()->getResultArray();
@@ -58,10 +59,24 @@ class DandoriController extends BaseController
                 ->get()->getResultArray();
         }
 
-        // 5. Kelompokkan Data Dandori berdasarkan shift
+        // 5. Kelompokkan Data Dandori berdasarkan shift dan setup unik
         $map = [];
         foreach ($dandoriRecords as $d) {
-            $map[$d['shift_id']][] = $d;
+            $key = $d['shift_id'] . '_' . $d['machine_id'] . '_' . $d['product_id'] . '_' . md5($d['activity']);
+            
+            if (!isset($map[$d['shift_id']][$key])) {
+                $d['time_slot_ids'] = [];
+                $d['slot_minutes']  = []; // [ ['slot_id'=>X,'minute'=>Y], ... ]
+                $map[$d['shift_id']][$key] = $d;
+            }
+            if (!empty($d['time_slot_id'])) {
+                $slotId = (int)$d['time_slot_id'];
+                $map[$d['shift_id']][$key]['time_slot_ids'][] = $slotId;
+                $map[$d['shift_id']][$key]['slot_minutes'][] = [
+                    'slot_id' => $slotId,
+                    'minute'  => (int)($d['dandori_minute'] ?? 0),
+                ];
+            }
         }
 
         return view('die_casting/dandori/index', [
@@ -98,85 +113,53 @@ class DandoriController extends BaseController
                 foreach ($items as $row) {
                     if (empty($row['shift_id']) || empty($row['machine_id']) || empty($row['product_id'])) continue;
 
-                    $shiftId    = (int)$row['shift_id'];
-                    $machineId  = (int)$row['machine_id'];
-                    $productId  = (int)$row['product_id'];
-                    $timeSlotId = !empty($row['time_slot_id']) ? (int)$row['time_slot_id'] : null;
-                    $activity   = $row['activity'] ?? 'Setup/Dandori Preparation';
+                    $shiftId   = (int)$row['shift_id'];
+                    $machineId = (int)$row['machine_id'];
+                    $productId = (int)$row['product_id'];
+                    $activity  = $row['activity'] ?? 'Setup/Dandori Preparation';
 
-                    // Validasi Duplikasi: 1 Mesin tidak boleh ada 2 setup di jam yang sama
-                    if ($timeSlotId) {
+                    // Format baru: slot_data[slot_id][selected] + slot_data[slot_id][minute]
+                    $slotData = $row['slot_data'] ?? [];
+
+                    $hasAnySlot = false;
+                    foreach ($slotData as $timeSlotId => $slotInfo) {
+                        if (empty($slotInfo['selected'])) continue; // tidak dicentang
+
+                        $timeSlotId    = (int)$timeSlotId;
+                        $dandoriMinute = (int)($slotInfo['minute'] ?? 0);
+
+                        // Validasi Duplikasi
                         $dupKey = $shiftId . '_' . $machineId . '_' . $timeSlotId;
                         if (isset($checkDuplicate[$dupKey])) {
-                            throw new \Exception("Duplikasi data! Mesin tidak dapat disetup 2 kali pada slot waktu yang sama.");
+                            throw new \Exception("Duplikasi data! Mesin ". $machineId ." tidak dapat disetup lebih dari 1 kali pada slot waktu yang sama.");
                         }
                         $checkDuplicate[$dupKey] = true;
+
+                        $db->table('die_casting_dandori')->insert([
+                            'dandori_date'   => $date,
+                            'shift_id'       => $shiftId,
+                            'machine_id'     => $machineId,
+                            'product_id'     => $productId,
+                            'time_slot_id'   => $timeSlotId,
+                            'dandori_minute' => $dandoriMinute,
+                            'activity'       => $activity,
+                            'created_at'     => date('Y-m-d H:i:s'),
+                        ]);
+                        $hasAnySlot = true;
                     }
 
-                    $db->table('die_casting_dandori')->insert([
-                        'dandori_date' => $date,
-                        'shift_id'     => $shiftId,
-                        'machine_id'   => $machineId,
-                        'product_id'   => $productId,
-                        'time_slot_id' => $timeSlotId,
-                        'activity'     => $activity,
-                        'created_at'   => date('Y-m-d H:i:s'),
-                    ]);
-
-                    // ─── Sinkronisasi Time Slot ke die_casting_hourly ─────────────────
-                    if ($timeSlotId) {
-                        $allSlots = $db->query(
-                            "SELECT ts.id AS time_slot_id, ts.time_start, ts.time_end
-                             FROM shift_time_slots sts
-                             JOIN time_slots ts ON ts.id = sts.time_slot_id
-                             WHERE sts.shift_id = ?
-                             ORDER BY ts.time_start ASC, ts.id ASC",
-                            [$shiftId]
-                        )->getResultArray();
-
-                        $passedDandori = false;
-                        foreach ($allSlots as $slot) {
-                            $slotId = (int)$slot['time_slot_id'];
-
-                            if ($slotId === $timeSlotId) {
-                                // ── Tandai slot ini sebagai DANDORI ──
-                                $existDan = $db->table('die_casting_hourly')
-                                    ->where('production_date', $date)
-                                    ->where('shift_id', $shiftId)
-                                    ->where('time_slot_id', $slotId)
-                                    ->where('machine_id', $machineId)
-                                    ->get()->getRowArray();
-
-                                $dandoriData = [
-                                    'production_date' => $date,
-                                    'shift_id'        => $shiftId,
-                                    'time_slot_id'    => $slotId,
-                                    'machine_id'      => $machineId,
-                                    'product_id'      => $productId,
-                                    'qty_fg'          => 0,
-                                    'qty_ng'          => 0,
-                                    'is_dandori'      => 1,
-                                    'dandori_label'   => $activity,
-                                ];
-                                if ($existDan) {
-                                    $db->table('die_casting_hourly')->where('id', $existDan['id'])->update($dandoriData);
-                                } else {
-                                    $db->table('die_casting_hourly')->insert($dandoriData);
-                                }
-                                $passedDandori = true;
-
-                            } elseif ($passedDandori) {
-                                // ── Slot sesudah Dandori: hapus baris produk LAMA (bukan produk baru) ──
-                                $db->table('die_casting_hourly')
-                                    ->where('production_date', $date)
-                                    ->where('shift_id', $shiftId)
-                                    ->where('time_slot_id', $slotId)
-                                    ->where('machine_id', $machineId)
-                                    ->where('product_id !=', $productId)
-                                    ->where('is_dandori', 0)
-                                    ->delete();
-                            }
-                        }
+                    // Jika tidak ada slot dicentang, insert tanpa slot
+                    if (!$hasAnySlot) {
+                        $db->table('die_casting_dandori')->insert([
+                            'dandori_date'   => $date,
+                            'shift_id'       => $shiftId,
+                            'machine_id'     => $machineId,
+                            'product_id'     => $productId,
+                            'time_slot_id'   => null,
+                            'dandori_minute' => 0,
+                            'activity'       => $activity,
+                            'created_at'     => date('Y-m-d H:i:s'),
+                        ]);
                     }
 
                     // ─── Maintain die_casting_production (plan record) ────────────────

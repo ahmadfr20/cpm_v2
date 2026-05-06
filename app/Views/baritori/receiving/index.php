@@ -1,8 +1,16 @@
 <?= $this->extend('layout/layout') ?>
 <?= $this->section('content') ?>
 
-<h4 class="mb-2 fw-bold">BARITORI</h4>
-<h5 class="mb-4 text-muted">RECEIVING FROM VENDOR</h5>
+<div class="d-flex justify-content-between align-items-center mb-4">
+  <div>
+    <h4 class="mb-2 fw-bold">BARITORI</h4>
+    <h5 class="mb-0 text-muted">RECEIVING FROM VENDOR</h5>
+  </div>
+  <form method="get" action="<?= site_url('/baritori/receiving') ?>" class="d-flex align-items-center gap-2">
+    <label for="date" class="fw-bold mb-0">Tanggal:</label>
+    <input type="date" name="date" id="date" class="form-control form-control-sm" value="<?= esc($date) ?>" onchange="this.form.submit()" style="width: 150px;">
+  </form>
+</div>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success"><?= esc(session()->getFlashdata('success')) ?></div>

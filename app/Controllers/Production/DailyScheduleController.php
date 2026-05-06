@@ -188,7 +188,15 @@ class DailyScheduleController extends BaseController
             'created_at'    => date('Y-m-d H:i:s')
         ]);
 
-        foreach ($this->request->getPost('items') as $item) {
+        // Support JSON-consolidated items to bypass max_input_vars limit
+        $itemsJson = $this->request->getPost('items_json');
+        if ($itemsJson) {
+            $itemsData = json_decode($itemsJson, true);
+        } else {
+            $itemsData = $this->request->getPost('items');
+        }
+
+        foreach (($itemsData ?? []) as $item) {
             if (empty($item['is_selected']) || empty($item['product_id'])) {
                 continue;
             }

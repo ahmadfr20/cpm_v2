@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>CPM - Shop Floor</title>
+<title>SHOFI</title>
 
 <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
 <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
@@ -162,9 +162,21 @@ body:not(.sidebar-open) .main-content {
     .form-control { border: none !important; }
 }
 </style>
+
+<?php if (isset($_GET['play']) && $_GET['play'] === '1'): ?>
+<style>
+/* ═══ PLAY MODE: sembunyikan sidebar, header, footer ═══ */
+body.play-mode .sidebar,
+body.play-mode .sidebar-overlay,
+body.play-mode .app-header,
+body.play-mode footer,
+body.play-mode #toggleSidebarBtn { display: none !important; }
+body.play-mode .main-content { margin-left: 0 !important; padding-top: 8px !important; }
+</style>
+<?php endif; ?>
 </head>
 
-<body class="sidebar-open"><!-- default OPEN -->
+<body class="<?= (isset($_GET['play']) && $_GET['play'] === '1') ? 'play-mode' : 'sidebar-open' ?>"><!-- play-mode or sidebar-open -->
 
 <!-- ================= HEADER ================= -->
 <header class="app-header">
@@ -172,13 +184,19 @@ body:not(.sidebar-open) .main-content {
         <i class="bi bi-list"></i>
     </button>
 
-    <span class="fw-semibold">CPM Shop Floor</span>
+    <span class="fw-semibold">SHOFI</span>
 
     <div class="ms-auto d-flex align-items-center">
-        <span class="me-3 small">
-            <?= session()->get('fullname') ?> (<?= session()->get('role') ?>)
-        </span>
-        <a href="/logout" class="btn btn-sm btn-outline-light">Logout</a>
+        <?php if (session()->get('logged_in')): ?>
+            <span class="me-3 small">
+                <?= session()->get('fullname') ?> (<?= session()->get('role') ?>)
+            </span>
+            <a href="/logout" class="btn btn-sm btn-outline-light">Logout</a>
+        <?php else: ?>
+            <a href="/login" class="btn btn-sm btn-outline-light">
+                <i class="bi bi-box-arrow-in-right me-1"></i> Login
+            </a>
+        <?php endif; ?>
     </div>
 </header>
 
@@ -199,6 +217,7 @@ body:not(.sidebar-open) .main-content {
     CPM Shop Floor © <?= date('Y') ?>
 </footer>
 
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
 
 <script>

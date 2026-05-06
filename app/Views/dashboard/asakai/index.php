@@ -95,25 +95,31 @@
                         <th rowspan="2" style="width: 150px; position: sticky; left: 0; z-index: 15;">Section</th>
                         <th rowspan="2" style="width: 250px; position: sticky; left: 150px; z-index: 15;">Product Part</th>
                         <?php foreach ($shifts as $shift): ?>
-                            <th colspan="3" class="text-primary"><?= esc($shift['shift_name']) ?></th>
+                            <th colspan="7" class="text-primary"><?= esc($shift['shift_name']) ?></th>
                         <?php endforeach; ?>
-                        <th colspan="3" class="total-col text-dark">TOTAL HARIAN</th>
+                        <th colspan="5" class="total-col text-dark">TOTAL HARIAN</th>
                     </tr>
                     <tr>
                         <?php foreach ($shifts as $shift): ?>
                             <th class="col-target" style="width: 80px;">Target</th>
                             <th class="col-actual" style="width: 80px;">Actual</th>
+                            <th style="width: 80px;">% NG</th>
+                            <th style="width: 80px;">DT (m)</th>
                             <th style="width: 80px;">Eff (%)</th>
+                            <th style="width: 120px;">Operator</th>
+                            <th style="width: 150px;">Remark</th>
                         <?php endforeach; ?>
                         <th class="total-col col-target" style="width: 90px;">Target</th>
                         <th class="total-col col-actual" style="width: 90px;">Actual</th>
+                        <th class="total-col" style="width: 80px;">% NG</th>
+                        <th class="total-col" style="width: 80px;">DT (m)</th>
                         <th class="total-col" style="width: 100px;">Total Eff</th>
                     </tr>
                 </thead>
                 <tbody>
                     <?php if (empty($summaryData)): ?>
                         <tr>
-                            <td colspan="<?= (count($shifts) * 3) + 5 ?>" class="text-muted py-4 text-center">
+                            <td colspan="<?= (count($shifts) * 7) + 7 ?>" class="text-muted py-4 text-center">
                                 Tidak ada data produksi yang ditemukan.
                             </td>
                         </tr>
@@ -121,24 +127,47 @@
                         <?php foreach ($summaryData as $sectionName => $products): ?>
                             
                             <?php 
-                                $rowspan = count($products) > 0 ? count($products) : 1; 
-                                $firstRow = true;
+                                $rowspan = count($products) > 0 ? count($products) + 2 : 2; 
                             ?>
+
+                                <tr>
+                                    <td class="section-name" rowspan="<?= $rowspan ?>" style="position: sticky; left: 0; z-index: 5; background-color: #fdfdfe;">
+                                        <?= esc($sectionName) ?>
+                                    </td>
+                                    <td class="text-center align-middle bg-light text-muted fw-bold" style="position: sticky; left: 150px; z-index: 5; font-size: 0.8rem; background-color: #fdfdfe;">
+                                        Nama Operator
+                                    </td>
+                                    <?php foreach ($shifts as $shift): 
+                                        $opStr = $operatorData[$sectionName][$shift['id']] ?? '-';
+                                    ?>
+                                        <td colspan="7" class="text-center align-middle bg-light text-primary fw-bold" style="font-size: 0.85rem;">
+                                            <i class="bi bi-person"></i> <?= esc($opStr ?: '-') ?>
+                                        </td>
+                                    <?php endforeach; ?>
+                                    <td colspan="5" class="total-col bg-light"></td>
+                                </tr>
+                                
+                                <tr>
+                                    <td class="text-center align-middle bg-light text-muted fw-bold" style="position: sticky; left: 150px; z-index: 5; font-size: 0.8rem; background-color: #fdfdfe;">
+                                        Nama Leader
+                                    </td>
+                                    <?php foreach ($shifts as $shift): 
+                                        $ldStr = $leaderData[$sectionName][$shift['id']] ?? '-';
+                                    ?>
+                                        <td colspan="7" class="text-center align-middle bg-light text-success fw-bold" style="font-size: 0.85rem;">
+                                            <i class="bi bi-person-badge"></i> <?= esc($ldStr ?: '-') ?>
+                                        </td>
+                                    <?php endforeach; ?>
+                                    <td colspan="5" class="total-col bg-light"></td>
+                                </tr>
 
                             <?php if (empty($products)): ?>
                                 <tr>
-                                    <td class="section-name" style="position: sticky; left: 0; z-index: 5;"><?= esc($sectionName) ?></td>
-                                    <td class="text-muted text-center" colspan="<?= (count($shifts) * 3) + 4 ?>">Tidak ada product di section ini hari ini</td>
+                                    <td class="text-muted text-center" colspan="<?= (count($shifts) * 7) + 6 ?>">Tidak ada product di section ini hari ini</td>
                                 </tr>
                             <?php else: ?>
                                 <?php foreach ($products as $prod): ?>
                                     <tr>
-                                        <?php if ($firstRow): ?>
-                                            <td class="section-name" rowspan="<?= $rowspan ?>" style="position: sticky; left: 0; z-index: 5;">
-                                                <?= esc($sectionName) ?>
-                                            </td>
-                                            <?php $firstRow = false; ?>
-                                        <?php endif; ?>
 
                                         <td class="text-start" style="position: sticky; left: 150px; z-index: 5; background-color: #fff;">
                                             <div class="fw-bold text-dark"><?= esc($prod['part_no']) ?></div>
@@ -158,8 +187,12 @@
                                                 elseif ($sData['eff'] > 0) $effClass = 'eff-danger';
                                             ?>
                                             <td class="col-target text-muted"><?= number_format($sData['target']) ?></td>
-                                            <td class="col-actual text-primary"><?= number_format($sData['fg']) ?></td>
+                                            <td class="col-actual text-primary fw-bold"><?= number_format($sData['fg']) ?></td>
+                                            <td class="text-danger fw-bold"><?= isset($sData['ng_pct']) && $sData['ng_pct'] > 0 ? $sData['ng_pct'].'%' : '-' ?></td>
+                                            <td class="text-warning fw-bold"><?= isset($sData['dt']) && $sData['dt'] > 0 ? $sData['dt'] : '-' ?></td>
                                             <td class="col-eff <?= $effClass ?>"><?= $sData['eff'] ?>%</td>
+                                            <td class="text-muted small"><?= esc(empty($sData['operator']) ? '-' : $sData['operator']) ?></td>
+                                            <td class="text-muted small" style="white-space: normal; min-width: 150px;"><?= esc(empty($sData['remark']) ? '-' : $sData['remark']) ?></td>
                                         <?php endforeach; ?>
 
                                         <?php 
@@ -170,11 +203,80 @@
                                         ?>
                                         <td class="total-col col-target text-muted fw-bold"><?= number_format($prod['total_target']) ?></td>
                                         <td class="total-col col-actual text-primary fw-bold"><?= number_format($prod['total_fg']) ?></td>
+                                        <td class="total-col text-danger fw-bold"><?= isset($prod['total_ng_pct']) && $prod['total_ng_pct'] > 0 ? $prod['total_ng_pct'].'%' : '-' ?></td>
+                                        <td class="total-col text-warning fw-bold"><?= isset($prod['total_dt']) && $prod['total_dt'] > 0 ? $prod['total_dt'] : '-' ?></td>
                                         <td class="total-col col-eff <?= $tEffClass ?>">
                                             <?= $prod['total_eff'] ?>%
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>
+                            <?php endif; ?>
+
+                            <!-- Machine Performance Sub-section with NG/DT names -->
+                            <?php 
+                            $secMachines = $machinePerf[$sectionName] ?? [];
+                            $totalColSpan = (count($shifts) * 7) + 6;
+                            if (!empty($secMachines)): 
+                            ?>
+                            <tr>
+                                <td colspan="<?= $totalColSpan ?>" class="p-0" style="position: sticky; left: 150px; z-index: 3; background: #fff;">
+                                    <div style="background:linear-gradient(90deg, #f0f9ff, #f8fafc); padding: 8px 12px;">
+                                        <div style="font-size:.7rem; font-weight:800; text-transform:uppercase; letter-spacing:.08em; color:#0369a1; margin-bottom:6px;">
+                                            <i class="bi bi-display me-1"></i>Per Mesin — <?= esc($sectionName) ?>
+                                        </div>
+                                        <table class="table table-sm table-bordered mb-0" style="font-size:.75rem; background:#fff;">
+                                            <thead>
+                                                <tr style="background:#1e293b; color:#e2e8f0;">
+                                                    <th class="text-start" style="width:100px;">Mesin</th>
+                                                    <th style="width:60px;">Target</th>
+                                                    <th style="width:60px;">FG</th>
+                                                    <th style="width:55px;">OK%</th>
+                                                    <th style="width:55px;">NG</th>
+                                                    <th style="width:55px;">NG%</th>
+                                                    <th style="width:55px;">DT%</th>
+                                                    <th>Detail NG</th>
+                                                    <th>Detail Downtime</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <?php foreach ($secMachines as $mc): ?>
+                                                <tr>
+                                                    <td class="fw-bold text-dark"><i class="bi bi-display text-muted me-1"></i><?= esc($mc['machine_code']) ?></td>
+                                                    <td class="text-center text-muted"><?= number_format($mc['target']) ?></td>
+                                                    <td class="text-center fw-bold text-success"><?= number_format($mc['fg']) ?></td>
+                                                    <td class="text-center fw-bold" style="color:<?= $mc['ok_achievement'] >= 95 ? '#16a34a' : ($mc['ok_achievement'] >= 75 ? '#f59e0b' : '#dc2626') ?>"><?= $mc['ok_achievement'] ?>%</td>
+                                                    <td class="text-center fw-bold text-danger"><?= number_format($mc['ng']) ?></td>
+                                                    <td class="text-center text-danger"><?= $mc['ng_rate'] ?>%</td>
+                                                    <td class="text-center text-warning fw-bold"><?= $mc['dt_rate'] ?>%</td>
+                                                    <td class="text-start" style="white-space:normal;">
+                                                        <?php 
+                                                        $ngDets = $mc['ng_details'] ?? [];
+                                                        if (!empty($ngDets)):
+                                                            foreach ($ngDets as $ngName => $ngQty): ?>
+                                                            <span style="display:inline-block; background:#fee2e2; color:#dc2626; padding:1px 5px; border-radius:4px; font-weight:700; font-size:.65rem; margin:1px;"><?= esc($ngName) ?>: <?= $ngQty ?></span>
+                                                        <?php endforeach; 
+                                                        else: ?>
+                                                            <span class="text-muted" style="font-size:.68rem;">—</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                    <td class="text-start" style="white-space:normal;">
+                                                        <?php 
+                                                        $dtDets = $mc['dt_details'] ?? [];
+                                                        if (!empty($dtDets)):
+                                                            foreach ($dtDets as $dtName => $dtMins): ?>
+                                                            <span style="display:inline-block; background:#fef3c7; color:#92400e; padding:1px 5px; border-radius:4px; font-weight:700; font-size:.65rem; margin:1px;"><?= esc($dtName) ?>: <?= $dtMins ?>m</span>
+                                                        <?php endforeach;
+                                                        else: ?>
+                                                            <span class="text-muted" style="font-size:.68rem;">—</span>
+                                                        <?php endif; ?>
+                                                    </td>
+                                                </tr>
+                                                <?php endforeach; ?>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </td>
+                            </tr>
                             <?php endif; ?>
 
                         <?php endforeach; ?>

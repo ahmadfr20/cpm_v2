@@ -3,7 +3,7 @@
         <i class="bi bi-list"></i>
     </button>
 
-    <span class="navbar-brand ms-2">CPM Shop Floor</span>
+    <span class="navbar-brand ms-2">SHOFI</span>
 
     <div class="ms-auto d-flex align-items-center text-white">
         <span class="me-3">

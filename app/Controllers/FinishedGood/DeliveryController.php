@@ -78,17 +78,98 @@ class DeliveryController extends BaseController
 
         // FG stock from WIP (to_process_id = FG)
         $availableMap = $this->getFgStockMap($db, $date, $fgProcessId);
+        
+        $schedules = $db->tableExists('fg_delivery_schedules')
+            ? $db->table('fg_delivery_schedules')->where('schedule_date', $date)->get()->getResultArray()
+            : [];
+
+        $fixedDefs = \App\Controllers\FinishedGood\DeliveryControlBoardController::getFixedDataPublic();
+        
+        $productByName = [];
+        $productById = [];
+        foreach ($products as $p) {
+            $nameKey = preg_replace('/[^a-z0-9]/', '', strtolower($p['part_name']));
+            $productByName[$nameKey] = $p;
+            $productById[$p['id']] = $p;
+        }
+
+        $customerByName = [];
+        foreach ($customers as $c) {
+            $cNameKey = preg_replace('/[^a-z0-9]/', '', strtolower($c['customer_name']));
+            $customerByName[$cNameKey] = $c;
+        }
+
+        // Map schedules by product_id for easy lookup of targets
+        $scheduleMap = [];
+        foreach ($schedules as $s) {
+            $scheduleMap[(int)$s['product_id']] = $s;
+        }
+
+        // Build fixed rows configuration
+        $fixedData = [];
+        $fixedProductIds = [];
+        foreach ($fixedDefs as $fd) {
+            $cNameKey = preg_replace('/[^a-z0-9]/', '', strtolower($fd['customer_name']));
+            $cust = $customerByName[$cNameKey] ?? null;
+
+            $group = [
+                'customer_name' => $fd['customer_name'],
+                'customer_id'   => $cust ? $cust['id'] : null,
+                'parts'         => []
+            ];
+
+            foreach ($fd['parts'] as $partName) {
+                $pNameKey = preg_replace('/[^a-z0-9]/', '', strtolower($partName));
+                $prod = $productByName[$pNameKey] ?? null;
+                if ($prod) {
+                    $pid = (int)$prod['id'];
+                    $prod['fixed_part_name'] = $partName;
+                    $prod['stock'] = $availableMap[$pid] ?? 0;
+                    $prod['schedule'] = $scheduleMap[$pid] ?? null;
+                    $group['parts'][] = $prod;
+                    $fixedProductIds[] = $pid;
+                }
+            }
+            $fixedData[] = $group;
+        }
+
+        // Build non-fixed "biasa" schedule items (scheduled but not in fixed template)
+        $customerById = [];
+        foreach ($customers as $c) {
+            $customerById[(int)$c['id']] = $c;
+        }
+
+        $biasaSchedules = [];
+        foreach ($schedules as $s) {
+            $pid = (int)$s['product_id'];
+            $dtype = $s['delivery_type'] ?? 'biasa';
+            if ($dtype === 'biasa' && !in_array($pid, $fixedProductIds)) {
+                $prod = $productById[$pid] ?? null;
+                if ($prod) {
+                    $s['part_no']       = $prod['part_no'] ?? '';
+                    $s['part_name']     = $prod['part_name'] ?? '';
+                    $s['stock']         = $availableMap[$pid] ?? 0;
+                    $cust = $customerById[(int)$s['customer_id']] ?? null;
+                    $s['customer_name'] = $cust ? $cust['customer_name'] : 'Unknown';
+                    $biasaSchedules[]   = $s;
+                }
+            }
+        }
 
         // delivery history
         $history = $this->getDeliveryHistory($db, $date);
 
         return view('finished_good/delivery/index', [
-            'date'         => $date,
-            'customers'    => $customers,
-            'products'     => $products,
-            'availableMap' => $availableMap,
-            'history'      => $history,
-            'fgProcessId'  => $fgProcessId,
+            'date'            => $date,
+            'customers'       => $customers,
+            'products'        => $products,
+            'schedules'       => $schedules,
+            'availableMap'    => $availableMap,
+            'history'         => $history,
+            'fgProcessId'     => $fgProcessId,
+            'fixedData'       => $fixedData,
+            'fixedProductIds' => $fixedProductIds,
+            'biasaSchedules'  => $biasaSchedules,
         ]);
     }
 
@@ -111,6 +192,9 @@ class DeliveryController extends BaseController
         $db    = db_connect();
         $date  = $this->request->getPost('delivery_date') ?: date('Y-m-d');
         $items = $this->request->getPost('items');
+
+        // Ensure RIT column exists
+        $this->ensureRitColumn($db);
 
         if (!is_array($items) || empty($items)) {
             return redirect()->back()->with('error', 'Tidak ada data item untuk dikirim.');
@@ -136,6 +220,7 @@ class DeliveryController extends BaseController
                 $productId  = (int)($row['product_id'] ?? 0);
                 $customerId = (int)($row['customer_id'] ?? 0);
                 $qty        = (int)($row['qty'] ?? 0);
+                $rit        = in_array($row['rit'] ?? '', ['RIT-1', 'RIT-2']) ? $row['rit'] : 'RIT-1';
 
                 if ($productId <= 0 || $qty <= 0) continue;
 
@@ -171,8 +256,6 @@ class DeliveryController extends BaseController
 
                 if ($db->fieldExists('customer_id', 'material_transactions')) {
                     $trxPayload['customer_id'] = $customerId;
-                } elseif ($db->fieldExists('process_to', 'material_transactions')) {
-                    $trxPayload['process_to'] = $customerId;
                 }
 
                 if ($db->fieldExists('do_number', 'material_transactions')) {
@@ -247,6 +330,7 @@ class DeliveryController extends BaseController
                     'product_id'  => $productId,
                     'customer_id' => $customerId,
                     'qty'         => $qty,
+                    'rit'         => $rit,
                     'do_number'   => $doNumber,
                 ];
             }
@@ -265,14 +349,18 @@ class DeliveryController extends BaseController
 
             $this->ensureFgDeliveryItemsTable($db);
             foreach ($deliveredItems as $di) {
-                $db->table('fg_delivery_items')->insert([
+                $insertData = [
                     'fg_delivery_id' => $deliveryId,
                     'product_id'     => $di['product_id'],
                     'customer_id'    => $di['customer_id'],
                     'qty'            => $di['qty'],
                     'do_number'      => $di['do_number'],
                     'created_at'     => $now,
-                ]);
+                ];
+                if ($db->fieldExists('rit', 'fg_delivery_items')) {
+                    $insertData['rit'] = $di['rit'] ?? 'RIT-1';
+                }
+                $db->table('fg_delivery_items')->insert($insertData);
             }
 
             if ($db->transStatus() === false) throw new \Exception('DB error saat proses delivery.');
@@ -457,8 +545,16 @@ class DeliveryController extends BaseController
             product_id INT NOT NULL,
             customer_id INT DEFAULT 0,
             qty INT DEFAULT 0,
+            rit VARCHAR(10) DEFAULT 'RIT-1',
             do_number VARCHAR(100) DEFAULT NULL,
             created_at DATETIME DEFAULT NULL
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4");
+    }
+
+    private function ensureRitColumn($db): void
+    {
+        if ($db->tableExists('fg_delivery_items') && !$db->fieldExists('rit', 'fg_delivery_items')) {
+            $db->query("ALTER TABLE fg_delivery_items ADD COLUMN rit VARCHAR(10) DEFAULT 'RIT-1' AFTER qty");
+        }
     }
 }

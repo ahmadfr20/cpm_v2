@@ -21,6 +21,7 @@ class ProductModel extends Model
 
         'cavity',
         'efficiency_rate',
+        'shot_weight', // ✅ baru: Shot Weight
 
         // ✅ weight
         'weight_ascas',
@@ -82,6 +83,7 @@ class ProductModel extends Model
                 p.cycle_time_machining,
 
                 p.cavity,
+                p.shot_weight,
                 p.efficiency_rate
             ')
             ->join('products p', 'p.id = mp.product_id')

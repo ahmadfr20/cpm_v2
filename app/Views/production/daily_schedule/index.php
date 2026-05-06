@@ -3,7 +3,7 @@
 
 <h4>Daily Production Schedule</h4>
 
-<form method="post" action="/production/daily-schedule/store">
+<form method="post" action="/production/daily-schedule/store" id="dailyScheduleForm">
 
 <div class="row mb-3">
     <div class="col-md-3">
@@ -47,7 +47,32 @@
 <tbody id="scheduleBody"></tbody>
 </table>
 
-<button class="btn btn-primary">Save Schedule</button>
+<button class="btn btn-primary" type="submit">Save Schedule</button>
+
+<script>
+document.getElementById('dailyScheduleForm').addEventListener('submit', function(e) {
+    const form = this;
+    const items = {};
+    const toDisable = [];
+    form.querySelectorAll('[name^="items["]').forEach(function(el) {
+        if (el.disabled) return;
+        const name = el.name;
+        const val = (el.type === 'checkbox') ? (el.checked ? el.value : '') : el.value;
+        if (el.type === 'checkbox' && !el.checked) return;
+        const keys = []; const regex = /\[([^\]]*)\]/g; let m;
+        while ((m = regex.exec(name)) !== null) keys.push(m[1]);
+        let obj = items;
+        for (let i = 0; i < keys.length - 1; i++) { if (!obj[keys[i]]) obj[keys[i]] = {}; obj = obj[keys[i]]; }
+        obj[keys[keys.length - 1]] = val;
+        toDisable.push(el);
+    });
+    let jsonInput = form.querySelector('input[name="items_json"]');
+    if (!jsonInput) { jsonInput = document.createElement('input'); jsonInput.type = 'hidden'; jsonInput.name = 'items_json'; form.appendChild(jsonInput); }
+    jsonInput.value = JSON.stringify(items);
+    toDisable.forEach(function(el) { el.disabled = true; });
+});
+</script>
+
 </form>
 
 <script>

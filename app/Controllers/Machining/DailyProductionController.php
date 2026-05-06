@@ -18,6 +18,7 @@ class DailyProductionController extends BaseController
         $shifts = $db->table('shifts')
             ->select('id, shift_code, shift_name')
             ->where('is_active', 1)
+            ->where('day_group', $this->getDayGroup($date))
             ->like('shift_name', 'MC')
             ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
             ->get()

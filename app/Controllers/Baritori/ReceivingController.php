@@ -241,10 +241,11 @@ class ReceivingController extends BaseController
     public function index()
     {
         $db = db_connect();
+        $date = $this->request->getGet('date') ?? date('Y-m-d');
 
         $baritoriId = $this->getBaritoriProcessId($db);
         if (!$baritoriId) {
-            return view('baritori/receiving/index', ['deliveries' => [], 'errorMsg' => 'Process Baritori tidak ditemukan.']);
+            return view('baritori/receiving/index', ['date' => $date, 'deliveries' => [], 'errorMsg' => 'Process Baritori tidak ditemukan.']);
         }
 
         $hasVendors   = $db->tableExists('vendors');
@@ -267,6 +268,7 @@ class ReceivingController extends BaseController
             ")
             ->join('products p', 'p.id = mt.product_id', 'left')
             ->join('shifts s', 's.id = mt.shift_id', 'left')
+            ->where('mt.transaction_date', $date)
             ->whereIn('mt.transaction_type', ['VENDOR_OUT', 'VENDOR_IN']);
 
         if ($hasVendors) {
@@ -319,6 +321,7 @@ class ReceivingController extends BaseController
         unset($d);
 
         return view('baritori/receiving/index', [
+            'date'       => $date,
             'deliveries' => $rows,
             'errorMsg'   => null
         ]);

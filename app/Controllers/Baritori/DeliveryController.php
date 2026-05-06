@@ -74,6 +74,27 @@ class DeliveryController extends BaseController
         return ['id' => 0, 'stock' => 0, 'transfer' => 0];
     }
 
+    // Get flow for process to determine previous step.
+    private function getPrevNextProcessByFlow($db, int $productId, int $currentProcessId): array
+    {
+        if (!$db->tableExists('product_process_flows')) return ['prev' => null, 'next' => null];
+
+        $rows = $db->table('product_process_flows')->select('process_id, sequence')
+            ->where('product_id', $productId)->where('is_active', 1)->orderBy('sequence', 'ASC')->get()->getResultArray();
+
+        if (!$rows) return ['prev' => null, 'next' => null];
+
+        $seq = array_map(fn($r) => (int)$r['process_id'], $rows);
+        $idx = array_search($currentProcessId, $seq, true);
+        if ($idx === false) return ['prev' => null, 'next' => null];
+
+        return [
+            'prev' => $seq[$idx - 1] ?? null,
+            'next' => $seq[$idx + 1] ?? null,
+        ];
+    }
+
+
     /* =====================================================
      * INDEX
      * ===================================================== */
@@ -82,6 +103,8 @@ class DeliveryController extends BaseController
     {
         $db   = db_connect();
         $date = $this->request->getGet('date') ?? date('Y-m-d');
+        $role = strtoupper((string)(session()->get('role') ?? ''));
+        $isAdmin = ($role === 'ADMIN');
 
         $baritoriId = $this->getBaritoriProcessId($db);
         if (!$baritoriId) {
@@ -109,9 +132,14 @@ class DeliveryController extends BaseController
             foreach ($schedules as $sch) {
                 $pid = (int)$sch['product_id'];
                 if (!isset($availableMap[$pid])) {
-                    // AMBIL STOCK LANGSUNG DARI BARITORI (karena di Schedule Controller sudah masuk ke Baritori)
-                    $snap = $this->getLatestSnapshot($db, $date, $baritoriId, $pid);
-                    $availableMap[$pid] = (int)($snap['stock'] ?? 0);
+                    $flow = $this->getPrevNextProcessByFlow($db, $pid, $baritoriId);
+                    $prevId = (int)($flow['prev'] ?? 0);
+                    $available = 0;
+                    if ($prevId > 0) {
+                        $snap = $this->getLatestSnapshot($db, $date, $prevId, $pid);
+                        $available = (int)($snap['stock'] ?? 0);
+                    }
+                    $availableMap[$pid] = $available;
                 }
             }
         }
@@ -121,6 +149,7 @@ class DeliveryController extends BaseController
             'schedules'    => $schedules,
             'availableMap' => $availableMap,
             'errorMsg'     => null,
+            'isAdmin'      => $isAdmin,
         ]);
     }
 
@@ -134,6 +163,10 @@ class DeliveryController extends BaseController
         $date  = date('Y-m-d');
         $items = $this->request->getPost('items');
 
+        // Server-side: hanya ADMIN yang boleh bypass stock
+        $role = strtoupper((string)(session()->get('role') ?? ''));
+        $bypassStock = ($role === 'ADMIN') ? (int)($this->request->getPost('bypass_stock') ?? 0) : 0;
+
         if (!is_array($items) || empty($items)) return redirect()->back()->with('error', 'Tidak ada data item untuk dikirim.');
 
         $baritoriId = $this->getBaritoriProcessId($db);
@@ -145,7 +178,7 @@ class DeliveryController extends BaseController
         $procCol     = $this->detectWipProcessColumn($db);
         $now         = date('Y-m-d H:i:s');
 
-        $db->transBegin();
+        $db->transStart();
         try {
             foreach ($items as $row) {
                 $scheduleItemId = (int)($row['schedule_item_id'] ?? 0);
@@ -165,15 +198,19 @@ class DeliveryController extends BaseController
                 $vendorId  = (int)($dsi['vendor_id'] ?? 0);
                 $shiftId   = (int)$dsi['shift_id'];
 
-                if ($vendorId <= 0) throw new \Exception("Vendor untuk produk ID {$productId} tidak tersetting di jadwal.");
+                if ($vendorId <= 0 && $vendorId !== -1) throw new \Exception("Vendor untuk produk ID {$productId} tidak tersetting di jadwal.");
 
-                // 1. Cek Stock Langsung di Baritori
-                $btSnap      = $this->getLatestSnapshot($db, $date, $baritoriId, $productId);
-                $availableBt = (int)($btSnap['stock'] ?? 0);
-                $btTransfer  = (int)($btSnap['transfer'] ?? 0);
+                $flow = $this->getPrevNextProcessByFlow($db, $productId, $baritoriId);
+                $prevId = (int)($flow['prev'] ?? 0);
+                if ($prevId <= 0 && !$bypassStock) throw new \Exception("Flow sebelumnya tidak ditemukan untuk produk ID {$productId}.");
 
-                if ($qty > $availableBt) {
-                    throw new \Exception("Gagal: Qty delivery ($qty) melebihi Ready Stock di Baritori ($availableBt) untuk produk ID {$productId}.");
+                // 1. Cek Stock di Proses Sebelumnya (misal Die Casting)
+                $prevSnap      = $prevId > 0 ? $this->getLatestSnapshot($db, $date, $prevId, $productId) : ['stock' => 0, 'transfer' => 0, 'id' => 0];
+                $availablePrev = (int)($prevSnap['stock'] ?? 0);
+                $prevTransfer  = (int)($prevSnap['transfer'] ?? 0);
+
+                if (!$bypassStock && $qty > $availablePrev) {
+                    throw new \Exception("Gagal: Qty delivery ($qty) melebihi Ready Stock di proses sebelumnya ($availablePrev) untuk produk ID {$productId}.");
                 }
 
                 // 2. Transaksi: VENDOR_OUT (Keluar dari Baritori ke Vendor)
@@ -183,17 +220,17 @@ class DeliveryController extends BaseController
                     'product_id'       => $productId, 
                     'qty'              => $qty,
                     'transaction_type' => 'VENDOR_OUT', 
-                    'process_from'     => $baritoriId, // Barang keluar dari Baritori
+                    'process_from'     => $prevId > 0 ? $prevId : $baritoriId,
                     'created_at'       => $now,
                 ];
 
                 // Cek ketersediaan kolom vendor di material_transactions
                 $hasVendorCol = $db->fieldExists('vendor_id', 'material_transactions');
                 if ($hasVendorCol) {
-                    $trxPayload['vendor_id']  = $vendorId;
-                } else {
-                    $trxPayload['process_to'] = $vendorId; // Fallback jika tidak ada kolom vendor_id
+                    $trxPayload['vendor_id'] = $vendorId;
                 }
+                // process_to: gunakan baritoriId atau vendorId jika bukan internal
+                $trxPayload['process_to'] = $vendorId > 0 ? $vendorId : $baritoriId;
 
                 $trxPayload['do_number']    = $do;
                 $trxPayload['source_table'] = 'daily_schedule_items';
@@ -202,51 +239,74 @@ class DeliveryController extends BaseController
                 $db->table('material_transactions')->insert($this->onlyExistingColumns($db, 'material_transactions', $trxPayload));
                 $trxId = (int)$db->insertID();
 
-                // 3. Update Stock Baritori (WIP: Baritori -> Out)
-                // Karena barang dikirim ke Vendor, Stock di Baritori BERKURANG
-                // dan dipindahkan ke Transfer Baritori (sebagai penanda sedang di subcon)
-                $btAfterStock    = max(0, $availableBt - $qty);
-                $btAfterTransfer = $btTransfer + $qty;
+                // 3. Update Stock PrevId (WIP: Prev -> Out)
+                // Barang dikirim ke Vendor (melalui Baritori), jadi Stock di PrevId BERKURANG
+                // tapi kita tambahkan ke transfer Baritori juga, agar Receiving bisa menariknya
+                $prevAfterStock = max(0, $availablePrev - $qty);
 
-                // Cek apakah hari ini sudah ada record Waiting/Open
-                // Agar tidak selalu Insert baru jika melakukan update di hari yang sama
-                $wipExist = $db->table('production_wip')->select('id')
-                               ->where($wipDateCol, $date)
-                               ->where($procCol, $baritoriId)
-                               ->where('product_id', $productId)
-                               ->where('status !=', 'DONE')
-                               ->orderBy('id', 'DESC')->limit(1)->get()->getRowArray();
+                if ($prevId > 0) {
+                    $wipExist = $db->table('production_wip')->select('id')
+                                   ->where($wipDateCol, $date)
+                                   ->where($procCol, $prevId)
+                                   ->where('product_id', $productId)
+                                   ->where('status !=', 'DONE')
+                                   ->orderBy('id', 'DESC')->limit(1)->get()->getRowArray();
 
-                if ($wipExist) {
-                    // Update baris terakhir hari ini (jika bukan DONE)
-                    $upd = [$stockCol => $btAfterStock];
-                    if ($transferCol) $upd[$transferCol] = $btAfterTransfer;
-                    $db->table('production_wip')->where('id', $wipExist['id'])->update($this->onlyExistingColumns($db, 'production_wip', $upd));
+                    if ($wipExist) {
+                        $upd = [$stockCol => $prevAfterStock];
+                        $db->table('production_wip')->where('id', $wipExist['id'])->update($this->onlyExistingColumns($db, 'production_wip', $upd));
+                    }
+
+                    // Insert Pengurangan Stock Prev (DONE)
+                    $prevWipOut = [
+                        $wipDateCol       => $date, 
+                        'product_id'      => $productId, 
+                        'from_process_id' => $prevId, 
+                        'to_process_id'   => $prevId,
+                        'qty'             => $qty, 
+                        'qty_in'          => 0, 
+                        'qty_out'         => $qty,
+                        $stockCol         => $prevAfterStock,
+                        'source_table'    => 'material_transactions', 
+                        'source_id'       => $trxId, 
+                        'status'          => 'DONE', 
+                        'created_at'      => $now,
+                    ];
+                    if ($transferCol) $prevWipOut[$transferCol] = $prevTransfer; 
+                    
+                    $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $prevWipOut));
                 }
 
-                // Insert History Pengurangan Stock (DONE)
-                $btWipOut = [
-                    $wipDateCol       => $date, 
-                    'product_id'      => $productId, 
-                    'from_process_id' => $baritoriId, 
-                    'to_process_id'   => $baritoriId, // Tetap di baritori, cuma ubah bentuk dari stock ke transfer
-                    'qty'             => $qty, 
-                    'qty_in'          => 0, 
-                    'qty_out'         => $qty, // Dicatat sebagai Barang Keluar dari Stock
-                    $stockCol         => $btAfterStock, // Nilai stock setelah dikurangi
-                    'source_table'    => 'material_transactions', 
-                    'source_id'       => $trxId, 
-                    'status'          => 'DONE', 
+                // 4. Update Transfer Baritori (Barang sedang berada di jalan/Subcon)
+                $btSnap = $this->getLatestSnapshot($db, $date, $baritoriId, $productId);
+                $btStock = (int)($btSnap['stock'] ?? 0);
+                $btTransfer = (int)($btSnap['transfer'] ?? 0);
+                $btAfterTransfer = $btTransfer + $qty;
+
+                $btWipTransfer = [
+                    $wipDateCol       => $date,
+                    'product_id'      => $productId,
+                    'from_process_id' => $prevId,
+                    'to_process_id'   => $baritoriId,
+                    'qty'             => $qty,
+                    'qty_in'          => 0,
+                    'qty_out'         => 0,
+                    $stockCol         => $btStock,          // stock tetap
+                    'source_table'    => 'material_transactions',
+                    'source_id'       => $trxId,
+                    'status'          => 'DONE',
                     'created_at'      => $now,
                 ];
-                if ($transferCol) $btWipOut[$transferCol] = $btAfterTransfer; // Nilai transfer setelah ditambah
-                
-                $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $btWipOut));
+                if ($transferCol) $btWipTransfer[$transferCol] = $btAfterTransfer;
+                $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $btWipTransfer));
             }
 
-            if ($db->transStatus() === false) throw new \Exception('DB error saat proses delivery.');
+            $db->transComplete();
 
-            $db->transCommit();
+            if ($db->transStatus() === false) {
+                return redirect()->back()->with('error', 'DB error: transaksi gagal, silakan coba lagi.');
+            }
+
             return redirect()->back()->with('success', 'Delivery Baritori berhasil disimpan. Stock Baritori telah dikurangi sesuai input aktual.');
         } catch (\Throwable $e) {
             $db->transRollback();

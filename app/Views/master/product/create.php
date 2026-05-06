@@ -35,6 +35,16 @@
     <input type="number" name="weight_runner" class="form-control">
 </div>
 
+<div class="mb-3">
+    <label>Shot Weight (gr)</label>
+    <input type="number" step="1" name="shot_weight" class="form-control" value="0">
+</div>
+
+<div class="mb-3">
+    <label>Weight Machining (kg)</label>
+    <input type="number" step="0.01" name="weight_machining" class="form-control" value="0">
+</div>
+
     <div class="col-md-4">
         <label>Cycle Time (sec)</label>
         <input type="number" name="cycle_time" class="form-control" required>

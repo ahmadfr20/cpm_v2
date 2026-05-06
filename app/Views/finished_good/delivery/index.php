@@ -103,6 +103,7 @@
                         <th style="width:40px">No</th>
                         <th style="width:220px">Customer</th>
                         <th>Part No & Name</th>
+                        <th style="width:90px" class="text-center">RIT</th>
                         <th style="width:140px" class="text-center">DO Number</th>
                         <th style="width:110px" class="text-center">Ready FG</th>
                         <th style="width:130px" class="text-center">Qty Kirim</th>
@@ -110,16 +111,142 @@
                     </tr>
                 </thead>
                 <tbody id="deliveryBody">
+                    <!-- ================= FIXED ROWS ================= -->
+                    <?php 
+                    $hasFixed = false;
+                    foreach ($fixedData as $grp): 
+                        $hasParts = false;
+                        // Pre-check if any part has schedule
+                        foreach ($grp['parts'] as $p) {
+                            if (!empty($p['schedule'])) {
+                                $t1 = (int)($p['schedule']['rit_1'] ?? 0);
+                                $t2 = (int)($p['schedule']['rit_2'] ?? 0);
+                                $tps = (int)($p['schedule']['target_per_shift'] ?? 0);
+                                if ($t1 > 0 || $t2 > 0 || $tps > 0) $hasParts = true;
+                            }
+                        }
+                        if (!$hasParts) continue;
+                        $hasFixed = true;
+                    ?>
+                        <tr class="table-secondary border-secondary">
+                            <td colspan="8" class="text-start fw-bold px-3">
+                                <i class="bi bi-building me-2"></i><?= esc($grp['customer_name']) ?>
+                            </td>
+                        </tr>
+                        <?php foreach ($grp['parts'] as $p): 
+                            $pid = $p['id'];
+                            $sched = $p['schedule'];
+                            if (!$sched) continue;
+                            
+                            $stock = (int)$p['stock'];
+                            $rits = [];
+                            if ((int)$sched['rit_1'] > 0) $rits['RIT-1'] = (int)$sched['rit_1'];
+                            if ((int)$sched['rit_2'] > 0) $rits['RIT-2'] = (int)$sched['rit_2'];
+                            
+                            // Fallback if user only input Target 1 Hari without specifying RIT
+                            if (empty($rits) && (int)($sched['target_per_shift'] ?? 0) > 0) {
+                                $rits['RIT-1'] = (int)$sched['target_per_shift'];
+                            }
+
+                            foreach ($rits as $rName => $rQty):
+                                $uid = 'FIX_' . $pid . '_' . str_replace('-', '', $rName);
+                        ?>
+                            <tr class="item-row fixed-row">
+                                <td class="row-no fw-bold text-center">—</td>
+                                <td>
+                                    <input type="hidden" name="items[<?= $uid ?>][customer_id]" value="<?= $grp['customer_id'] ?>">
+                                    <span class="fw-bold d-block text-truncate" style="max-width: 180px;" title="<?= esc($grp['customer_name']) ?>"><?= esc($grp['customer_name']) ?></span>
+                                </td>
+                                <td>
+                                    <input type="hidden" name="items[<?= $uid ?>][product_id]" value="<?= $pid ?>">
+                                    <div class="fw-bold"><?= esc($p['part_no'] ?: '-') ?></div>
+                                    <div class="small text-muted"><?= esc($p['part_name']) ?></div>
+                                </td>
+                                <td class="text-center">
+                                    <input type="hidden" name="items[<?= $uid ?>][rit]" value="<?= $rName ?>">
+                                    <span class="badge bg-dark fw-bold"><?= $rName ?></span>
+                                    <div class="small text-muted mt-1">Trgt: <?= $rQty ?></div>
+                                </td>
+                                <td class="text-center"><span class="badge bg-light text-secondary border px-2 py-1 w-100 fs-7">Auto Generate</span></td>
+                                <td class="ready-fg text-center fw-bold">
+                                    <span class="badge-stock <?= $stock <= 0 ? 'zero' : '' ?>"><?= number_format($stock) ?> Pcs</span>
+                                </td>
+                                <td>
+                                    <?php $limit = min($rQty, $stock); ?>
+                                    <input type="number" name="items[<?= $uid ?>][qty]" class="form-control form-control-sm text-center qty-input fw-bold" 
+                                           min="0" <?= $limit > 0 ? "max=\"$limit\"" : 'readonly' ?> 
+                                           data-max="<?= $limit ?>" placeholder="<?= $limit > 0 ? 'Max: ' . $limit : '0' ?>" value="<?= $limit > 0 ? '' : '0' ?>">
+                                </td>
+                                <td class="text-center"><i class="bi bi-lock-fill text-muted"></i></td>
+                            </tr>
+                            <?php endforeach; ?>
+                        <?php endforeach; ?>
+                    <?php endforeach; ?>
+
+                    <!-- ================= BIASA SCHEDULE ROWS (NON-FIXED) ================= -->
+                    <?php if (!empty($biasaSchedules)): ?>
+                        <tr class="table-info border-info">
+                            <td colspan="8" class="text-start fw-bold px-3">
+                                <i class="bi bi-calendar-check me-2"></i>Jadwal Pengiriman Biasa (Dari Schedule)
+                            </td>
+                        </tr>
+                        <?php foreach ($biasaSchedules as $bs):
+                            $bsPid = (int)$bs['product_id'];
+                            $bsStock = (int)($bs['stock'] ?? 0);
+                            $bsRits = [];
+                            if ((int)($bs['rit_1'] ?? 0) > 0) $bsRits['RIT-1'] = (int)$bs['rit_1'];
+                            if ((int)($bs['rit_2'] ?? 0) > 0) $bsRits['RIT-2'] = (int)$bs['rit_2'];
+                            if (empty($bsRits) && (int)($bs['target_per_shift'] ?? 0) > 0) {
+                                $bsRits['RIT-1'] = (int)$bs['target_per_shift'];
+                            }
+                            foreach ($bsRits as $bsRName => $bsRQty):
+                                $bsUid = 'BIASA_' . $bsPid . '_' . str_replace('-', '', $bsRName);
+                        ?>
+                            <tr class="item-row fixed-row">
+                                <td class="row-no fw-bold text-center">—</td>
+                                <td>
+                                    <input type="hidden" name="items[<?= $bsUid ?>][customer_id]" value="<?= (int)$bs['customer_id'] ?>">
+                                    <span class="fw-bold d-block text-truncate" style="max-width: 180px;" title="<?= esc($bs['customer_name'] ?? '') ?>"><?= esc($bs['customer_name'] ?? '-') ?></span>
+                                </td>
+                                <td>
+                                    <input type="hidden" name="items[<?= $bsUid ?>][product_id]" value="<?= $bsPid ?>">
+                                    <div class="fw-bold"><?= esc($bs['part_no'] ?: '-') ?></div>
+                                    <div class="small text-muted"><?= esc($bs['part_name']) ?></div>
+                                </td>
+                                <td class="text-center">
+                                    <input type="hidden" name="items[<?= $bsUid ?>][rit]" value="<?= $bsRName ?>">
+                                    <span class="badge bg-dark fw-bold"><?= $bsRName ?></span>
+                                    <div class="small text-muted mt-1">Trgt: <?= $bsRQty ?></div>
+                                </td>
+                                <td class="text-center"><span class="badge bg-light text-secondary border px-2 py-1 w-100 fs-7">Auto Generate</span></td>
+                                <td class="ready-fg text-center fw-bold">
+                                    <span class="badge-stock <?= $bsStock <= 0 ? 'zero' : '' ?>"><?= number_format($bsStock) ?> Pcs</span>
+                                </td>
+                                <td>
+                                    <?php $bsLimit = min($bsRQty, $bsStock); ?>
+                                    <input type="number" name="items[<?= $bsUid ?>][qty]" class="form-control form-control-sm text-center qty-input fw-bold"
+                                           min="0" <?= $bsLimit > 0 ? "max=\"$bsLimit\"" : 'readonly' ?>
+                                           data-max="<?= $bsLimit ?>" placeholder="<?= $bsLimit > 0 ? 'Max: ' . $bsLimit : '0' ?>" value="<?= $bsLimit > 0 ? '' : '0' ?>">
+                                </td>
+                                <td class="text-center"><i class="bi bi-calendar-check text-info"></i></td>
+                            </tr>
+                        <?php endforeach; ?>
+                        <?php endforeach; ?>
+                        <?php $hasFixed = true; ?>
+                    <?php endif; ?>
+                    
+                    <?php if (!$hasFixed): ?>
                     <tr class="empty-row text-muted">
-                        <td colspan="7" class="py-4 text-center fw-bold">
+                        <td colspan="8" class="py-4 text-center fw-bold">
                             <i class="bi bi-inbox fs-3 d-block mb-2"></i>
-                            Klik <strong>"Tambah Item"</strong> untuk menambah baris pengiriman.
+                            Baris schedule kosong (tidak ada target). Klik <strong>"Tambah Item"</strong> untuk menambah baris manual.
                         </td>
                     </tr>
+                    <?php endif; ?>
                 </tbody>
             </table>
         </div>
-        <div class="p-3 bg-light d-flex justify-content-end" id="deliveryActions" style="display:none!important;">
+        <div class="p-3 bg-light d-flex justify-content-end" id="deliveryActions">
             <button type="submit" class="btn btn-success fw-bold shadow px-4">
                 <i class="bi bi-truck me-1"></i> Simpan & Kirim
             </button>
@@ -219,6 +346,7 @@
 const products     = <?= json_encode($products) ?>;
 const customers    = <?= json_encode($customers) ?>;
 const availableMap = <?= json_encode($availableMap) ?>;
+const schedules    = <?= json_encode($schedules) ?>;
 let rowCount = 0;
 
 document.getElementById('btnAddRow').addEventListener('click', addRow);
@@ -231,10 +359,11 @@ function addRow() {
 
     let custOpts = '<option value="">-- Customer --</option>';
     customers.forEach(c => {
-        custOpts += `<option value="${c.id}">${c.customer_name || c.id}</option>`;
+        custOpts += `<option value="${c.id}">${c.customer_name}</option>`;
     });
 
-    let prodOpts = '<option value="">-- Produk --</option>';
+    let prodOpts = '<option value="">-- Pilih Produk --</option>';
+
     products.forEach(p => {
         const stock = availableMap[p.id] || 0;
         if (stock > 0) {
@@ -243,23 +372,31 @@ function addRow() {
     });
 
     const tr = document.createElement('tr');
-    tr.className = 'item-row';
+    tr.className = 'item-row custom-row';
     tr.innerHTML = `
         <td class="row-no fw-bold">${rowCount}</td>
         <td><select name="items[${rowCount}][customer_id]" class="form-select form-select-sm fw-bold" required>${custOpts}</select></td>
         <td><select name="items[${rowCount}][product_id]" class="form-select form-select-sm product-select fw-bold" required>${prodOpts}</select></td>
+        <td class="text-center">
+            <select name="items[${rowCount}][rit]" class="form-select form-select-sm fw-bold" style="min-width:80px;">
+                <option value="RIT-1">RIT-1</option>
+                <option value="RIT-2">RIT-2</option>
+            </select>
+        </td>
         <td class="text-center"><span class="badge bg-light text-secondary border px-2 py-1 w-100 fs-7">Auto Generate</span></td>
         <td class="ready-fg text-center fw-bold">-</td>
-        <td><input type="number" name="items[${rowCount}][qty]" class="form-control form-control-sm text-center qty-input fw-bold" min="1" placeholder="0" required readonly></td>
-        <td><button type="button" class="btn btn-sm btn-outline-danger btn-remove-row"><i class="bi bi-x-lg"></i></button></td>
+        <td><input type="number" name="items[${rowCount}][qty]" class="form-control form-control-sm text-center qty-input fw-bold" min="0" placeholder="0" required readonly></td>
+        <td class="text-center"><button type="button" class="btn btn-sm btn-outline-danger btn-remove-row"><i class="bi bi-x-lg"></i></button></td>
     `;
     tbody.appendChild(tr);
     updateRowNumbers();
-    showActions();
 
     const prodSelect = tr.querySelector('.product-select');
     const inputQty   = tr.querySelector('.qty-input');
     const readyTd    = tr.querySelector('.ready-fg');
+
+    const custSelect = tr.querySelector(`select[name="items[${rowCount}][customer_id]"]`);
+    const ritSelect  = tr.querySelector(`select[name="items[${rowCount}][rit]"]`);
 
     prodSelect.addEventListener('change', function() {
         const opt = this.selectedOptions[0];
@@ -267,19 +404,65 @@ function addRow() {
             readyTd.innerHTML = '-';
             inputQty.readOnly = true;
             inputQty.value = '';
+            custSelect.innerHTML = '<option value="">-- Customer --</option>';
+            ritSelect.innerHTML = '';
             return;
         }
+
+        const pid = parseInt(opt.value);
+        const sched = schedules.find(s => parseInt(s.product_id) === pid);
+        
+        if (sched) {
+            let cName = 'Unknown';
+            const cb = customers.find(x => parseInt(x.id) === parseInt(sched.customer_id));
+            if (cb) cName = cb.customer_name;
+            custSelect.innerHTML = `<option value="${sched.customer_id}">${cName}</option>`;
+        } else {
+            let cOpts = '<option value="">-- Pilih Customer --</option>';
+            customers.forEach(c => {
+                cOpts += `<option value="${c.id}">${c.customer_name}</option>`;
+            });
+            custSelect.innerHTML = cOpts;
+        }
+        
+        let ritHtml = '';
+        for(let i=1; i<=5; i++) {
+            let trgt = sched ? parseInt(sched['rit_'+i] || '0') : 0;
+            if(trgt > 0) {
+                ritHtml += `<option value="RIT-${i}" data-target="${trgt}">RIT-${i} (Target: ${trgt})</option>`;
+            } else {
+                ritHtml += `<option value="RIT-${i}" data-target="${trgt}">RIT-${i} (Special)</option>`;
+            }
+        }
+        ritSelect.innerHTML = ritHtml;
+
         const stock = parseInt(opt.dataset.stock || '0');
         readyTd.innerHTML = `<span class="badge-stock ${stock<=0?'zero':''}">${stock.toLocaleString()} Pcs</span>`;
-        if (stock > 0) {
+        updateQtyConstraint();
+    });
+
+    ritSelect.addEventListener('change', updateQtyConstraint);
+
+    function updateQtyConstraint() {
+        const rOpt = ritSelect.selectedOptions[0];
+        const sOpt = prodSelect.selectedOptions[0];
+        if(!rOpt || !sOpt) return;
+        
+        const stock = parseInt(sOpt.dataset.stock || '0');
+        const limit = stock; // Limit by stock for special delivery
+        
+        if(limit > 0) {
             inputQty.readOnly = false;
-            inputQty.setAttribute('max', stock);
-            inputQty.dataset.max = stock;
+            inputQty.setAttribute('max', limit);
+            inputQty.dataset.max = limit;
+            inputQty.value = '';
+            inputQty.placeholder = `Max: ${limit}`;
         } else {
             inputQty.readOnly = true;
             inputQty.value = '';
+            inputQty.placeholder = '0';
         }
-    });
+    }
 
     inputQty.addEventListener('input', function() {
         const max = parseInt(this.dataset.max || '0');
@@ -294,7 +477,7 @@ function addRow() {
         if (!document.querySelectorAll('#deliveryBody .item-row').length) {
             document.getElementById('deliveryBody').innerHTML = `
                 <tr class="empty-row text-muted">
-                    <td colspan="7" class="py-4 text-center fw-bold"><i class="bi bi-inbox fs-3 d-block mb-2"></i>Klik <strong>"Tambah Item"</strong> untuk menambah baris pengiriman.</td>
+                    <td colspan="8" class="py-4 text-center fw-bold"><i class="bi bi-inbox fs-3 d-block mb-2"></i>Klik <strong>"Tambah Item"</strong> untuk menambah baris pengiriman.</td>
                 </tr>`;
             hideActions();
         }
@@ -302,8 +485,9 @@ function addRow() {
 }
 
 function updateRowNumbers() {
-    document.querySelectorAll('#deliveryBody .item-row').forEach((r, i) => {
-        r.querySelector('.row-no').textContent = i + 1;
+    document.querySelectorAll('#deliveryBody .custom-row').forEach((r, i) => {
+        const rowNoCell = r.querySelector('.row-no');
+        if (rowNoCell) rowNoCell.textContent = i + 1;
     });
 }
 function showActions() { document.getElementById('deliveryActions').style.display = 'flex'; document.getElementById('deliveryActions').classList.remove('d-none'); }

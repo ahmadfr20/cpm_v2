@@ -1,5 +1,6 @@
 <?php
-$role = session()->get('role');
+$role      = session()->get('role');
+$loggedIn  = (bool) session()->get('logged_in');
 $currentUrl = service('uri')->getPath();
 
 function isActive($path, $currentUrl)
@@ -11,27 +12,55 @@ function isActive($path, $currentUrl)
 <div id="sidebar" class="sidebar bg-dark p-3">
 <ul class="nav nav-pills flex-column">
 
-<!-- ================= DASHBOARD ================= -->
+<!-- ================= PUBLIC MENU (semua orang) ================= -->
 <li class="nav-item">
-    <a class="nav-link <?= $currentUrl === 'dashboard' ? 'active' : '' ?>"
+    <a class="nav-link <?= isActive('panduan', $currentUrl) ? 'active' : 'text-info' ?>"
+       href="/panduan">
+        <i class="bi bi-book-half me-2"></i> Panduan Aplikasi
+    </a>
+</li>
+
+<li class="nav-item mt-2">
+    <a class="nav-link <?= $currentUrl === 'dashboard' || $currentUrl === '' ? 'active' : '' ?>"
        href="/dashboard">
         <i class="bi bi-speedometer2 me-2"></i> Dashboard
     </a>
 </li>
 
-<li class="nav-item">
+<li class="nav-item mt-2">
+    <a class="nav-link <?= isActive('wip/inventory', $currentUrl) ? 'active' : '' ?>"
+       href="/wip/inventory">
+        <i class="bi bi-alarm me-2"></i> WIP List
+    </a>
+</li>
+
+<li class="nav-item mt-2">
     <a class="nav-link <?= isActive('inventory-fg', $currentUrl) ? 'active' : 'text-white' ?>"
        href="/inventory-fg">
         <i class="bi bi-box-seam me-2 text-success"></i> Inventory FG
     </a>
 </li>
 
-<!-- <li class="nav-item mt-3">
-    <a class="nav-link <?= $currentUrl === 'dashboard' ? 'active' : '' ?>"
-       href="/production/daily-schedule/list">
-        <i class="bi bi-alarm me-2"></i> All Daily Schedules
+<?php if ($loggedIn): ?>
+
+<li class="nav-item mt-3">
+    <a class="nav-link <?= isActive('dashboard/daily-performance', $currentUrl) ? 'active' : '' ?>"
+       href="/dashboard/daily-performance">
+        <i class="bi bi-graph-up-arrow me-2"></i> Daily Performance
     </a>
-</li> -->
+</li>
+<li class="nav-item mt-2">
+    <a class="nav-link <?= isActive('dashboard/asakai', $currentUrl) ? 'active' : '' ?>"
+       href="/dashboard/asakai">
+        <i class="bi bi-bar-chart-line me-2"></i> ASAKAI
+    </a>
+</li>
+<li class="nav-item mt-2">
+    <a class="nav-link <?= isActive('dashboard/dandori', $currentUrl) ? 'active' : '' ?>"
+       href="/dashboard/dandori">
+        <i class="bi bi-tools me-2 text-warning"></i> Dandori Report
+    </a>
+</li>
 
 <!-- ================= MASTER DATA ================= -->
 <?php if (in_array($role, ['ADMIN','PPIC'])): ?>
@@ -46,6 +75,7 @@ function isActive($path, $currentUrl)
     <div class="collapse <?= isActive('master',$currentUrl)?'show':'' ?>" id="menuMaster">
         <ul class="nav flex-column ms-3">
             <li><a class="nav-link <?= isActive('master/user',$currentUrl)?'active':'' ?>" href="/master/user">Manage Users</a></li>
+            <li><a class="nav-link <?= isActive('master/operator',$currentUrl)?'active':'' ?>" href="/master/operator">Operator</a></li>
             <li><a class="nav-link <?= isActive('master/shift',$currentUrl)?'active':'' ?>" href="/master/shift">Shift</a></li>
             <li><a class="nav-link <?= isActive('master/time-slot',$currentUrl)?'active':'' ?>" href="/master/time-slot">Time Slot</a></li>
             <li><a class="nav-link <?= isActive('master/product',$currentUrl)?'active':'' ?>" href="/master/product">Product</a></li>
@@ -61,6 +91,7 @@ function isActive($path, $currentUrl)
 </li>
 <?php endif; ?>
 
+<?php if (in_array($role, ['ADMIN', 'PPIC'])): ?>
 <!-- ================= PPC ================= -->
 <li class="nav-item mt-3">
 <a class="nav-link text-white d-flex justify-content-between align-items-center"
@@ -85,15 +116,6 @@ function isActive($path, $currentUrl)
 <li><a class="nav-link" href="/machining/dandori">Daily Dandori Schedule</a></li>
 <li><a class="nav-link" href="/machining/sub-assy-daily-schedule">Sub Assy Daily Schedule</a></li>
 
-<li class="text-secondary small mt-2">Machining Leak Test</li>
-<li><a class="nav-link" href="/machining/leak-test/schedule">Daily Schedule</a></li>
-
-<li class="text-secondary small mt-2">Machining Assy Bushing</li>
-<li><a class="nav-link" href="/machining/assy-bushing/schedule">Daily Schedule</a></li>
-
-<li class="text-secondary small mt-2">Machining Assy Shaft</li>
-<li><a class="nav-link" href="/machining/assy-shaft/schedule">Daily Schedule</a></li>
-
 <li class="text-secondary small mt-2">Shotblast</li>
 <li><a class="nav-link" href="/shot-blasting/schedule">Daily Schedule</a></li>
 
@@ -101,18 +123,40 @@ function isActive($path, $currentUrl)
 <li><a class="nav-link" href="/baritori/schedule">Daily Schedule</a></li>
 
 <li class="text-secondary small mt-2">Painting</li>
-<li><a class="nav-link" href="/painting/daily-schedule">Daily Schedule</a></li>
 <li><a class="nav-link" href="/painting/delivery-external">Delivery to External</a></li>
 <li><a class="nav-link" href="/painting/receive-external">Receiving from External</a></li>
 
+<li class="text-secondary small mt-2">Finished Good</li>
+<li><a class="nav-link <?= isActive('finished-good/delivery-schedule',$currentUrl)?'active':'' ?>" href="/finished-good/delivery-schedule"><i class="bi bi-calendar2-check me-1"></i> FG Delivery Schedule</a></li>
+
 <li class="text-secondary small mt-2">Others</li>
-<li><a class="nav-link" href="/raw-material">Raw Material</a></li>
 <li><a class="nav-link" href="/maintenance">Maintenance</a></li>
 <li><a class="nav-link" href="/production/transfer-machining">Part Transfer to Machining</a></li>
 
 </ul>
 </div>
 </li>
+<?php endif; ?>
+
+<?php if (in_array($role, ['ADMIN', 'PPIC'])): ?>
+<!-- ================= STOCK OPNAME (STO) ================= -->
+<li class="nav-item mt-3">
+<a class="nav-link text-white d-flex justify-content-between align-items-center"
+   data-bs-toggle="collapse"
+   href="#menuSTO">
+    <span><i class="bi bi-ui-checks-grid me-2 text-warning"></i> Stock Opname</span>
+    <i class="bi bi-chevron-down"></i>
+</a>
+
+<div class="collapse <?= isActive('sto',$currentUrl)?'show':'' ?>" id="menuSTO">
+<ul class="nav flex-column ms-3">
+    <li><a class="nav-link <?= (trim($currentUrl, '/') == 'sto')?'active':'' ?>" href="/sto">Data Riwayat STO</a></li>
+    <li><a class="nav-link <?= isActive('sto/input',$currentUrl)?'active':'' ?>" href="/sto/input">Input Manual STO</a></li>
+    <li><a class="nav-link <?= isActive('sto/import',$currentUrl)?'active':'' ?>" href="/sto/import"><i class="bi bi-file-earmark-excel me-1 text-success"></i> Import Excel</a></li>
+</ul>
+</div>
+</li>
+<?php endif; ?>
 
 <!-- ================= CASTING ================= -->
 <li class="nav-item mt-3">
@@ -135,7 +179,7 @@ function isActive($path, $currentUrl)
 </div>
 </li>
 
-<!-- Delivery -->
+<!-- ================= DELIVERY ================= -->
 <li class="nav-item mt-3">
 <a class="nav-link text-white d-flex justify-content-between align-items-center"
    data-bs-toggle="collapse"
@@ -152,7 +196,7 @@ function isActive($path, $currentUrl)
 </div>
 </li>
 
-<!-- receiving -->
+<!-- ================= RECEIVING ================= -->
 <li class="nav-item mt-3">
 <a class="nav-link text-white d-flex justify-content-between align-items-center"
    data-bs-toggle="collapse"
@@ -167,8 +211,6 @@ function isActive($path, $currentUrl)
             <li><a class="nav-link" href="/baritori/receiving">Receiving from Baritori</a></li>
 </div>
 </li>
-
-
 
 <!-- ================= MACHINING ================= -->
 <li class="nav-item mt-3">
@@ -196,38 +238,89 @@ function isActive($path, $currentUrl)
             <li class="text-secondary small mt-2">Assy Shaft</li>
             <li><a class="nav-link" href="/machining/assy-shaft/hourly">Production Result per Jam</a></li>
             <li><a class="nav-link" href="/machining/assy-shaft/production/shift">Production Result per Shift</a></li>
+
+            <li class="text-secondary small mt-2">Jig Plug</li>
+            <li><a class="nav-link" href="/machining/jig-plug/hourly">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/machining/jig-plug/daily-production-achievement">Production Result per Shift</a></li>
+
+            <li class="text-secondary small mt-2">Painting</li>
+            <li><a class="nav-link" href="/painting/hourly">Production Result per Jam</a></li>
+            <li><a class="nav-link" href="/painting/daily-production-achievement">Production Result per Shift</a></li>
     </ul>
 </div>
 </li>
+<?php endif; // end loggedIn (menutup block yang dibuka di atas) ?>
 
-
-
-
+<?php if (in_array($role, ['ADMIN', 'QC'])): ?>
+<!-- ================= QUALITY CONTROL ================= -->
 <li class="nav-item mt-3">
-    <a class="nav-link <?= $currentUrl === 'wip/inventory' ? 'active' : '' ?>"
-       href="/wip/inventory">
-        <i class="bi bi-alarm me-2"></i> WIP List
+    <a class="nav-link text-white d-flex justify-content-between align-items-center"
+       data-bs-toggle="collapse"
+       href="#menuQC">
+        <span><i class="bi bi-shield-check me-2"></i> Quality Control</span>
+        <i class="bi bi-chevron-down"></i>
     </a>
+
+    <div class="collapse <?= isActive('qc', $currentUrl) ? 'show' : '' ?>" id="menuQC">
+        <ul class="nav flex-column ms-3">
+            <li><a class="nav-link <?= ($currentUrl === 'qc' || $currentUrl === '/qc') ? 'active' : '' ?>" href="/qc">QC Inspection</a></li>
+            <li><a class="nav-link <?= isActive('qc/completed-items', $currentUrl) ? 'active' : '' ?>" href="/qc/completed-items">QC Completed History</a></li>
+            <li><a class="nav-link <?= isActive('qc/defect-ongoing', $currentUrl) ? 'active' : '' ?>" href="/qc/defect-ongoing">
+                <i class="bi bi-bug me-1 text-danger"></i> Defect Ongoing
+            </a></li>
+            <li><a class="nav-link <?= isActive('qc/summary-defect-ongoing', $currentUrl) ? 'active' : '' ?>" href="/qc/summary-defect-ongoing">
+                <i class="bi bi-bar-chart-steps me-1 text-warning"></i> Summary Defect Yearly
+            </a></li>
+        </ul>
+    </div>
 </li>
+<?php endif; ?>
 
+<?php if ($loggedIn): ?>
+
+<!-- ================= FG DELIVERY ================= -->
 <li class="nav-item mt-3">
-    <a class="nav-link <?= $currentUrl === 'qc' ? 'active' : '' ?>"
-       href="/qc">
-        <i class="bi bi-shield-check me-2"></i> Quality Control
-    </a>
-</li>
-
-<!-- <li class="nav-item mt-3">
-    <a class="nav-link <?= $currentUrl === 'final-inspection/daily-production' ? 'active' : '' ?>"
-       href="/final-inspection/daily-production">
-        <i class="bi bi-hand-thumbs-up me-2"></i> Final Inspection (Old)
-    </a>
-</li> -->
-
-<li class="nav-item mt-3">
-    <a class="nav-link <?= $currentUrl === 'finished-good/delivery' ? 'active' : '' ?>"
+    <a class="nav-link <?= isActive('finished-good/delivery', $currentUrl) ? 'active' : '' ?>"
        href="/finished-good/delivery">
         <i class="bi bi-box-seam me-2"></i> FG Delivery
+    </a>
+</li>
+
+<!-- ================= RAW MATERIAL ================= -->
+<?php if (in_array($role, ['ADMIN', 'PPIC'])): ?>
+<li class="nav-item mt-3">
+    <a class="nav-link text-white d-flex justify-content-between align-items-center"
+       data-bs-toggle="collapse"
+       href="#menuRawMaterial">
+        <span><i class="bi bi-box-seam me-2"></i> Raw Material</span>
+        <i class="bi bi-chevron-down"></i>
+    </a>
+
+    <div class="collapse <?= isActive('raw-material', $currentUrl) ? 'show' : '' ?>" id="menuRawMaterial">
+        <ul class="nav flex-column ms-3">
+            <li><a class="nav-link <?= isActive('raw-material/ingot', $currentUrl) ? 'active' : '' ?>" href="/raw-material/ingot">Input Ingot</a></li>
+            <li><a class="nav-link <?= isActive('raw-material/scrap', $currentUrl) ? 'active' : '' ?>" href="/raw-material/scrap">Input Scrap</a></li>
+            <li><a class="nav-link <?= isActive('raw-material/stock', $currentUrl) ? 'active' : '' ?>" href="/raw-material/stock">Inventory Stock</a></li>
+        </ul>
+    </div>
+</li>
+<?php endif; ?>
+
+<?php endif; // end loggedIn ?>
+
+<!-- ================= DELIVERY CONTROL BOARD (Public) ================= -->
+<li class="nav-item mt-2">
+    <a class="nav-link <?= isActive('finished-good/delivery-control-board', $currentUrl) ? 'active' : '' ?>"
+       href="/finished-good/delivery-control-board">
+        <i class="bi bi-clipboard2-data me-2 text-warning"></i> Delivery Control Board
+    </a>
+</li>
+
+<!-- ================= SPECIAL CONTROL DELIVERY (Public) ================= -->
+<li class="nav-item mt-1">
+    <a class="nav-link <?= isActive('finished-good/special-control-delivery', $currentUrl) ? 'active' : '' ?>"
+       href="/finished-good/special-control-delivery">
+        <i class="bi bi-truck-front me-2 text-success"></i> Special Control Delivery
     </a>
 </li>
 

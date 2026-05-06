@@ -9,7 +9,8 @@ class HomeController extends BaseController
     public function index()
     {
         return view('dashboard/home', [
-            'fullname' => session()->get('fullname')
+            'fullname'  => session()->get('fullname') ?? null,
+            'logged_in' => (bool) session()->get('logged_in'),
         ]);
     }
 }

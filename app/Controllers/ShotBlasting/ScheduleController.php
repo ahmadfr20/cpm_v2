@@ -128,24 +128,20 @@ class ScheduleController extends BaseController
         return (int)($row['stock_val'] ?? 0);
     }
 
-    // Mengambil referensi Shift dari jadwal Die Casting di tanggal tersebut
-    private function getDcShifts($db, string $date): array
+    private function getShotBlastShifts($db, string $date): array
     {
         if (!$db->tableExists('shifts')) return [];
-        $dcId = $this->getDieCastingProcessId($db);
-        if (!$dcId || !$db->tableExists('daily_schedules')) return $db->table('shifts')->get()->getResultArray();
+        $rows = $db->table('shifts')
+            ->where('is_active', 1)
+            ->groupStart()
+                ->like('shift_name', 'SB')
+                ->orLike('shift_name', 'Shot Blast')
+                ->orLike('shift_name', 'Sand Blast')
+            ->groupEnd()
+            ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
+            ->get()->getResultArray();
 
-        $dateCol = $db->fieldExists('schedule_date', 'daily_schedules') ? 'schedule_date' : null;
-        if (!$dateCol) return $db->table('shifts')->get()->getResultArray();
-
-        $rows = $db->table('daily_schedules')->select('shift_id')->where('process_id', $dcId)->where($dateCol, $date)->groupBy('shift_id')->get()->getResultArray();
-        $ids = [];
-        foreach ($rows as $r) {
-            $sid = (int)($r['shift_id'] ?? 0);
-            if ($sid > 0) $ids[] = $sid;
-        }
-
-        return $ids ? $db->table('shifts')->whereIn('id', $ids)->get()->getResultArray() : $db->table('shifts')->get()->getResultArray();
+        return $rows ?: $db->table('shifts')->where('is_active', 1)->get()->getResultArray();
     }
 
     private function upsertDailyScheduleHeader($db, string $date, int $processId, int $shiftId, string $section): int
@@ -234,7 +230,7 @@ class ScheduleController extends BaseController
                 $av = $this->getLatestStockOnly($db, $date, $prevId, $pid);
 
                 $availableMap[$pid] = ['available' => $av, 'prev_process_id' => $prevId, 'next_process_id' => $nextId > 0 ? $nextId : null];
-                if ($av > 0) $idsAvail[] = $pid;
+                $idsAvail[] = $pid;
             }
 
             if ($idsAvail) {
@@ -264,7 +260,7 @@ class ScheduleController extends BaseController
 
         return view('shot_blasting/schedule/index', [
             'date'          => $date,
-            'shifts'        => $this->getDcShifts($db, $date),
+            'shifts'        => $this->getShotBlastShifts($db, $date),
             'productsAvail' => $productsAvail,
             'availableMap'  => $availableMap,
             'schedules'     => $schedules,
@@ -291,19 +287,6 @@ class ScheduleController extends BaseController
         $sbId = $this->getShotBlastProcessId($db);
         if (!$sbId) return redirect()->back()->with('error', 'Process Shot Blasting tidak ditemukan (process_code SB).');
 
-        $stockCol = $this->detectStockColumn($db);
-        if (!$stockCol) return redirect()->back()->with('error', 'Kolom stock tidak ditemukan di production_wip.');
-
-        $flow   = $this->getPrevNextProcessByFlow($db, $productId, $sbId);
-        $prevId = (int)($flow['prev'] ?? 0);
-        $nextId = (int)($flow['next'] ?? 0);
-
-        if ($prevId <= 0) return redirect()->back()->with('error', 'Flow sebelumnya tidak ditemukan.');
-
-        $availablePrev = $this->getLatestStockOnly($db, $date, $prevId, $productId);
-        if ($availablePrev <= 0) return redirect()->back()->with('error', 'Stock proses sebelumnya kosong (0).');
-        if ($qty > $availablePrev) return redirect()->back()->with('error', "Qty melebihi stock prev. Available: {$availablePrev}");
-
         $machineId = $this->getAutoShotBlastMachineId($db);
         
         $wipDateCol  = $this->detectWipDateColumn($db);
@@ -317,89 +300,6 @@ class ScheduleController extends BaseController
 
             $itemId = $this->insertDailyScheduleItem($db, $dailyId, $shiftId, $machineId, $productId, $qty, $targetHr);
             if ($itemId <= 0) throw new \Exception('Gagal membuat daily_schedule_items.');
-
-            // prev OUT (stock prev berkurang)
-            $prevAfter = max(0, $availablePrev - $qty);
-
-            $prevWip = [
-                $wipDateCol       => $date,
-                'product_id'      => $productId,
-                'from_process_id' => $prevId,
-                'to_process_id'   => $prevId,
-                'qty'             => $qty,
-                'qty_in'          => 0,
-                'qty_out'         => $qty,
-                $stockCol         => $prevAfter,
-                'source_table'    => 'daily_schedule_items',
-                'source_id'       => $itemId,
-                'status'          => 'DONE',
-                'created_at'      => $now,
-            ];
-            if ($transferCol) $prevWip[$transferCol] = $qty;
-            $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $prevWip));
-
-            // SB IN (stock SB bertambah)
-            $sbBefore = $this->getLatestStockOnly($db, $date, $sbId, $productId);
-            $sbAfter  = $sbBefore + $qty;
-
-            $sbIn = [
-                $wipDateCol       => $date,
-                'product_id'      => $productId,
-                'from_process_id' => $prevId,
-                'to_process_id'   => $sbId,
-                'qty'             => $qty,
-                'qty_in'          => $qty,
-                'qty_out'         => 0,
-                $stockCol         => $sbAfter,
-                'source_table'    => 'daily_schedule_items',
-                'source_id'       => $itemId,
-                'status'          => 'DONE',
-                'created_at'      => $now,
-            ];
-            if ($transferCol) $sbIn[$transferCol] = $qty;
-            $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $sbIn));
-
-            // optional send next
-            if ($sendNext === 1) {
-                if ($nextId <= 0) throw new \Exception('Next process tidak ditemukan pada flow.');
-
-                $sbAfter2 = max(0, $sbAfter - $qty);
-                $sbOut = [
-                    $wipDateCol       => $date,
-                    'product_id'      => $productId,
-                    'from_process_id' => $sbId,
-                    'to_process_id'   => $sbId,
-                    'qty'             => $qty,
-                    'qty_in'          => 0,
-                    'qty_out'         => $qty,
-                    $stockCol         => $sbAfter2,
-                    'source_table'    => 'daily_schedule_items',
-                    'source_id'       => $itemId,
-                    'status'          => 'DONE',
-                    'created_at'      => $now,
-                ];
-                if ($transferCol) $sbOut[$transferCol] = $qty;
-                $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $sbOut));
-
-                $nextBefore = $this->getLatestStockOnly($db, $date, $nextId, $productId);
-                $nextAfter  = $nextBefore + $qty;
-                $nextIn = [
-                    $wipDateCol       => $date,
-                    'product_id'      => $productId,
-                    'from_process_id' => $sbId,
-                    'to_process_id'   => $nextId,
-                    'qty'             => $qty,
-                    'qty_in'          => $qty,
-                    'qty_out'         => 0,
-                    $stockCol         => $nextAfter,
-                    'source_table'    => 'daily_schedule_items',
-                    'source_id'       => $itemId,
-                    'status'          => 'DONE',
-                    'created_at'      => $now,
-                ];
-                if ($transferCol) $nextIn[$transferCol] = $qty;
-                $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $nextIn));
-            }
 
             if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();

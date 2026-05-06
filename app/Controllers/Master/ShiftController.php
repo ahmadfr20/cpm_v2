@@ -72,13 +72,17 @@ class ShiftController extends BaseController
         foreach ($shiftsRaw as $row) {
             $shiftId = (int)($row['id'] ?? 0);
 
-            // Ambil slot sesuai urutan pivot (penting untuk begin/end yang berurutan)
-            $selected = $this->pivot
-                ->select('shift_time_slots.time_slot_id, time_slots.time_start, time_slots.time_end')
-                ->join('time_slots', 'time_slots.id = shift_time_slots.time_slot_id', 'left')
-                ->where('shift_time_slots.shift_id', $shiftId)
-                ->orderBy('shift_time_slots.id', 'ASC') 
-                ->findAll();
+            // Ambil slot sesuai urutan pivot — include is_break (raw query untuk hindari CI4 alias issue)
+            $db = db_connect();
+            $selected = $db->query(
+                "SELECT sts.id AS pivot_id, sts.time_slot_id, sts.is_break,
+                        ts.time_start, ts.time_end
+                 FROM shift_time_slots sts
+                 LEFT JOIN time_slots ts ON ts.id = sts.time_slot_id
+                 WHERE sts.shift_id = ?
+                 ORDER BY sts.id ASC",
+                [$shiftId]
+            )->getResultArray();
 
             $slots = [];
             $totalMinutes = 0;
@@ -86,20 +90,15 @@ class ShiftController extends BaseController
             foreach ($selected as $s) {
                 $st = substr((string)($s['time_start'] ?? ''), 0, 5);
                 $en = substr((string)($s['time_end'] ?? ''), 0, 5);
+                $isBreak = (int)($s['is_break'] ?? 0);
 
                 $mins = 0;
                 if ($st && $en) {
                     $sArr = explode(':', $st);
                     $eArr = explode(':', $en);
-                    
-                    // Konversi ke total menit harian
                     $mStart = ((int)$sArr[0] * 60) + (int)$sArr[1];
                     $mEnd   = ((int)$eArr[0] * 60) + (int)$eArr[1];
-                    
-                    // Jika melewati jam 00:00 (end < start), tambah 24 jam (1440 menit)
-                    if ($mEnd <= $mStart) {
-                        $mEnd += 1440;
-                    }
+                    if ($mEnd <= $mStart) $mEnd += 1440;
                     $mins = $mEnd - $mStart;
                 }
 
@@ -108,9 +107,11 @@ class ShiftController extends BaseController
                     'start'        => $st,
                     'end'          => $en,
                     'minutes'      => $mins,
+                    'is_break'     => $isBreak,
                 ];
 
-                $totalMinutes += $mins;
+                // Hanya hitung menit aktif (bukan istirahat)
+                if (!$isBreak) $totalMinutes += $mins;
             }
 
             // Begin dan End secara presisi diambil dari array index pertama dan terakhir
@@ -169,21 +170,26 @@ class ShiftController extends BaseController
 
     public function updateSlots($id)
     {
-        $id = (int)$id;
-        $slots = $this->request->getPost('slots') ?? [];
+        $id     = (int)$id;
+        $slots  = $this->request->getPost('slots') ?? [];  // array of time_slot_id
+        $db     = db_connect();
 
         // Hapus data pivot lama
-        $this->pivot->where('shift_id', $id)->delete();
+        $db->table('shift_time_slots')->where('shift_id', $id)->delete();
 
-        // Insert urutan slot baru yang dikirim form
-        foreach ($slots as $tsId) {
+        // Insert slot + is_break per slot
+        foreach ($slots as $idx => $tsId) {
             $tsId = (int)$tsId;
-            if ($tsId > 0) {
-                $this->pivot->insert([
-                    'shift_id'     => $id,
-                    'time_slot_id' => $tsId,
-                ]);
-            }
+            if ($tsId <= 0) continue;
+
+            // Checkbox name: is_break_{idx}_{shiftId}
+            $isBreak = (int)($this->request->getPost("is_break_{$idx}_{$id}") == '1');
+
+            $db->table('shift_time_slots')->insert([
+                'shift_id'     => $id,
+                'time_slot_id' => $tsId,
+                'is_break'     => $isBreak,
+            ]);
         }
 
         return redirect()->to('/master/shift')->with('success', 'Time slot shift berhasil diperbarui');

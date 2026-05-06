@@ -49,9 +49,11 @@
   .w-sec{ width:120px; }
   .w-days{ width:90px; }
   .w-shift{ width:60px; text-align:center; font-weight:800; }
+  .w-name{ width:120px; font-weight:bold; }
   .w-time{ width:70px; text-align:center; font-weight:700; }
   .w-slots{ min-width:350px; }
   .w-total{ width:100px; text-align:right; font-weight:900; }
+  .w-rest{ width:250px; }
   .w-action{ width:120px; text-align:center; }
 
   .cell-muted{ color:#777; font-size:12px; line-height: 1.2; }
@@ -163,6 +165,7 @@ foreach ($timeSlots as $ts) {
         <th class="w-sec">section</th>
         <th class="w-days">days</th>
         <th class="w-shift">shift</th>
+        <th class="w-name">name</th>
         <th class="w-time">begin</th>
         <th class="w-time">end</th>
         <th class="w-slots">time slots (berurutan)</th>
@@ -188,6 +191,7 @@ foreach ($timeSlots as $ts) {
           <td class="w-sec"><?= esc($s['section']) ?></td>
           <td class="w-days"><?= esc($s['days_label']) ?></td>
           <td class="w-shift"><?= (int)$s['shift_no'] ?></td>
+          <td class="w-name"><?= esc($s['shift_name']) ?></td>
 
           <td class="w-time"><span class="beginTxt"><?= esc($s['begin']) ?></span></td>
           <td class="w-time"><span class="endTxt"><?= esc($s['end']) ?></span></td>
@@ -201,6 +205,10 @@ foreach ($timeSlots as $ts) {
                   <select class="form-select form-select-sm slotSelect" name="slots[]" style="width:140px;" form="form-<?= (int)$s['id'] ?>">
                     <?= str_replace('value="'.$slot['time_slot_id'].'"', 'value="'.$slot['time_slot_id'].'" selected', $optsHtml) ?>
                   </select>
+                  <label class="ms-2 mb-0" style="font-size:11px; white-space:nowrap; cursor:pointer;">
+                      <input type="checkbox" name="is_break_<?= $idx ?>_<?= (int)$s['id'] ?>" value="1" <?= (!empty($slot['is_break'])) ? 'checked' : '' ?> form="form-<?= (int)$s['id'] ?>"> 
+                      Istirahat?
+                  </label>
                   <button type="button" class="btn btn-sm text-danger btn-remove-slot ms-1 px-1 py-0 border-0" title="Hapus Slot"><i class="bi bi-x-circle-fill"></i></button>
                 </div>
               <?php endforeach; ?>
@@ -208,6 +216,8 @@ foreach ($timeSlots as $ts) {
               <button type="button" class="btn btn-sm btn-outline-primary btn-add-slot">+ Slot</button>
             </div>
           </td>
+
+
 
           <td class="w-total"><span class="totalMinutes"><?= (int)$s['total_minutes'] ?></span></td>
 
@@ -283,6 +293,10 @@ foreach ($timeSlots as $ts) {
     <select class="form-select form-select-sm slotSelect" name="slots[]" style="width:140px;">
       <?= $optsHtml ?>
     </select>
+    <label class="ms-2 mb-0" style="font-size:11px; white-space:nowrap; cursor:pointer;">
+        <input type="checkbox" name="is_break_temp" value="1" class="template-checkbox"> 
+        Istirahat?
+    </label>
     <button type="button" class="btn btn-sm text-danger btn-remove-slot ms-1 px-1 py-0 border-0" title="Hapus Slot"><i class="bi bi-x-circle-fill"></i></button>
   </div>
 </template>
@@ -312,12 +326,21 @@ foreach ($timeSlots as $ts) {
       $(this).find('.slot-number').text(index + 1);
 
       const select = $(this).find('.slotSelect');
+      const isBreakCb = $(this).find('input[type="checkbox"]');
+      const shiftId = $tr.attr('id').replace('shift-row-', '');
+      
+      if (isBreakCb.length) {
+          isBreakCb.attr('name', `is_break_${index}_${shiftId}`);
+          isBreakCb.attr('form', `form-${shiftId}`);
+      }
+
       if (select.val()) {
         const opt = select[0].options[select[0].selectedIndex];
         validSlots.push({
           st: opt?.dataset?.start || '',
           en: opt?.dataset?.end || '',
-          mins: parseInt(opt?.dataset?.minutes || '0', 10) || 0
+          mins: parseInt(opt?.dataset?.minutes || '0', 10) || 0,
+          isRest: isBreakCb.prop('checked')
         });
       }
     });
@@ -328,7 +351,9 @@ foreach ($timeSlots as $ts) {
     if (validSlots.length > 0) {
       begin = validSlots[0].st;
       end = validSlots[validSlots.length - 1].en;
-      validSlots.forEach(s => { total += s.mins; });
+      validSlots.forEach(s => { 
+          if(!s.isRest) total += s.mins; 
+      });
     }
 
     $tr.find('.totalMinutes').text(total);
@@ -336,8 +361,8 @@ foreach ($timeSlots as $ts) {
     $tr.find('.endTxt').text(end);
   }
 
-  // Trigger rekalkulasi saat nilai dropdown berubah
-  $(document).on('change', '.slotSelect', function(){
+  // Trigger rekalkulasi saat nilai dropdown atau checkbox berubah
+  $(document).on('change', '.slotSelect, input[type="checkbox"]', function(){
     recalcRow($(this).closest('tr'));
   });
 
@@ -378,7 +403,7 @@ foreach ($timeSlots as $ts) {
 
 function exportExcel() {
     const data = [];
-    data.push(['Section', 'Days', 'Shift', 'Begin', 'End', 'Time Slots', 'Total Minutes']);
+    data.push(['Section', 'Days', 'Shift', 'Name', 'Begin', 'End', 'Time Slots', 'Total Minutes']);
     
     document.querySelectorAll('.shift-table tbody tr').forEach(tr => {
         if(tr.querySelector('td.text-center.text-muted')) return;
@@ -386,6 +411,7 @@ function exportExcel() {
         const sec = tr.querySelector('.w-sec')?.innerText.trim() || '';
         const days = tr.querySelector('.w-days')?.innerText.trim() || '';
         const shift = tr.querySelector('.w-shift')?.innerText.trim() || '';
+        const name = tr.querySelector('.w-name')?.innerText.trim() || '';
         const begin = tr.querySelector('.beginTxt')?.innerText.trim() || '';
         const end = tr.querySelector('.endTxt')?.innerText.trim() || '';
         const total = tr.querySelector('.totalMinutes')?.innerText.trim() || '';
@@ -398,7 +424,7 @@ function exportExcel() {
             }
         });
         
-        data.push([sec, days, shift, begin, end, slots.join(', '), total]);
+        data.push([sec, days, shift, name, begin, end, slots.join(', '), total]);
     });
     
     const ws = XLSX.utils.aoa_to_sheet(data);

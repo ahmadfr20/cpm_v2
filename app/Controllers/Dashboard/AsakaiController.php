@@ -60,9 +60,10 @@ class AsakaiController extends BaseController
             return $posA <=> $posB;
         });
 
-        // Ambil list Shift (aktif)
+        // Ambil list Shift (aktif) difilter berdasarkan hari (mon-thu, fri, sat, sun)
         $shifts = $db->table('shifts')
             ->where('is_active', 1)
+            ->where('day_group', $this->getDayGroup($date))
             ->orderBy('shift_code', 'ASC')
             ->get()
             ->getResultArray();
@@ -82,6 +83,32 @@ class AsakaiController extends BaseController
             }
         }
 
+        $operatorData = [];
+        $leaderData = [];
+        foreach ($sectionsList as $sec) {
+            $operatorData[$sec] = [];
+            $leaderData[$sec] = [];
+            foreach ($shifts as $shift) {
+                $opName = '';
+                $ldName = '';
+                if (strtoupper($sec) === 'DIE CASTING' && $db->tableExists('die_casting_hourly')) {
+                    $op = $db->table('die_casting_hourly')->select('operator_name, leader_name')->where('production_date', $date)->where('shift_id', $shift['id'])->orderBy('id', 'DESC')->get()->getRowArray();
+                    if ($op) {
+                        $opName = $op['operator_name'];
+                        $ldName = $op['leader_name'];
+                    }
+                } elseif (strtoupper($sec) === 'MACHINING' && $db->tableExists('machining_hourly')) {
+                    $op = $db->table('machining_hourly')->select('operator_name, leader_name')->where('production_date', $date)->where('shift_id', $shift['id'])->orderBy('id', 'DESC')->get()->getRowArray();
+                    if ($op) {
+                        $opName = $op['operator_name'];
+                        $ldName = $op['leader_name'];
+                    }
+                }
+                $operatorData[$sec][$shift['id']] = $opName;
+                $leaderData[$sec][$shift['id']] = $ldName;
+            }
+        }
+
         // =================================================================
         // LOGIKA EXPORT EXCEL
         // =================================================================
@@ -96,17 +123,32 @@ class AsakaiController extends BaseController
                 'date'        => $date,
                 'selectedSec' => $section,
                 'shifts'      => $shifts,
-                'summaryData' => $summaryData
+                'summaryData' => $summaryData,
+                'operatorData'=> $operatorData,
+                'leaderData'  => $leaderData
             ]);
             exit;
         }
+
+        // =================================================================
+        // MACHINE PERFORMANCE DATA (with NG/DT names per machine)
+        // =================================================================
+        $machinePerf = [];
+        $perfCtrl = new \App\Controllers\Dashboard\PerformanceController();
+        $dcData = $perfCtrl->getDieCastingData($db, $date);
+        $machinePerf['Die Casting'] = $dcData['machines'] ?? [];
+        $mcData = $perfCtrl->getMachiningData($db, $date);
+        $machinePerf['Machining'] = $mcData['machines'] ?? [];
 
         return view('dashboard/asakai/index', [
             'date'         => $date,
             'selectedSec'  => $section,
             'sectionsList' => $sectionsList,
             'shifts'       => $shifts,
-            'summaryData'  => $summaryData
+            'summaryData'  => $summaryData,
+            'operatorData' => $operatorData,
+            'leaderData'   => $leaderData,
+            'machinePerf'  => $machinePerf,
         ]);
     }
 
@@ -183,6 +225,62 @@ class AsakaiController extends BaseController
             $productsMap[$pid]['shifts'][$sid]['fg'] += (int)$a['qty_in'];
         }
 
+        $operatorsAndRemarks = [];
+        $ngDtMap = [];
+        $hourlyTbl = null;
+        if (strtoupper($sectionName) === 'DIE CASTING' && $db->tableExists('die_casting_hourly')) $hourlyTbl = 'die_casting_hourly';
+        if (strtoupper($sectionName) === 'MACHINING' && $db->tableExists('machining_hourly')) $hourlyTbl = 'machining_hourly';
+        if (strtoupper($sectionName) === 'ASSY BUSHING' && $db->tableExists('machining_assy_bushing_hourly')) $hourlyTbl = 'machining_assy_bushing_hourly';
+        if (strtoupper($sectionName) === 'ASSY SHAFT' && $db->tableExists('machining_assy_shaft_hourly')) $hourlyTbl = 'machining_assy_shaft_hourly';
+        if (strtoupper($sectionName) === 'LEAK TEST' && $db->tableExists('machining_leak_test_hourly')) $hourlyTbl = 'machining_leak_test_hourly';
+
+        if ($hourlyTbl) {
+            // Check existence of ng and dt columns
+            $hasNg = $db->fieldExists('qty_ng', $hourlyTbl);
+            $hasDt1 = $db->fieldExists('downtime_minute', $hourlyTbl);
+            $hasDt2 = $db->fieldExists('downtime', $hourlyTbl);
+            $dtCol = $hasDt1 ? 'downtime_minute' : ($hasDt2 ? 'downtime' : false);
+            
+            $hasOp = $db->fieldExists('operator_name', $hourlyTbl);
+            $hasRem = $db->fieldExists('remark', $hourlyTbl);
+
+            $selCols = 'product_id, shift_id';
+            if ($hasOp) $selCols .= ', operator_name';
+            if ($hasRem) $selCols .= ', remark';
+            if ($hasNg) $selCols .= ', qty_ng';
+            if ($dtCol) $selCols .= ", $dtCol as dt_min";
+
+            $hrm = $db->table($hourlyTbl)
+                     ->select($selCols)
+                     ->where('production_date', $date)
+                     ->get()->getResultArray();
+
+            foreach ($hrm as $h) {
+                $pid_loop = (int)$h['product_id'];
+                $sid_loop = (int)$h['shift_id'];
+                
+                if (!isset($operatorsAndRemarks[$pid_loop][$sid_loop])) {
+                    $operatorsAndRemarks[$pid_loop][$sid_loop] = ['operators' => [], 'remarks' => []];
+                }
+                if ($hasOp && !empty(trim((string)$h['operator_name']))) {
+                    $operatorsAndRemarks[$pid_loop][$sid_loop]['operators'][] = trim((string)$h['operator_name']);
+                }
+                if ($hasRem && !empty(trim((string)$h['remark']))) {
+                    $operatorsAndRemarks[$pid_loop][$sid_loop]['remarks'][] = trim((string)$h['remark']);
+                }
+
+                if (!isset($ngDtMap[$pid_loop][$sid_loop])) {
+                    $ngDtMap[$pid_loop][$sid_loop] = ['ng' => 0, 'dt' => 0];
+                }
+                if ($hasNg) {
+                    $ngDtMap[$pid_loop][$sid_loop]['ng'] += (int)($h['qty_ng'] ?? 0);
+                }
+                if ($dtCol) {
+                    $ngDtMap[$pid_loop][$sid_loop]['dt'] += (int)($h['dt_min'] ?? 0);
+                }
+            }
+        }
+
         /* ================= 3. FORMAT HASIL & HITUNG EFF ================= */
         $result = [];
         foreach ($productsMap as $pid => $data) {
@@ -195,13 +293,42 @@ class AsakaiController extends BaseController
                 $t = $data['shifts'][$sid]['target'] ?? 0;
                 $f = $data['shifts'][$sid]['fg'] ?? 0;
                 $e = $t > 0 ? round(($f / $t) * 100, 1) : 0;
+                
+                $n = $ngDtMap[$pid][$sid]['ng'] ?? 0;
+                $d = $ngDtMap[$pid][$sid]['dt'] ?? 0;
+                $n_pct = ($f + $n) > 0 ? round(($n / ($f + $n)) * 100, 1) : 0;
 
-                $shiftOutput[$sid] = ['target' => $t, 'fg' => $f, 'eff' => $e];
-                $totalTarget += $t;
-                $totalFg     += $f;
+                $ops = []; $rems = [];
+                if (isset($operatorsAndRemarks[$pid][$sid])) {
+                    $ops = array_unique($operatorsAndRemarks[$pid][$sid]['operators']);
+                    $rems = array_unique($operatorsAndRemarks[$pid][$sid]['remarks']);
+                }
+
+                $shiftOutput[$sid] = [
+                    'target' => $t, 
+                    'fg' => $f, 
+                    'ng' => $n,
+                    'ng_pct' => $n_pct,
+                    'dt' => $d,
+                    'eff' => $e,
+                    'operator' => implode(', ', $ops),
+                    'remark' => implode(' | ', $rems)
+                ];
+            }
+
+            $totalTarget = 0;
+            $totalFg     = 0;
+            $totalNg     = 0;
+            $totalDt     = 0;
+            foreach ($shiftOutput as $so) {
+                $totalTarget += $so['target'];
+                $totalFg     += $so['fg'];
+                $totalNg     += $so['ng'];
+                $totalDt     += $so['dt'];
             }
 
             $totalEff = $totalTarget > 0 ? round(($totalFg / $totalTarget) * 100, 1) : 0;
+            $totalNgPct = ($totalFg + $totalNg) > 0 ? round(($totalNg / ($totalFg + $totalNg)) * 100, 1) : 0;
 
             $result[$pid] = [
                 'part_no'      => $data['part_no'],
@@ -209,6 +336,9 @@ class AsakaiController extends BaseController
                 'shifts'       => $shiftOutput,
                 'total_target' => $totalTarget,
                 'total_fg'     => $totalFg,
+                'total_ng'     => $totalNg,
+                'total_ng_pct' => $totalNgPct,
+                'total_dt'     => $totalDt,
                 'total_eff'    => $totalEff
             ];
         }

@@ -16,7 +16,15 @@
   table.tbl th{ background:#f1f5f9;border-bottom:1px solid #cbd5e1;padding:10px;text-align:center;font-weight:900; }
   table.tbl td{ border-bottom:1px solid #e5e7eb;padding:10px;vertical-align:middle; }
   .num{ text-align:right;font-variant-numeric:tabular-nums; }
+  
+  /* Select2 Styling */
+  .select2-container .select2-selection--single{ height: 31px; border: 1px solid #dee2e6; }
+  .select2-container--default .select2-selection--single .select2-selection__rendered{ line-height: 31px; font-size:13px; }
+  .select2-container--default .select2-selection--single .select2-selection__arrow{ height: 31px; }
+  .select2-container{ width:100% !important; }
 </style>
+
+<link href="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/css/select2.min.css" rel="stylesheet"/>
 
 <div class="mb-2">
   <div class="title">SHOT BLASTING – Schedule</div>
@@ -63,7 +71,7 @@
       </div>
 
       <div>
-        <label>Shift (dari Die Casting)</label>
+        <label>Shift Shot Blasting</label>
         <select name="shift_id" class="form-select form-select-sm" required>
           <option value="">-- shift --</option>
           <?php foreach ($shifts as $s): ?>
@@ -73,7 +81,7 @@
       </div>
 
       <div>
-        <label>Product (Hanya yg ada stock)</label>
+        <label>Product</label>
         <select name="product_id" id="productSelect" class="form-select form-select-sm" required <?= empty($productsAvail) ? 'disabled' : '' ?>>
           <option value="">-- pilih product --</option>
           <?php foreach ($productsAvail as $p): ?>
@@ -137,11 +145,18 @@
   </table>
 </div>
 
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/select2@4.1.0-rc.0/dist/js/select2.min.js"></script>
 <script>
 (function(){
   const productSelect = document.getElementById('productSelect');
   const qtyInput = document.getElementById('qtyInput');
   const flowHint = document.getElementById('flowHint');
+
+  // Initialize Select2
+  if (productSelect) {
+      $(productSelect).select2();
+  }
 
   function refreshHint(){
     if (!productSelect) return;
@@ -155,12 +170,13 @@
     const prev = opt.dataset.prev || "-";
     if (flowHint) flowHint.textContent = `Prev Process: ${prev} | Available: ${av}`;
     if (qtyInput){
-      if (av > 0) qtyInput.setAttribute('max', String(av));
-      else qtyInput.removeAttribute('max');
+      qtyInput.removeAttribute('max');
     }
   }
 
-  if (productSelect) productSelect.addEventListener('change', refreshHint);
+  if (productSelect) {
+      $(productSelect).on('change', refreshHint);
+  }
   refreshHint();
 })();
 </script>

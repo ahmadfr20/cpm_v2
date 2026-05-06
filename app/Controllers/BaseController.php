@@ -42,4 +42,21 @@ abstract class BaseController extends Controller
         // Preload any models, libraries, etc, here.
         // $this->session = service('session');
     }
+
+    /**
+     * Helper mapping a date to the `day_group` ENUM defined in the shifts table
+     */
+    protected function getDayGroup(string $date): string
+    {
+        $dayNum = (int)date('N', strtotime($date));
+        if ($dayNum >= 1 && $dayNum <= 4) {
+            return 'MON_THU';
+        } elseif ($dayNum === 5) {
+            return 'FRI';
+        } elseif ($dayNum === 6) {
+            return 'SAT';
+        } else {
+            return 'SUN';
+        }
+    }
 }

@@ -49,22 +49,23 @@ class CustomerController extends BaseController
      * ✅ Generate customer_code_app: CUST-0001, CUST-0002, ...
      * Aman dari duplicate dengan loop check + transaksi.
      */
-    private function generateCustomerCodeApp(): string
+    private function generateCustomerCodeApp(int $offset = 0): string
     {
-        // Ambil customer_code_app terbesar yang diawali "CUST-"
-        $row = $this->customerModel
+        // Ambil semua customer_code_app yang diawali "CUST-"
+        $rows = $this->customerModel
             ->select('customer_code_app')
             ->like('customer_code_app', 'CUST-', 'after')
-            ->orderBy('customer_code_app', 'DESC')
-            ->first();
+            ->findAll();
 
-        $lastNumber = 0;
-        if ($row && !empty($row['customer_code_app'])) {
-            $num = (int) preg_replace('/\D+/', '', (string) $row['customer_code_app']);
-            $lastNumber = $num;
+        $maxNum = 0;
+        foreach ($rows as $r) {
+            $num = (int) preg_replace('/\D+/', '', (string) $r['customer_code_app']);
+            if ($num > $maxNum) {
+                $maxNum = $num;
+            }
         }
 
-        $next = $lastNumber + 1;
+        $next = $maxNum + 1 + $offset;
         return 'CUST-' . str_pad((string)$next, 4, '0', STR_PAD_LEFT);
     }
 
@@ -95,16 +96,20 @@ class CustomerController extends BaseController
                 if ($tries > 20) {
                     throw new \Exception('Gagal generate Customer Code App. Silakan coba lagi.');
                 }
-                $codeApp = $this->generateCustomerCodeApp();
+                $codeApp = $this->generateCustomerCodeApp($tries);
+            }
+
+            $manualCode = trim((string)$this->request->getPost('customer_code'));
+            if (empty($manualCode)) {
+                $manualCode = $codeApp; // fallback ke app code agar unik
             }
 
             $this->customerModel->insert([
-                // ✅ Accurate code (bebas)
-                'customer_code'     => trim((string)$this->request->getPost('customer_code')),
+                // ✅ Accurate code (bebas atau fallback)
+                'customer_code'     => $manualCode,
                 // ✅ App code (auto)
                 'customer_code_app' => $codeApp,
                 'customer_name'     => trim((string)$this->request->getPost('customer_name')),
-                'is_active'         => (int) ($this->request->getPost('is_active') ?? 1),
             ]);
 
             if ($db->transStatus() === false) {
@@ -137,12 +142,16 @@ class CustomerController extends BaseController
                 ->with('errors', $this->validator->getErrors());
         }
 
+        $manualCode = trim((string)$this->request->getPost('customer_code'));
+        if (empty($manualCode)) {
+            $manualCode = $customer['customer_code_app'];
+        }
+
         $this->customerModel->update($id, [
             // ✅ Accurate code boleh diubah (bebas)
-            'customer_code' => trim((string)$this->request->getPost('customer_code')),
+            'customer_code' => $manualCode,
             // ✅ App code TIDAK diubah
             'customer_name' => trim((string)$this->request->getPost('customer_name')),
-            'is_active'     => (int) ($this->request->getPost('is_active') ?? ($customer['is_active'] ?? 1)),
         ]);
 
         return redirect()->to('/master/customer')->with('success', 'Customer berhasil diupdate');

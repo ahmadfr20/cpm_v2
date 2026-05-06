@@ -49,22 +49,23 @@ class VendorController extends BaseController
      * Generate vendor_code_app: VEND-1, VEND-2, ...
      * (auto increment berdasarkan max angka yang sudah ada)
      */
-    private function generateVendorCodeApp(): string
+    private function generateVendorCodeApp(int $offset = 0): string
     {
-        $row = $this->vendorModel
+        $rows = $this->vendorModel
             ->select('vendor_code_app')
             ->like('vendor_code_app', 'VEND-', 'after')
-            ->orderBy('vendor_code_app', 'DESC')
-            ->first();
+            ->findAll();
 
-        $lastNumber = 0;
-        if ($row && !empty($row['vendor_code_app'])) {
-            $num = (int) preg_replace('/\D+/', '', (string) $row['vendor_code_app']);
-            $lastNumber = $num;
+        $maxNum = 0;
+        foreach ($rows as $r) {
+            $num = (int) preg_replace('/\D+/', '', (string) $r['vendor_code_app']);
+            if ($num > $maxNum) {
+                $maxNum = $num;
+            }
         }
 
-        $next = $lastNumber + 1;
-        return 'VEND-' . $next; // kalau mau padding: 'VEND-' . str_pad((string)$next, 4, '0', STR_PAD_LEFT);
+        $next = $maxNum + 1 + $offset;
+        return 'VEND-' . $next;
     }
 
     public function store()
@@ -93,7 +94,7 @@ class VendorController extends BaseController
                 if ($tries > 20) {
                     throw new \Exception('Gagal generate vendor code app. Silakan coba lagi.');
                 }
-                $codeApp = $this->generateVendorCodeApp();
+                $codeApp = $this->generateVendorCodeApp($tries);
             }
 
             $this->vendorModel->insert([

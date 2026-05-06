@@ -43,7 +43,7 @@
 
 <div class="d-flex flex-column flex-md-row justify-content-between align-items-start align-items-md-center mb-3 gap-2">
   <div>
-      <h4 class="mb-0 text-dark fw-bold">DAILY SCHEDULE – MACHINING</h4>
+      <h4 class="mb-0 text-dark fw-bold">DAILY SCHEDULE &ndash; <?= strtoupper(esc($category)) ?></h4>
 <div class="d-flex justify-content-end mb-3 gap-2 d-print-none">
     <button type="button" class="btn btn-outline-success btn-sm fw-bold" onclick="exportGenericExcel()">
         <i class="bi bi-file-earmark-excel"></i> Export Excel
@@ -55,11 +55,13 @@
       <small class="text-muted">Mengambil data dari WIP Transfer Machining</small>
   </div>
   <div>
-      <a href="<?= base_url('machining/daily-schedule/inventory?date='.$date) ?>" class="btn btn-primary fw-bold btn-sm rounded-pill px-3">
-        <i class="bi bi-box-seam me-1"></i> Stock Area MC
+      <a href="<?= base_url('machining/daily-schedule/inventory?category='.urlencode($category).'&date='.$date) ?>" class="btn btn-primary fw-bold btn-sm rounded-pill px-3">
+        <i class="bi bi-box-seam me-1"></i> Stock Area <?= esc($category) ?>
       </a>
   </div>
 </div>
+
+<?= $this->include('layout/schedule_unified_ui') ?>
 
 <?php if (session()->getFlashdata('success')): ?>
   <div class="alert alert-success shadow-sm"><i class="bi bi-check-circle-fill me-2"></i><?= esc(session()->getFlashdata('success')) ?></div>
@@ -73,6 +75,7 @@
         <form method="get" class="row align-items-end">
             <div class="col-md-3">
                 <label class="form-label fw-bold text-muted small">PILIH TANGGAL JADWAL</label>
+                <input type="hidden" name="category" value="<?= esc($category) ?>">
                 <input type="date" name="date" value="<?= esc($date) ?>" class="form-control form-control-sm" onchange="this.form.submit()">
             </div>
 
@@ -93,6 +96,7 @@
 <form method="post" action="/machining/daily-schedule/store" class="mc-form">
     <?= csrf_field() ?>
     <input type="hidden" name="date" value="<?= esc($date) ?>">
+    <input type="hidden" name="category" value="<?= esc($category) ?>">
 
     <?php foreach ($shifts as $shift): ?>
       <div class="card shadow-sm border-0 mb-4">
@@ -102,26 +106,8 @@
           
           <div class="card-body bg-light border-bottom py-2">
              <div class="d-flex align-items-center gap-3">
-                 <label class="fw-bold mb-0 text-dark"><i class="bi bi-stop-circle"></i> Waktu Berakhir Shift:</label>
-                 <div style="min-width: 250px;">
-                     <select class="form-select form-select-sm shift-end-select" name="shift_end_slots[<?= $shift['id'] ?>]" data-shift="<?= (int)$shift['id'] ?>">
-                        <?php 
-                          $savedEndId = $shiftEndSlots[$shift['id']] ?? null;
-                          $lastSlotId = !empty($shiftSlots[$shift['id']]) ? end($shiftSlots[$shift['id']])['time_slot_id'] : null;
-                          $activeEndId = $savedEndId ?: $lastSlotId;
-                        ?>
-                        <?php foreach ($shiftSlots[$shift['id']] as $slot): ?>
-                          <?php $sel = ($activeEndId == $slot['time_slot_id']) ? 'selected' : ''; ?>
-                          <option value="<?= $slot['time_slot_id'] ?>" data-seconds="<?= $slot['seconds'] ?>" <?= $sel ?>><?= $slot['label'] ?></option>
-                        <?php endforeach; ?>
-                     </select>
-                 </div>
-                 <div class="ms-auto fs-6 text-end">
-                     <span class="text-muted">Waktu Produksi:</span> 
-                     <span class="shift-net-minutes text-primary fw-bold fs-5 ms-1" data-shift="<?= (int)$shift['id'] ?>" data-net="0">
-                         0 Menit
-                     </span>
-                 </div>
+                 <label class="fw-bold mb-0 text-dark"><i class="bi bi-info-circle"></i> Info Target Produksi:</label>
+                 <div class="text-muted ms-2 small">Target Planning Harian (Pcs) akan menyesuaikan dengan durasi <b>Waktu Berakhir</b> yang dipilih pada masing-masing mesin.</div>
              </div>
           </div>
 
@@ -137,7 +123,8 @@
                         <th style="width:130px">Stock Ready</th>
                         <th style="width:130px" class="text-primary">Planning</th>
                         <th style="width:90px">Actual</th>
-                        <th style="min-width:140px;">Dandori & Waktu</th>
+                        <th style="min-width:200px;">Waktu Produksi Spesifik</th>
+                        <th style="min-width:140px;">Dandori &amp; Waktu</th>
                         <th style="width:60px">Hapus</th>
                       </tr>
                     </thead>
@@ -147,7 +134,7 @@
                     foreach ($machines as $m):
                       $rows = $planMap[$shift['id']][$m['id']] ?? [[]]; 
                       
-                      foreach ($rows as $plan):
+                      foreach ($rows as $idx => $plan):
                           $uuid = uniqid('row_'); 
                           $prodId = $plan['product_id'] ?? '';
                           $actKey  = $shift['id'].'_'.$m['id'].'_'.$prodId;
@@ -156,7 +143,8 @@
                           // Ambil data dandori dari map
                           $dandoriData = $dandoriMap[$shift['id']][$m['id']][$prodId] ?? null;
                           $isDandori = $dandoriData !== null;
-                          $dandoriTimeSlotId = $isDandori ? $dandoriData : '';
+                          $dandoriTimeSlotIds = $isDandori ? ($dandoriData['time_slot_ids'] ?? []) : [];
+                          $dandoriSlotMinutes = $isDandori ? ($dandoriData['slot_minutes'] ?? []) : [];
                     ?>
                       <tr class="schedule-row" data-shift="<?= (int)$shift['id'] ?>">
                         <td class="text-muted fw-bold td-line"><?= esc($m['line_position']) ?></td>
@@ -165,7 +153,7 @@
                           <select class="form-select form-select-sm machine-select fw-bold" name="items[<?= $uuid ?>][machine_id]">
                             <?php foreach ($machines as $mach): ?>
                               <option value="<?= $mach['id'] ?>" data-line="<?= esc($mach['line_position']) ?>" <?= ($mach['id'] == $m['id']) ? 'selected' : '' ?>>
-                                <?= esc($mach['line_position'] . ' - ' . $mach['machine_code']) ?>
+                                <?= esc($mach['machine_code']) ?>
                               </option>
                             <?php endforeach ?>
                           </select>
@@ -198,11 +186,75 @@
                                  name="items[<?= $uuid ?>][plan]"
                                  min="0"
                                  max="1200"
-                                 value="<?= esc($plan['target_per_shift'] ?? '') ?>">
+                                 value="<?= esc($plan['target_per_shift'] ?? '') ?>"
+                                 data-saved-plan="<?= esc($plan['target_per_shift'] ?? '') ?>">
                         </td>
 
                         <td>
                           <input type="text" class="form-control text-center actual-display bg-light border-0" value="<?= esc($actual) ?>" readonly>
+                        </td>
+
+                        <?php
+                          $savedActiveSlots = $activeSlotMap[$shift['id']][$m['id']][$idx] ?? null;
+                          $hasSpecificSlots = ($savedActiveSlots !== null);
+                          $savedCustomTimes = $slotCustomTimesMap[$shift['id']][$m['id']][$idx] ?? null;
+                          $customTimesMap = [];
+                          if ($savedCustomTimes) {
+                              foreach (explode(',', $savedCustomTimes) as $entry) {
+                                  $parts = explode(':', $entry, 2);
+                                  if (count($parts) === 2) $customTimesMap[(int)$parts[0]] = (int)$parts[1];
+                              }
+                          }
+                        ?>
+                        <td>
+                          <div class="form-check form-switch d-flex align-items-center gap-2 mb-1">
+                            <input class="form-check-input slot-toggle" type="checkbox" role="switch"
+                                   id="slot-toggle-<?= $uuid ?>"
+                                   <?= $hasSpecificSlots ? 'checked' : '' ?>
+                                   onchange="mcToggleSlotPanel(this,'<?= $uuid ?>')"
+                                   style="cursor:pointer;">
+                            <label class="form-check-label small fw-bold" for="slot-toggle-<?= $uuid ?>" style="cursor:pointer;">
+                              <?= $hasSpecificSlots ? '<span class="text-primary">Slot Spesifik</span>' : '<span class="text-muted">Semua Slot (Maks)</span>' ?>
+                            </label>
+                          </div>
+                          <div class="slot-panel <?= $hasSpecificSlots ? '' : 'd-none' ?>" id="slot-panel-<?= $uuid ?>">
+                            <input type="hidden" name="items[<?= $uuid ?>][active_slot_ids]" class="active-slot-ids-input" id="asi-<?= $uuid ?>" value="<?= $hasSpecificSlots ? esc(implode(',', $savedActiveSlots)) : '' ?>">
+                            <input type="hidden" name="items[<?= $uuid ?>][slot_custom_times]" class="slot-custom-times-input" id="sct-<?= $uuid ?>" value="<?= esc($savedCustomTimes ?? '') ?>">
+                            <table class="table table-sm table-bordered mb-0" style="font-size:11px;">
+                              <thead class="table-light text-center"><tr><th style="width:20px;">✓</th><th>Slot Waktu</th><th style="width:55px;">Menit</th></tr></thead>
+                              <tbody>
+                                <?php foreach ($shiftSlots[$shift['id']] as $slot):
+                                  if (!empty($slot['is_break'])) continue;
+                                  $isActive = $hasSpecificSlots && in_array((int)$slot['time_slot_id'], $savedActiveSlots);
+                                  $defaultMins = (int)floor($slot['seconds'] / 60);
+                                  $customMins = $customTimesMap[(int)$slot['time_slot_id']] ?? $defaultMins;
+                                ?>
+                                <tr>
+                                  <td class="text-center">
+                                    <input type="checkbox" class="form-check-input slot-cb"
+                                           data-uuid="<?= $uuid ?>"
+                                           data-slot-seconds="<?= (int)$slot['seconds'] ?>"
+                                           data-default-minutes="<?= $defaultMins ?>"
+                                           value="<?= $slot['time_slot_id'] ?>"
+                                           <?= $isActive ? 'checked' : '' ?>
+                                           onchange="mcSyncSlotIds('<?= $uuid ?>')"
+                                           style="width:14px;height:14px;">
+                                  </td>
+                                  <td style="white-space:nowrap"><?= esc($slot['label']) ?></td>
+                                  <td>
+                                    <input type="number" class="form-control form-control-sm text-center slot-custom-min p-0"
+                                           data-uuid="<?= $uuid ?>" data-slot-id="<?= $slot['time_slot_id'] ?>"
+                                           data-default="<?= $defaultMins ?>"
+                                           value="<?= $isActive ? $customMins : $defaultMins ?>"
+                                           min="1" max="<?= $defaultMins ?>"
+                                           onchange="mcSyncSlotIds('<?= $uuid ?>')"
+                                           style="font-size:11px;width:50px;" <?= $isActive ? '' : 'disabled' ?>>
+                                  </td>
+                                </tr>
+                                <?php endforeach; ?>
+                              </tbody>
+                            </table>
+                          </div>
                         </td>
 
                         <td>
@@ -212,14 +264,37 @@
                           </div>
                           
                           <div class="dandori-time-container <?= $isDandori ? '' : 'd-none' ?>">
-                              <select class="form-select form-select-sm dandori-time-select bg-warning-subtle" name="items[<?= $uuid ?>][dandori_time_slot_id]">
-                                  <option value="">-- Set Waktu --</option>
-                                  <?php foreach ($shiftSlots[$shift['id']] as $slot): ?>
-                                      <option value="<?= $slot['time_slot_id'] ?>" <?= ($dandoriTimeSlotId == $slot['time_slot_id']) ? 'selected' : '' ?>>
-                                          <?= $slot['label'] ?>
-                                      </option>
+                              <table class="table table-sm table-bordered mb-0" style="font-size:11px;">
+                                <thead class="table-light text-center">
+                                  <tr><th style="width:24px;">&#10003;</th><th>Waktu</th><th style="width:70px;">Menit</th></tr>
+                                </thead>
+                                <tbody>
+                                  <?php foreach ($shiftSlots[$shift['id']] as $slot):
+                                    if (!empty($slot['is_break'])) continue;
+                                    $slotId = $slot['time_slot_id'];
+                                    $isCheckedSlot = in_array($slotId, $dandoriTimeSlotIds);
+                                    $savedMin = 0;
+                                    foreach ($dandoriSlotMinutes as $sm) {
+                                        if ((int)$sm['slot_id'] === (int)$slotId) { $savedMin = (int)$sm['minute']; break; }
+                                    }
+                                  ?>
+                                  <tr>
+                                    <td class="text-center">
+                                      <input type="checkbox" class="form-check-input"
+                                             name="items[<?= $uuid ?>][slot_data][<?= $slotId ?>][selected]"
+                                             value="1" <?= $isCheckedSlot ? 'checked' : '' ?>
+                                             style="width:14px;height:14px;">
+                                    </td>
+                                    <td style="white-space:nowrap"><?= esc($slot['label']) ?></td>
+                                    <td>
+                                      <input type="number" class="form-control form-control-sm text-center p-0"
+                                             name="items[<?= $uuid ?>][slot_data][<?= $slotId ?>][minute]"
+                                             value="<?= $isCheckedSlot ? $savedMin : 0 ?>" min="0" placeholder="mnt">
+                                    </td>
+                                  </tr>
                                   <?php endforeach; ?>
-                              </select>
+                                </tbody>
+                              </table>
                           </div>
                         </td>
 
@@ -250,6 +325,47 @@
           <i class="bi bi-save me-1"></i> Simpan Jadwal Keseluruhan
         </button>
     </div>
+
+<script>
+// Consolidate all items[] inputs into a single JSON field to avoid max_input_vars limit
+document.querySelector('form.mc-form').addEventListener('submit', function(e) {
+    const form = this;
+    const items = {};
+    const toDisable = [];
+
+    form.querySelectorAll('[name^="items["]').forEach(function(el) {
+        if (el.disabled) return;
+        const name = el.name;
+        const val = (el.type === 'checkbox') ? (el.checked ? el.value : '') : el.value;
+        if (el.type === 'checkbox' && !el.checked) return;
+
+        const keys = [];
+        const regex = /\[([^\]]*)\]/g;
+        let m;
+        while ((m = regex.exec(name)) !== null) keys.push(m[1]);
+
+        let obj = items;
+        for (let i = 0; i < keys.length - 1; i++) {
+            if (!obj[keys[i]]) obj[keys[i]] = {};
+            obj = obj[keys[i]];
+        }
+        obj[keys[keys.length - 1]] = val;
+        toDisable.push(el);
+    });
+
+    let jsonInput = form.querySelector('input[name="items_json"]');
+    if (!jsonInput) {
+        jsonInput = document.createElement('input');
+        jsonInput.type = 'hidden';
+        jsonInput.name = 'items_json';
+        form.appendChild(jsonInput);
+    }
+    jsonInput.value = JSON.stringify(items);
+
+    toDisable.forEach(function(el) { el.disabled = true; });
+});
+</script>
+
 </form>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
@@ -259,6 +375,7 @@
 <script>
 const productUrl = "/machining/daily-schedule/product-target";
 const scheduleDate = "<?= esc($date) ?>";
+const scheduleCategory = "<?= esc($category) ?>";
 
 function initSelect2(selectEl) {
   const $el = $(selectEl);
@@ -306,7 +423,7 @@ async function loadProducts(selectEl) {
   const selectedId = selectEl.dataset.selected;
 
   try {
-    const res  = await fetch(`${productUrl}?machine_id=${machineId}&shift_id=${shiftId}&date=${encodeURIComponent(scheduleDate)}`);
+    const res  = await fetch(`${productUrl}?machine_id=${machineId}&shift_id=${shiftId}&date=${encodeURIComponent(scheduleDate)}&category=${encodeURIComponent(scheduleCategory)}`);
     const data = await res.json();
 
     selectEl.innerHTML = '<option value=""></option>';
@@ -331,9 +448,16 @@ async function loadProducts(selectEl) {
     if (selectedId) {
       const row = selectEl.closest('tr');
       const planEl = row.querySelector('.plan-input');
+      const savedPlan = planEl ? (planEl.dataset.savedPlan || planEl.value) : '';
       if (planEl) planEl.dataset.manual = "1";
       
       $(selectEl).val(String(selectedId)).trigger('change');
+      
+      // Restore saved plan value (change handler may have overwritten it)
+      if (planEl && savedPlan) {
+          planEl.value = savedPlan;
+          planEl.dataset.manual = "1";
+      }
     } else {
       $(selectEl).trigger('change');
     }
@@ -363,13 +487,13 @@ function validatePlanAgainstStock(row, showAlert = true) {
   let planVal = parseInt(planEl.value || '0', 10);
 
   if (stockReady <= 0 && planVal > 0) {
-    if (showAlert) alert('Stok Area Machining Kosong. Lakukan Part Transfer terlebih dahulu.');
+    if (showAlert) alert('Stok Area ' + scheduleCategory + ' Kosong. Lakukan Part Transfer terlebih dahulu.');
     planEl.value = 0;
     return false;
   }
 
   if (planVal > stockReady) {
-    if (showAlert) alert(`Jadwal tidak boleh melebihi stok yang ada di Area Machining (${stockReady}).`);
+    if (showAlert) alert(`Jadwal tidak boleh melebihi stok yang ada di Area ${scheduleCategory} (${stockReady}).`);
     planEl.value = stockReady;
     return false;
   }
@@ -377,12 +501,83 @@ function validatePlanAgainstStock(row, showAlert = true) {
   return true;
 }
 
+function mcToggleSlotPanel(toggleEl, uuid) {
+    const panel = document.getElementById('slot-panel-' + uuid);
+    const labelEl = toggleEl.nextElementSibling;
+    if (toggleEl.checked) {
+        panel.classList.remove('d-none');
+        if (labelEl) labelEl.innerHTML = '<span class="text-primary">Slot Spesifik</span>';
+    } else {
+        panel.classList.add('d-none');
+        if (labelEl) labelEl.innerHTML = '<span class="text-muted">Semua Slot (Maks)</span>';
+        panel.querySelectorAll('.slot-cb').forEach(cb => cb.checked = false);
+        const hidInput = document.getElementById('asi-' + uuid);
+        if (hidInput) hidInput.value = '';
+        const tr = toggleEl.closest('tr');
+        tr.dataset.netMin = '';
+        const planEl = tr.querySelector('.plan-input');
+        if (planEl) planEl.dataset.manual = '';
+        calculatePlan(tr);
+    }
+}
+
+function mcSyncSlotIds(uuid) {
+    const panel = document.getElementById('slot-panel-' + uuid);
+    const checkedCbs = Array.from(panel.querySelectorAll('.slot-cb:checked'));
+    const checked = checkedCbs.map(cb => cb.value);
+    const hidInput = document.getElementById('asi-' + uuid);
+    if (hidInput) hidInput.value = checked.join(',');
+
+    // Enable/disable custom minute inputs based on checkbox state
+    panel.querySelectorAll('.slot-cb').forEach(cb => {
+        const minInput = panel.querySelector(`.slot-custom-min[data-slot-id="${cb.value}"]`);
+        if (minInput) {
+            minInput.disabled = !cb.checked;
+            if (!cb.checked) minInput.value = minInput.dataset.default || 60;
+        }
+    });
+
+    // Build slot_custom_times string and calculate total minutes
+    let totalMins = 0;
+    let customParts = [];
+    checkedCbs.forEach(cb => {
+        const minInput = panel.querySelector(`.slot-custom-min[data-slot-id="${cb.value}"]`);
+        const defaultMin = parseInt(cb.dataset.defaultMinutes || Math.floor((parseInt(cb.dataset.slotSeconds)||0)/60));
+        const customMin = minInput ? parseInt(minInput.value || defaultMin) : defaultMin;
+        totalMins += customMin;
+        if (customMin !== defaultMin) {
+            customParts.push(cb.value + ':' + customMin);
+        }
+    });
+
+    const sctInput = document.getElementById('sct-' + uuid);
+    if (sctInput) sctInput.value = customParts.join(',');
+
+    const tr = panel.closest('tr');
+    tr.dataset.netMin = totalMins;
+    const planEl = tr.querySelector('.plan-input');
+    // Only reset manual flag if no saved plan (user is actively changing slots)
+    if (planEl && !planEl.dataset.savedPlan) planEl.dataset.manual = '';
+    calculatePlan(tr);
+}
+
 function calculatePlan(row) {
     const shiftId = row.dataset.shift;
-    const netSpan = document.querySelector(`.shift-net-minutes[data-shift="${shiftId}"]`);
     
-    const netMins = parseInt(netSpan?.dataset.net || 0);
-    const netSecs = netMins * 60; 
+    // Ambil Menit Netto: dari slot spesifik (jika toggle ON) atau hitung dari semua slot
+    let netMins = parseInt(row.dataset.netMin || 0);
+    
+    // Jika netMin belum di-set (toggle OFF / belum ada), hitung dari semua slot
+    if (!row.dataset.netMin) {
+        let totalSecs = 0;
+        row.querySelectorAll('.slot-cb').forEach(cb => {
+            totalSecs += parseInt(cb.dataset.slotSeconds || 0);
+        });
+        netMins = Math.floor(totalSecs / 60);
+        // Jangan simpan ke dataset netMin jika toggle OFF, agar tetap fallback di kalkulasi selanjutnya
+    }
+    
+    const netSecs = netMins * 60;
 
     const selectEl = row.querySelector('.product-select');
     const planEl   = row.querySelector('.plan-input');
@@ -403,31 +598,6 @@ function calculatePlan(row) {
     
     validatePlanAgainstStock(row, false);
 }
-
-$(document).on('change', '.shift-end-select', function() {
-    const shiftId = this.dataset.shift;
-    let totalMins = 0;
-    let found = false;
-
-    Array.from(this.options).forEach(opt => {
-        if (found) return;
-        const secs = parseInt(opt.dataset.seconds || 0);
-        totalMins += Math.floor(secs / 60); 
-        if (opt.selected) found = true; 
-    });
-
-    const netSpan = document.querySelector(`.shift-net-minutes[data-shift="${shiftId}"]`);
-    if (netSpan) {
-        netSpan.dataset.net = totalMins;
-        netSpan.innerText = `${totalMins} Menit`;
-    }
-
-    document.querySelectorAll(`tr.schedule-row[data-shift="${shiftId}"]`).forEach(tr => {
-        const planEl = tr.querySelector('.plan-input');
-        if (planEl) planEl.dataset.manual = ""; 
-        calculatePlan(tr);
-    });
-});
 
 $(document).on('change', '.product-select', function() {
   const selectEl = this;
@@ -461,7 +631,7 @@ $(document).on('change', '.product-select', function() {
   const isBypass = bypassToggle && bypassToggle.checked;
 
   if (stockReady <= 0 && !isBypass) {
-    alert('Stok di Area Machining Kosong. Tidak bisa menjadwalkan part ini.');
+    alert('Stok di Area ' + scheduleCategory + ' Kosong. Tidak bisa menjadwalkan part ini.');
     planEl.value = 0;
     return;
   }
@@ -470,12 +640,15 @@ $(document).on('change', '.product-select', function() {
   if (!planEl.value || planEl.value == 0) {
     planEl.dataset.manual = ""; 
   }
+  // User actively changed product — clear saved plan so auto-calc works for new product
+  delete planEl.dataset.savedPlan;
   
   calculatePlan(row);
 });
 
 $(document).on('input', '.plan-input', function() {
   this.dataset.manual = "1";
+  delete this.dataset.savedPlan; // User manually edited — clear saved plan
   const row = this.closest('tr');
   validatePlanAgainstStock(row, true);
 });
@@ -493,15 +666,12 @@ $(document).on('change', '#bypassStockToggle', function() {
 // Aksi Toggle Dandori
 $(document).on('change', '.dandori-toggle', function() {
     const container = $(this).closest('td').find('.dandori-time-container');
-    const selectBox = container.find('.dandori-time-select');
-    
     if (this.checked) {
         container.removeClass('d-none');
-        selectBox.prop('required', true); 
     } else {
         container.addClass('d-none');
-        selectBox.val('');
-        selectBox.prop('required', false);
+        container.find('input[type="checkbox"]').prop('checked', false);
+        container.find('input[type="number"]').val(0);
     }
 });
 
@@ -559,12 +729,50 @@ $(document).on('click', '.btn-add-machine', function() {
     const cb = newRow.querySelector('.dandori-toggle');
     if(cb) cb.checked = false;
     const dContainer = newRow.querySelector('.dandori-time-container');
-    if(dContainer) dContainer.classList.add('d-none');
-    const dSelect = newRow.querySelector('.dandori-time-select');
-    if(dSelect) {
-        dSelect.value = '';
-        dSelect.required = false;
+    if(dContainer) {
+        dContainer.classList.add('d-none');
+        dContainer.querySelectorAll('input[type="checkbox"]').forEach(el => el.checked = false);
+        dContainer.querySelectorAll('input[type="number"]').forEach(el => el.value = 0);
     }
+    // Reset slot panel di row baru
+    const slotToggle = newRow.querySelector('.slot-toggle');
+    if (slotToggle) {
+        slotToggle.checked = false;
+        slotToggle.id = 'slot-toggle-' + uuid;
+        slotToggle.setAttribute('onchange', `mcToggleSlotPanel(this,'${uuid}')`);
+    }
+    const slotToggleLabel = slotToggle ? slotToggle.parentElement.querySelector('label') : null;
+    if (slotToggleLabel && slotToggle) {
+        slotToggleLabel.setAttribute('for', 'slot-toggle-' + uuid);
+        slotToggleLabel.innerHTML = '<span class="text-muted">Semua Slot (Maks)</span>';
+    }
+    const slotPanel = newRow.querySelector('.slot-panel');
+    if (slotPanel) {
+        slotPanel.id = 'slot-panel-' + uuid;
+        slotPanel.classList.add('d-none');
+        slotPanel.querySelectorAll('.slot-cb').forEach(el => {
+            el.checked = false;
+            el.dataset.uuid = uuid;
+            el.setAttribute('onchange', `mcSyncSlotIds('${uuid}')`);
+        });
+    }
+    const asiInput = newRow.querySelector('.active-slot-ids-input');
+    if (asiInput) {
+        asiInput.id = 'asi-' + uuid;
+        asiInput.value = '';
+    }
+    const sctInput = newRow.querySelector('.slot-custom-times-input');
+    if (sctInput) {
+        sctInput.id = 'sct-' + uuid;
+        sctInput.value = '';
+    }
+    // Reset custom minute inputs
+    newRow.querySelectorAll('.slot-custom-min').forEach(el => {
+        el.dataset.uuid = uuid;
+        el.value = el.dataset.default || 60;
+        el.disabled = true;
+        el.setAttribute('onchange', `mcSyncSlotIds('${uuid}')`);
+    });
 
     tbody.appendChild(newRow);
 
@@ -608,14 +816,21 @@ $(document).on('submit', '.mc-form', function(e){
 });
 
 document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.shift-end-select').forEach(sel => {
-        $(sel).trigger('change');
+    // Init slot panels yang sudah tersimpan
+    document.querySelectorAll('tr.schedule-row').forEach(tr => {
+        const slotToggle = tr.querySelector('.slot-toggle');
+        if (slotToggle && slotToggle.checked) {
+            const uuid = slotToggle.id.replace('slot-toggle-', '');
+            mcSyncSlotIds(uuid);
+        }
     });
 
     document.querySelectorAll('.product-select').forEach(selectEl => {
       initSelect2(selectEl);
       loadProducts(selectEl);
     });
+    
+    $('.dandori-time-select:not(.select2-hidden-accessible)').select2({ width: '100%', placeholder: '-- Set Waktu --', allowClear: true, closeOnSelect: false });
 });
 </script>
 

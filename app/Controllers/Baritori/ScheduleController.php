@@ -107,20 +107,19 @@ class ScheduleController extends BaseController
         ];
     }
 
-    private function getDcShifts($db, string $date): array
+    private function getBaritoriShifts($db, string $date): array
     {
         if (!$db->tableExists('shifts')) return [];
-        $dcId = $this->getDieCastingProcessId($db);
-        if (!$dcId || !$db->tableExists('daily_schedules')) return $db->table('shifts')->get()->getResultArray();
-        $dateCol = $db->fieldExists('schedule_date', 'daily_schedules') ? 'schedule_date' : null;
-        if (!$dateCol) return $db->table('shifts')->get()->getResultArray();
-        $rows = $db->table('daily_schedules')->select('shift_id')->where('process_id', $dcId)->where($dateCol, $date)->groupBy('shift_id')->get()->getResultArray();
-        $ids = [];
-        foreach ($rows as $r) {
-            $sid = (int)($r['shift_id'] ?? 0);
-            if ($sid > 0) $ids[] = $sid;
-        }
-        return $ids ? $db->table('shifts')->whereIn('id', $ids)->get()->getResultArray() : $db->table('shifts')->get()->getResultArray();
+        $rows = $db->table('shifts')
+            ->where('is_active', 1)
+            ->groupStart()
+                ->like('shift_name', 'BT')
+                ->orLike('shift_name', 'Baritori')
+            ->groupEnd()
+            ->orderBy('CAST(shift_code AS UNSIGNED)', 'ASC')
+            ->get()->getResultArray();
+        
+        return $rows ?: $db->table('shifts')->where('is_active', 1)->get()->getResultArray();
     }
 
     private function getVendors($db): array
@@ -216,7 +215,7 @@ class ScheduleController extends BaseController
                 $av = $wipStatus['stock'];
 
                 $availableMap[$pid] = ['available' => $av, 'prev_process_id' => $prevId, 'next_process_id' => $nextId > 0 ? $nextId : null];
-                if ($av > 0) $idsAvail[] = $pid;
+                $idsAvail[] = $pid;
             }
 
             if ($idsAvail) {
@@ -233,7 +232,7 @@ class ScheduleController extends BaseController
                 $query = $db->table('daily_schedule_items dsi')
                     ->select("ds.id as daily_schedule_id, ds.$dateCol as schedule_date, ds.shift_id, s.shift_name, dsi.id as item_id, dsi.product_id, p.part_no, p.part_name, dsi.target_per_shift, dsi.target_per_hour");
                 if ($db->fieldExists('vendor_id', 'daily_schedule_items')) {
-                    $query->select('v.vendor_name')->join('vendors v', 'v.id = dsi.vendor_id', 'left');
+                    $query->select('dsi.vendor_id, v.vendor_name')->join('vendors v', 'v.id = dsi.vendor_id', 'left');
                 }
                 
                 $schedules = $query->join('daily_schedules ds', 'ds.id = dsi.daily_schedule_id', 'inner')
@@ -249,7 +248,7 @@ class ScheduleController extends BaseController
 
         return view('baritori/schedule/index', [
             'date'          => $date,
-            'shifts'        => $this->getDcShifts($db, $date),
+            'shifts'        => $this->getBaritoriShifts($db, $date),
             'productsAvail' => $productsAvail,
             'availableMap'  => $availableMap,
             'schedules'     => $schedules,
@@ -271,34 +270,14 @@ class ScheduleController extends BaseController
         $targetHr  = (int)($this->request->getPost('target_hour') ?? 0);
 
         if ($shiftId <= 0) return redirect()->back()->with('error', 'Shift wajib dipilih.');
-        if ($vendorId <= 0) return redirect()->back()->with('error', 'Vendor wajib dipilih.');
+        if ($vendorId <= 0 && $vendorId !== -1) return redirect()->back()->with('error', 'Vendor wajib dipilih.');
         if ($productId <= 0) return redirect()->back()->with('error', 'Product wajib dipilih.');
         if ($qty <= 0) return redirect()->back()->with('error', 'Qty harus > 0.');
 
         $baritoriId = $this->getBaritoriProcessId($db);
         if (!$baritoriId) return redirect()->back()->with('error', 'Process Baritori tidak ditemukan.');
 
-        $stockCol = $this->detectStockColumn($db);
-        if (!$stockCol) return redirect()->back()->with('error', 'Kolom stock tidak ditemukan di production_wip.');
-
-        $flow   = $this->getPrevNextProcessByFlow($db, $productId, $baritoriId);
-        $prevId = (int)($flow['prev'] ?? 0);
-        $nextId = (int)($flow['next'] ?? 0); // Ambil next process
-
-        if ($prevId <= 0) return redirect()->back()->with('error', 'Flow sebelumnya tidak ditemukan.');
-
-        // Get Status (Stock & Transfer) Flow Sebelumnya
-        $prevWipStatus = $this->getLatestWip($db, $date, $prevId, $productId);
-        $availablePrev = $prevWipStatus['stock'];
-        $transferPrev  = $prevWipStatus['transfer'];
-
-        if ($availablePrev <= 0) return redirect()->back()->with('error', 'Stock proses sebelumnya kosong (0).');
-        if ($qty > $availablePrev) return redirect()->back()->with('error', "Qty melebihi stock prev. Available: {$availablePrev}");
-
         $machineId   = $this->getAutoBaritoriMachineId($db);
-        $wipDateCol  = $this->detectWipDateColumn($db);
-        $transferCol = $this->detectTransferColumn($db);
-        $now         = date('Y-m-d H:i:s');
 
         $db->transBegin();
         try {
@@ -308,81 +287,10 @@ class ScheduleController extends BaseController
             $itemId = $this->insertDailyScheduleItem($db, $dailyId, $shiftId, $machineId, $productId, $qty, $targetHr, $vendorId);
             if ($itemId <= 0) throw new \Exception('Gagal membuat daily_schedule_items.');
 
-            // 1. PREV OUT: Stock Prev berkurang
-            $prevAfterStock    = max(0, $availablePrev - $qty);
-            
-            $prevWip = [
-                $wipDateCol       => $date,
-                'product_id'      => $productId,
-                'from_process_id' => $prevId,
-                'to_process_id'   => $prevId,
-                'qty'             => $qty,
-                'qty_in'          => 0,
-                'qty_out'         => $qty,
-                $stockCol         => $prevAfterStock,
-                'source_table'    => 'daily_schedule_items',
-                'source_id'       => $itemId,
-                'status'          => 'DONE',
-                'created_at'      => $now,
-            ];
-            // Transfer prev tetap sama
-            if ($transferCol) $prevWip[$transferCol] = $transferPrev;
-            $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $prevWip));
-
-            // 2. BARITORI IN: Qty_in bertambah & Stock Baritori bertambah
-            $barWipStatus      = $this->getLatestWip($db, $date, $baritoriId, $productId);
-            $barBeforeStock    = $barWipStatus['stock'];
-            $barBeforeTransfer = $barWipStatus['transfer'];
-            
-            // Tambahkan qty ke Stock Baritori
-            $barAfterStock     = $barBeforeStock + $qty;
-
-            $barIn = [
-                $wipDateCol       => $date,
-                'product_id'      => $productId,
-                'from_process_id' => $prevId,
-                'to_process_id'   => $baritoriId,
-                'qty'             => $qty,
-                'qty_in'          => $qty, // Masuk ke Qty In Baritori
-                'qty_out'         => 0,
-                $stockCol         => $barAfterStock, // Stock Baritori terisi
-                'source_table'    => 'daily_schedule_items',
-                'source_id'       => $itemId,
-                'status'          => 'DONE',
-                'created_at'      => $now,
-            ];
-            // Transfer baritori tetap
-            if ($transferCol) $barIn[$transferCol] = $barBeforeTransfer; 
-            $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $barIn));
-
-            // 3. NEXT PROCESS TRANSFER: Kolom transfer di proses selanjutnya terisi
-            if ($nextId > 0 && $transferCol) {
-                $nextWipStatus    = $this->getLatestWip($db, $date, $nextId, $productId);
-                $nextBeforeStock  = $nextWipStatus['stock'];
-                $nextAfterTransfer = $nextWipStatus['transfer'] + $qty; // Transfer proses selanjutnya bertambah
-
-                $nextWip = [
-                    $wipDateCol       => $date,
-                    'product_id'      => $productId,
-                    'from_process_id' => $baritoriId,
-                    'to_process_id'   => $nextId,
-                    'qty'             => $qty,
-                    'qty_in'          => 0,
-                    'qty_out'         => 0,
-                    $stockCol         => $nextBeforeStock, // Stock proses selanjutnya belum bertambah (masih tetap)
-                    $transferCol      => $nextAfterTransfer, // HANYA transfer yang terisi
-                    'source_table'    => 'daily_schedule_items',
-                    'source_id'       => $itemId,
-                    'status'          => 'DONE',
-                    'created_at'      => $now,
-                ];
-                $db->table('production_wip')->insert($this->onlyExistingColumns($db, 'production_wip', $nextWip));
-            }
-
             if ($db->transStatus() === false) throw new \Exception('DB error');
             $db->transCommit();
 
-            return redirect()->back()->with('success', 'Schedule Baritori tersimpan. Stock & Qty In Baritori terisi, serta Transfer di proses selanjutnya telah ditambahkan.');
+            return redirect()->back()->with('success', 'Schedule Baritori tersimpan.');
         } catch (\Throwable $e) {
             $db->transRollback();
             return redirect()->back()->with('error', 'Gagal simpan: ' . $e->getMessage());

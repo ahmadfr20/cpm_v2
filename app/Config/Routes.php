@@ -5,24 +5,26 @@ use CodeIgniter\Router\RouteCollection;
 /**
  * @var RouteCollection $routes
  */
-$routes->get('/', 'Auth::login');
+$routes->get('/', 'DashboardController::index');  // Langsung ke dashboard (public)
 $routes->get('/login', 'Auth::login');
 $routes->post('/login', 'Auth::authenticate');
 $routes->get('/logout', 'Auth::logout');
 
 /**
- * DASHBOARD: semua yang login boleh akses
+ * DASHBOARD: bisa diakses tanpa login (public)
  */
+$routes->get('panduan', 'PanduanController::index');      // Panduan Aplikasi
+$routes->get('dashboard', 'DashboardController::index');  // public — comprehensive dashboard
+// Halaman Asakai & Daily Performance: PUBLIC (tanpa login)
+$routes->get('dashboard/asakai', 'Dashboard\AsakaiController::index');
+$routes->get('dashboard/daily-performance', 'Dashboard\PerformanceController::index');
+// Halaman yang masih membutuhkan login
 $routes->group('dashboard', ['filter' => 'auth'], function ($routes) {
-    $routes->get('/', 'Dashboard\HomeController::index');
-    $routes->get('asakai', 'Dashboard\AsakaiController::index');
     $routes->get('inventory', 'Dashboard\InventoryController::index');
-
-    // kalau dashboard ini mengarah ke WIP, batasi PPIC
-    
+    $routes->get('dandori', 'Dashboard\DandoriController::index');
 });
 
-$routes->get('wip/inventory', 'WIP\WipInventoryController::index');
+$routes->get('wip/inventory', 'WIP\WipInventoryController::index'); // public
 
 /**
  * MASTER: Admin only
@@ -40,6 +42,11 @@ $routes->group('master', ['filter' => 'auth:ADMIN'], function ($routes) {
     $routes->get('user/(:num)/privilege', 'Master\UserController::privilege/$1');
     $routes->post('user/(:num)/privilege', 'Master\UserController::savePrivilege/$1');
 
+    // Operator
+    $routes->get('operator', 'Master\OperatorController::index');
+    $routes->post('operator/store', 'Master\OperatorController::store');
+    $routes->post('operator/update/(:num)', 'Master\OperatorController::update/$1');
+    $routes->post('operator/delete/(:num)', 'Master\OperatorController::delete/$1');
 
     // Shift
     $routes->get('shift', 'Master\ShiftController::index');
@@ -131,11 +138,11 @@ $routes->group('master', ['filter' => 'auth:ADMIN'], function ($routes) {
 });
 
 /**
- * WIP: PPIC only
+ * WIP: public untuk inventory, total-stock tetap butuh login
  */
-$routes->group('wip', ['filter' => 'auth'], function ($routes) {
-    $routes->get('inventory', 'WIP\WipInventoryController::index');
-    $routes->get('inventory/total-stock', 'WIP\WipInventoryController::totalStock');
+$routes->group('wip', function ($routes) {
+    $routes->get('inventory', 'WIP\WipInventoryController::index'); // public
+    $routes->get('inventory/total-stock', 'WIP\WipInventoryController::totalStock', ['filter' => 'auth']);
 });
 
 /**
@@ -201,6 +208,8 @@ $routes->group('die-casting', ['filter' => 'auth'], function ($routes) {
     $routes->get('dandori', 'DieCasting\DandoriController::index', ['filter' => 'auth:OPERATOR,DC']);
     $routes->post('dandori/store', 'DieCasting\DandoriController::store', ['filter' => 'auth:OPERATOR,DC']);
 
+    $routes->post('daily-production/endDandori', 'DieCasting\DailyProductionController::endDandori', ['filter' => 'auth:OPERATOR,DC']);
+
     $routes->get('daily-production-achievement', 'DieCasting\DailyProductionAchievementController::index', ['filter' => 'auth:OPERATOR,DC']);
     $routes->post('daily-production-achievement/store', 'DieCasting\DailyProductionAchievementController::store', ['filter' => 'auth:OPERATOR,DC']);
 });
@@ -263,26 +272,7 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->get('schedule', 'Machining\DailyScheduleController::index', ['filter' => 'auth:PPIC']);
     $routes->post('schedule/store', 'Machining\DailyScheduleController::store', ['filter' => 'auth:PPIC']);
 
-    // Leak Test schedule (PPIC)
-    $routes->get('leak-test/schedule', 'Machining\LeakTestDailyScheduleController::index', ['filter' => 'auth:PPIC']);
-    $routes->get('leak-test/schedule/product-target', 'Machining\LeakTestDailyScheduleController::getProductAndTarget', ['filter' => 'auth:PPIC']);
-    $routes->post('leak-test/schedule/store', 'Machining\LeakTestDailyScheduleController::store', ['filter' => 'auth:PPIC']);
-    $routes->get('leak-test/schedule/incoming-wip', 'Machining\LeakTestDailyScheduleController::incomingWip', ['filter' => 'auth:PPIC']);
-    $routes->post('leak-test/schedule/assign-incoming-wip', 'Machining\LeakTestDailyScheduleController::assignIncomingWip', ['filter' => 'auth:PPIC']);
 
-    // Assy Bushing schedule (PPIC)
-    $routes->get('assy-bushing/schedule', 'Machining\AssyBushingDailyScheduleController::index', ['filter' => 'auth:PPIC']);
-    $routes->get('assy-bushing/schedule/product-target', 'Machining\AssyBushingDailyScheduleController::getProductAndTarget', ['filter' => 'auth:PPIC']);
-    $routes->post('assy-bushing/schedule/store', 'Machining\AssyBushingDailyScheduleController::store', ['filter' => 'auth:PPIC']);
-    $routes->get('assy-bushing/schedule/incoming-wip', 'Machining\AssyBushingDailyScheduleController::incomingWip', ['filter' => 'auth:PPIC']);
-    $routes->post('assy-bushing/schedule/assign-incoming-wip', 'Machining\AssyBushingDailyScheduleController::assignIncomingWip', ['filter' => 'auth:PPIC']);
-
-    // Assy Shaft schedule (PPIC)
-    $routes->get('assy-shaft/schedule', 'Machining\AssyShaftDailyScheduleController::index', ['filter' => 'auth:PPIC']);
-    $routes->get('assy-shaft/schedule/product-target', 'Machining\AssyShaftDailyScheduleController::getProductAndTarget', ['filter' => 'auth:PPIC']);
-    $routes->post('assy-shaft/schedule/store', 'Machining\AssyShaftDailyScheduleController::store', ['filter' => 'auth:PPIC']);
-    $routes->get('assy-shaft/schedule/incoming-wip', 'Machining\AssyShaftDailyScheduleController::incomingWip', ['filter' => 'auth:PPIC']);
-    $routes->post('assy-shaft/schedule/assign-incoming-wip', 'Machining\AssyShaftDailyScheduleController::assignIncomingWip', ['filter' => 'auth:PPIC']);
 
     // ===== OPERATOR: MACHINING (MC) =====
     $routes->get('production', 'Machining\ProductionController::index', ['filter' => 'auth:OPERATOR,MC']);
@@ -291,6 +281,7 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->get('hourly', 'Machining\HourlyController::index', ['filter' => 'auth:OPERATOR,MC']);
     $routes->post('hourly/store', 'Machining\HourlyController::store', ['filter' => 'auth:OPERATOR,MC']);
     $routes->post('hourly/finish-shift', 'Machining\HourlyController::finishShift', ['filter' => 'auth:OPERATOR,MC']);
+    $routes->post('hourly/endDandori', 'Machining\HourlyController::endDandori', ['filter' => 'auth:OPERATOR,MC']);
 
     $routes->get('daily-production-achievement', 'Machining\DailyProductionAchievementController::index', ['filter' => 'auth:OPERATOR,MC']);
     $routes->post('daily-production-achievement/store', 'Machining\DailyProductionAchievementController::store', ['filter' => 'auth:OPERATOR,MC']);
@@ -301,42 +292,59 @@ $routes->group('machining', ['filter' => 'auth'], function ($routes) {
     $routes->get('sub-assy', 'Machining\SubAssyController::index', ['filter' => 'auth:OPERATOR,MC']);
     $routes->post('sub-assy/store', 'Machining\SubAssyController::store', ['filter' => 'auth:OPERATOR,MC']);
 
-    // ===== OPERATOR: LEAK TEST (LT) =====
-    $routes->get('leak-test', 'Machining\LeakTestDailyProductionController::index', ['filter' => 'auth:OPERATOR,LT']);
-    $routes->post('leak-test/hourly/store', 'Machining\LeakTestDailyProductionController::store', ['filter' => 'auth:OPERATOR,LT']);
-    $routes->post('leak-test/hourly/finish-shift', 'Machining\LeakTestDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,LT']);
-    $routes->get('leak-test/production-shift', 'Machining\LeakTestProductionController::index', ['filter' => 'auth:OPERATOR,LT']);
+    // ===== OPERATOR: LEAK TEST (LT, MC) =====
+    $routes->get('leak-test', 'Machining\LeakTestDailyProductionController::index', ['filter' => 'auth:OPERATOR,LT,MC']);
+    $routes->post('leak-test/hourly/store', 'Machining\LeakTestDailyProductionController::store', ['filter' => 'auth:OPERATOR,LT,MC']);
+    $routes->post('leak-test/hourly/finish-shift', 'Machining\LeakTestDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,LT,MC']);
+    $routes->get('leak-test/production-shift', 'Machining\LeakTestProductionController::index', ['filter' => 'auth:OPERATOR,LT,MC']);
+    $routes->post('leak-test/production-shift/store', 'Machining\LeakTestProductionController::store', ['filter' => 'auth:OPERATOR,LT,MC']);
     $routes->get('leak-test/schedule/inventory', 'Machining\LeakTestDailyScheduleController::inventory');
 
-    // ===== OPERATOR: ASSY BUSHING (AB) =====
-    $routes->get('assy-bushing/hourly', 'Machining\AssyBushingDailyProductionController::index', ['filter' => 'auth:OPERATOR,AB']);
-    $routes->post('assy-bushing/hourly/store', 'Machining\AssyBushingDailyProductionController::store', ['filter' => 'auth:OPERATOR,AB']);
-    $routes->post('assy-bushing/hourly/finish-shift', 'Machining\AssyBushingDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,AB']);
+    // ===== OPERATOR: ASSY BUSHING (AB, MC) =====
+    $routes->get('assy-bushing/hourly', 'Machining\AssyBushingDailyProductionController::index', ['filter' => 'auth:OPERATOR,AB,MC']);
+    $routes->post('assy-bushing/hourly/store', 'Machining\AssyBushingDailyProductionController::store', ['filter' => 'auth:OPERATOR,AB,MC']);
+    $routes->post('assy-bushing/hourly/finish-shift', 'Machining\AssyBushingDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,AB,MC']);
     $routes->get('assy-bushing/schedule/inventory', 'Machining\AssyBushingDailyScheduleController::inventory');
 
-    $routes->get('assy-bushing/achievement', 'Machining\AssyBushingDailyProductionAchievementController::index', ['filter' => 'auth:OPERATOR,AB']);
-    $routes->post('assy-bushing/achievement/store', 'Machining\AssyBushingDailyProductionAchievementController::store', ['filter' => 'auth:OPERATOR,AB']);
+    $routes->get('assy-bushing/achievement', 'Machining\AssyBushingDailyProductionAchievementController::index', ['filter' => 'auth:OPERATOR,AB,MC']);
+    $routes->post('assy-bushing/achievement/store', 'Machining\AssyBushingDailyProductionAchievementController::store', ['filter' => 'auth:OPERATOR,AB,MC']);
 
-    // ===== OPERATOR: ASSY SHAFT (AS) =====
-    $routes->get('assy-shaft/hourly', 'Machining\AssyShaftDailyProductionController::index', ['filter' => 'auth:OPERATOR,AS']);
-    $routes->post('assy-shaft/hourly/store', 'Machining\AssyShaftDailyProductionController::store', ['filter' => 'auth:OPERATOR,AS']);
-    $routes->post('assy-shaft/hourly/finish-shift', 'Machining\AssyShaftDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,AS']);
-    $routes->get('assy-shaft/production/shift', 'Machining\AssyShaftShiftProductionController::index', ['filter' => 'auth:OPERATOR,AS']);
+    // ===== OPERATOR: ASSY SHAFT (AS, MC) =====
+    $routes->get('assy-shaft/hourly', 'Machining\AssyShaftDailyProductionController::index', ['filter' => 'auth:OPERATOR,AS,MC']);
+    $routes->post('assy-shaft/hourly/store', 'Machining\AssyShaftDailyProductionController::store', ['filter' => 'auth:OPERATOR,AS,MC']);
+    $routes->post('assy-shaft/hourly/finish-shift', 'Machining\AssyShaftDailyProductionController::finishShift', ['filter' => 'auth:OPERATOR,AS,MC']);
+    $routes->get('assy-shaft/production/shift', 'Machining\AssyShaftShiftProductionController::index', ['filter' => 'auth:OPERATOR,AS,MC']);
+    $routes->post('assy-shaft/production/shift/store', 'Machining\AssyShaftShiftProductionController::store', ['filter' => 'auth:OPERATOR,AS,MC']);
     $routes->get('assy-shaft/schedule/inventory', 'Machining\AssyShaftDailyScheduleController::inventory');
+
+    // ===== OPERATOR: JIG PLUG (JP, MC) =====
+    $routes->get('jig-plug/hourly', 'Machining\JigPlugHourlyController::index', ['filter' => 'auth:OPERATOR,JP,MC']);
+    $routes->post('jig-plug/hourly/store', 'Machining\JigPlugHourlyController::store', ['filter' => 'auth:OPERATOR,JP,MC']);
+    $routes->post('jig-plug/hourly/finish-shift', 'Machining\JigPlugHourlyController::finishShift', ['filter' => 'auth:OPERATOR,JP,MC']);
+    $routes->post('jig-plug/hourly/endDandori', 'Machining\JigPlugHourlyController::endDandori', ['filter' => 'auth:OPERATOR,JP,MC']);
+    $routes->get('jig-plug/daily-production-achievement', 'Machining\JigPlugDailyProductionAchievementController::index', ['filter' => 'auth:OPERATOR,JP,MC']);
+    $routes->post('jig-plug/daily-production-achievement/store', 'Machining\JigPlugDailyProductionAchievementController::store', ['filter' => 'auth:OPERATOR,JP,MC']);
 });
 
 /**
- * PAINTING: OPERATOR process_code = PT
+ * PAINTING: OPERATOR process_code = PT, MC
  */
-$routes->group('painting', ['filter' => 'auth:OPERATOR,PT'], function ($routes) {
-    $routes->get('schedule', 'Painting\ScheduleController::index');
-    $routes->post('schedule/store', 'Painting\ScheduleController::store');
+$routes->group('painting', ['filter' => 'auth:OPERATOR,PT,MC'], function ($routes) {
+
 
     $routes->get('send', 'Painting\SendController::index');
     $routes->post('send/store', 'Painting\SendController::store');
 
     $routes->get('receive-external', 'Painting\ReceiveExternalController::index');
     $routes->post('receive-external/store', 'Painting\ReceiveExternalController::store');
+
+    $routes->get('hourly', 'Painting\PaintingHourlyController::index');
+    $routes->post('hourly/store', 'Painting\PaintingHourlyController::store');
+    $routes->post('hourly/finish-shift', 'Painting\PaintingHourlyController::finishShift');
+    $routes->post('hourly/endDandori', 'Painting\PaintingHourlyController::endDandori');
+
+    $routes->get('daily-production-achievement', 'Painting\PaintingDailyProductionAchievementController::index');
+    $routes->post('daily-production-achievement/store', 'Painting\PaintingDailyProductionAchievementController::store');
 });
 
 /**
@@ -354,29 +362,99 @@ $routes->group('finished-good', ['filter' => 'auth'], function ($routes) {
     $routes->get('delivery/get-ready-stock', 'FinishedGood\DeliveryController::getReadyStock');
     $routes->get('delivery/invoice/(:num)', 'FinishedGood\DeliveryController::invoice/$1');
     $routes->get('delivery/export', 'FinishedGood\DeliveryController::export');
+
+    // Delivery Control Board — POST routes require login
+    $routes->post('delivery-control-board/save-target', 'FinishedGood\DeliveryControlBoardController::saveTarget');
+    $routes->post('delivery-control-board/delete/(:num)', 'FinishedGood\DeliveryControlBoardController::deleteRow/$1');
+
+    // Special Control Delivery — POST routes require login
+    $routes->post('special-control-delivery/save-settings', 'FinishedGood\SpecialControlDeliveryController::saveSettings');
+    $routes->post('special-control-delivery/save-row', 'FinishedGood\SpecialControlDeliveryController::saveRow');
+    $routes->post('special-control-delivery/delete/(:num)', 'FinishedGood\SpecialControlDeliveryController::deleteRow/$1');
 });
 
 /**
- * QC (NEW)
+ * Delivery Control Board — GET is PUBLIC (view-only tanpa login)
  */
-$routes->group('qc', ['filter' => 'auth'], function ($routes) {
+$routes->get('finished-good/delivery-control-board', 'FinishedGood\DeliveryControlBoardController::index');
+
+/**
+ * Special Control Delivery — GET is PUBLIC (view-only tanpa login)
+ */
+$routes->get('finished-good/special-control-delivery', 'FinishedGood\SpecialControlDeliveryController::index');
+
+/**
+ * QC (butuh login role QC)
+ */
+$routes->group('qc', ['filter' => 'auth:QC'], function ($routes) {
+    // QC Inspection
     $routes->get('/', 'QC\QCController::index');
+    $routes->get('export', 'QC\QCController::exportCsv');
     $routes->post('store', 'QC\QCController::store');
+    
+    // QC Completed Items
+    $routes->get('completed-items', 'QC\CompletedItemsController::index');
+    $routes->get('completed-items/export', 'QC\CompletedItemsController::exportCsv');
+
+    // QC Defect Ongoing
+    $routes->get('defect-ongoing', 'QC\DefectOngoingController::index');
+    $routes->get('defect-ongoing/export', 'QC\DefectOngoingController::exportCsv');
+    
+    // QC Summary Defect Yearly
+    $routes->get('summary-defect-ongoing', 'QC\SummaryDefectOngoingController::index');
+    $routes->get('summary-defect-ongoing/export', 'QC\SummaryDefectOngoingController::exportCsv');
 });
 
 $routes->group('ppc', ['filter' => 'auth:PPIC'], function ($routes) {
+    
     $routes->get('qc-schedule', 'QC\QCScheduleController::index');
     $routes->post('qc-schedule/store', 'QC\QCScheduleController::store');
     $routes->post('qc-schedule/delete/(:num)', 'QC\QCScheduleController::delete/$1');
     $routes->get('qc-schedule/available-stock', 'QC\QCScheduleController::getAvailableStock');
+
+});
+
+/**
+ * Stock Opname (STO)
+ */
+$routes->group('sto', ['filter' => 'auth:PPIC'], function ($routes) {
+    $routes->get('/', 'StockOpname\StockOpnameController::index');
+    $routes->get('create', 'StockOpname\StockOpnameController::create');
+    $routes->get('input', 'StockOpname\StockOpnameController::create'); // Alias
+    $routes->post('storeManual', 'StockOpname\StockOpnameController::storeManual');
+    $routes->get('export', 'StockOpname\StockOpnameController::export');
+    
+    $routes->get('import', 'StockOpname\StockOpnameController::import');
+    $routes->post('preview', 'StockOpname\StockOpnameController::preview');
+    $routes->post('store', 'StockOpname\StockOpnameController::store');
 });
 
 /**
  * FG Inventory
  */
-$routes->group('inventory-fg', ['filter' => 'auth'], function ($routes) {
-    $routes->get('/', 'FinishedGood\FgInventoryController::index');
-    $routes->get('export', 'FinishedGood\FgInventoryController::exportCsv');
+$routes->group('inventory-fg', function ($routes) {
+    $routes->get('/', 'FinishedGood\FgInventoryController::index'); // public
+    $routes->get('export', 'FinishedGood\FgInventoryController::exportCsv'); // public
 });
 
 $routes->get('/asakai', 'AsakaiController::index', ['filter' => 'auth']);
+$routes->get('finished-good/delivery-schedule', 'FinishedGood\DeliveryScheduleController::index');
+$routes->post('finished-good/delivery-schedule/store', 'FinishedGood\DeliveryScheduleController::store');
+
+/**
+ * Raw Material (PPC)
+ */
+$routes->group('raw-material', ['filter' => 'auth:PPIC'], function ($routes) {
+    $routes->get('ingot', 'RawMaterial\IngotController::index');
+    $routes->post('ingot/store', 'RawMaterial\IngotController::store');
+
+    // Request Ingot: merekam pengambilan ingot & mengurangi stok
+    $routes->get('request-ingot', 'RawMaterial\RequestIngotController::index');
+    $routes->post('request-ingot/store', 'RawMaterial\RequestIngotController::store');
+    $routes->get('request-ingot/stock-info', 'RawMaterial\RequestIngotController::stockInfo');
+
+    $routes->get('scrap', 'RawMaterial\ScrapController::index');
+    $routes->post('scrap/store', 'RawMaterial\ScrapController::store');
+    
+    $routes->get('stock', 'RawMaterial\StockController::index');
+});
